@@ -2042,7 +2042,10 @@ async function buildNetworkFilesFromClusters(workDir, clusterFilePath, fallbackF
       });
     }
 
-    if (includeReferenceLinks) {
+      // Always compute reference-candidate edges — they are essential for
+      // seeing where reference sequences sit in the similarity graph,
+      // regardless of the includeReferenceLinks toggle.
+      {
       const refSeqById = new Map();
       for (const rec of referenceRecords) {
         const refId = String(rec?.id || '').trim();
