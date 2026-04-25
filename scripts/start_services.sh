@@ -135,7 +135,7 @@ start_backend() {
   echo "[backend] starting..."
   (
     cd "$PROJECT_DIR"
-    nohup env "PATH=/home/threo/miniconda3/envs/mining/bin:$PATH" "PIPELINE_PYTHON=/home/threo/miniconda3/envs/mining/bin/python" node backend/server.mjs >"$BACKEND_LOG" 2>&1 &
+    nohup env "PATH=/home/threo/miniconda3/envs/mining/bin:$PATH" "PIPELINE_PYTHON=/home/threo/miniconda3/envs/mining/bin/python" node --max-old-space-size=4096 backend/server.mjs >"$BACKEND_LOG" 2>&1 &
     echo $! >"$BACKEND_PID_FILE"
   )
   echo "[backend] started (pid=$(cat "$BACKEND_PID_FILE"), log=$BACKEND_LOG)"
