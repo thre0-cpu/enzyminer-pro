@@ -142,12 +142,14 @@ function assertPathInsideDir(resolvedPath, allowedDir) {
   return realTarget;
 }
 
-/** Resolve and validate a user-supplied file path against the workDir. */
+/** Resolve and validate a user-supplied file path against pipelineRoot.
+ *  Uses pipelineRoot (not workDir) so that cross-task references (e.g. ref.fasta
+ *  from a previous task) are accepted while still preventing directory traversal. */
 function resolveAndValidatePath(userPath, workDir, defaultPath) {
   const resolved = userPath
     ? (path.isAbsolute(String(userPath)) ? path.resolve(String(userPath)) : path.resolve(workDir, String(userPath)))
     : defaultPath;
-  assertPathInsideDir(resolved, workDir);
+  assertPathInsideDir(resolved, pipelineRoot);
   return resolved;
 }
 
