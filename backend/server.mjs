@@ -4422,14 +4422,20 @@ app.post('/api/network/push-cytoscape', async (req, res) => {
       const forceRebuild = req.body?.forceRebuild === true;
       const sourceFastaPath = String(req.body?.sourceFasta || '').trim();
       const referenceFastaPath = String(req.body?.referenceFasta || '').trim();
-      const { nodesPath, edgesPath, generated } = await ensureNetworkFiles(workDir, {
-        pairwiseThresholdPct: forceRebuild ? 0 : undefined,
-        includeReferenceLinks,
-        similarityMethod,
+      // When NOT rebuilding, omit similarity/source/reference params so
+      // ensureNetworkFiles won't trigger a full recalculation just because
+      // the UI defaults differ from what was used to build the cached files.
+      const ensureOpts = {
         forceRebuild,
-        sourceFastaPath,
-        referenceFastaPath,
-      });
+        pairwiseThresholdPct: forceRebuild ? 0 : undefined,
+      };
+      if (forceRebuild) {
+        ensureOpts.includeReferenceLinks = includeReferenceLinks;
+        ensureOpts.similarityMethod = similarityMethod;
+        ensureOpts.sourceFastaPath = sourceFastaPath;
+        ensureOpts.referenceFastaPath = referenceFastaPath;
+      }
+      const { nodesPath, edgesPath, generated } = await ensureNetworkFiles(workDir, ensureOpts);
       const { rows: nodesRows } = await readCsvRows(nodesPath);
       const { rows: edgesRows } = await readCsvRows(edgesPath);
       const filteredEdgesRows = filterEdgesByThresholdPct(edgesRows, pairwiseThresholdPct);
