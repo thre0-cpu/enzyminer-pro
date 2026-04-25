@@ -1,0 +1,273 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-science-bg: #f8f9fa;
+  --color-science-surface: #ffffff;
+  --color-science-border: #e9ecef;
+  --color-science-text: #212529;
+  --color-science-muted: #6c757d;
+  --color-science-primary: #0d6efd;
+  --color-science-primary-hover: #0b5ed7;
+  --color-science-accent: #198754;
+}
+
+body {
+  background-color: var(--color-science-bg);
+  color: var(--color-science-text);
+  font-family: var(--font-sans);
+}
+
+@keyframes progressShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.progress-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    #4f46e5 0%,
+    #6366f1 35%,
+    #818cf8 50%,
+    #6366f1 65%,
+    #4f46e5 100%
+  );
+  background-size: 200% 100%;
+  animation: progressShimmer 1.4s linear infinite;
+}
+
+@keyframes stepGlow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(99, 102, 241, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+  }
+}
+
+.step-running-glow {
+  animation: stepGlow 1.4s ease-out infinite;
+}
+
+@keyframes stepSuccessPop {
+  0% {
+    transform: scale(0.98);
+    opacity: 0.8;
+  }
+  45% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.step-success-pop {
+  animation: stepSuccessPop 420ms ease-out;
+}
+
+@keyframes viewEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.995);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.view-enter {
+  animation: viewEnter 260ms ease-out;
+}
+
+/* Custom scrollbar for data tables */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ===== Dark Mode ===== */
+
+.dark {
+  --color-science-bg: #0f172a;
+  --color-science-surface: #1e293b;
+  --color-science-border: #334155;
+  --color-science-text: #e2e8f0;
+  --color-science-muted: #94a3b8;
+  --color-science-primary: #6366f1;
+  --color-science-primary-hover: #818cf8;
+  --color-science-accent: #34d399;
+
+  color-scheme: dark;
+}
+
+/* --- Backgrounds --- */
+.dark .bg-white          { background-color: #1e293b !important; }
+.dark .bg-slate-50       { background-color: #0f172a !important; }
+.dark .bg-slate-100      { background-color: #1e293b !important; }
+
+/* --- Text --- */
+.dark .text-slate-900    { color: #f1f5f9 !important; }
+.dark .text-slate-800    { color: #e2e8f0 !important; }
+.dark .text-slate-700    { color: #cbd5e1 !important; }
+.dark .text-slate-600    { color: #94a3b8 !important; }
+.dark .text-slate-500    { color: #64748b !important; }
+.dark .text-slate-400    { color: #64748b !important; }
+
+/* --- Borders --- */
+.dark .border-slate-200  { border-color: #334155 !important; }
+.dark .border-slate-300  { border-color: #475569 !important; }
+.dark .border-slate-100  { border-color: #1e293b !important; }
+
+/* --- Hover states --- */
+.dark .hover\:bg-slate-100:hover  { background-color: #334155 !important; }
+.dark .hover\:bg-slate-800:hover  { background-color: #475569 !important; }
+.dark .hover\:border-indigo-300:hover { border-color: #6366f1 !important; }
+.dark .group:hover .group-hover\:bg-indigo-100 { background-color: #3730a3 !important; }
+
+/* --- Sidebar active item --- */
+.dark .bg-indigo-50      { background-color: #312e81 !important; }
+.dark .text-indigo-700   { color: #a5b4fc !important; }
+.dark .text-indigo-600   { color: #818cf8 !important; }
+
+/* --- Pipeline step cards --- */
+.dark .bg-emerald-50     { background-color: rgba(16, 185, 129, 0.12) !important; }
+.dark .border-emerald-200 { border-color: #065f46 !important; }
+.dark .text-emerald-600  { color: #34d399 !important; }
+.dark .text-emerald-800  { color: #6ee7b7 !important; }
+.dark .border-emerald-300 { border-color: #065f46 !important; }
+
+.dark .bg-red-50         { background-color: rgba(239, 68, 68, 0.12) !important; }
+.dark .border-red-200    { border-color: #991b1b !important; }
+.dark .border-red-300    { border-color: #991b1b !important; }
+.dark .text-red-600      { color: #f87171 !important; }
+.dark .text-red-700      { color: #fca5a5 !important; }
+.dark .text-red-800      { color: #fca5a5 !important; }
+.dark .border-rose-300   { border-color: #9f1239 !important; }
+.dark .bg-rose-50        { background-color: rgba(244, 63, 94, 0.12) !important; }
+.dark .text-rose-800     { color: #fda4af !important; }
+
+.dark .bg-indigo-50      { background-color: rgba(99, 102, 241, 0.15) !important; }
+.dark .border-indigo-300 { border-color: #4338ca !important; }
+.dark .border-indigo-200 { border-color: #3730a3 !important; }
+.dark .text-indigo-800   { color: #c7d2fe !important; }
+
+/* --- Buttons --- */
+.dark .bg-slate-900      { background-color: #475569 !important; }
+.dark .bg-slate-900.text-white { background-color: #475569 !important; }
+
+/* --- Inputs --- */
+.dark select,
+.dark input[type="text"],
+.dark input[type="number"],
+.dark input[type="email"],
+.dark textarea {
+  background-color: #1e293b !important;
+  border-color: #475569 !important;
+  color: #e2e8f0 !important;
+}
+.dark select option {
+  background-color: #1e293b;
+  color: #e2e8f0;
+}
+
+/* --- Tables --- */
+.dark table th {
+  background-color: #1e293b !important;
+  color: #94a3b8 !important;
+  border-color: #334155 !important;
+}
+.dark table td {
+  border-color: #334155 !important;
+  color: #cbd5e1 !important;
+}
+.dark table tr:hover td {
+  background-color: #334155 !important;
+}
+
+/* --- Alerts & banners --- */
+.dark .bg-blue-50        { background-color: rgba(59, 130, 246, 0.12) !important; }
+.dark .border-blue-300   { border-color: #1e40af !important; }
+.dark .text-blue-600     { color: #60a5fa !important; }
+.dark .text-blue-700     { color: #93c5fd !important; }
+.dark .text-blue-800     { color: #93c5fd !important; }
+.dark .bg-amber-50       { background-color: rgba(245, 158, 11, 0.12) !important; }
+.dark .border-amber-300  { border-color: #92400e !important; }
+.dark .text-amber-700    { color: #fbbf24 !important; }
+.dark .text-amber-800    { color: #fcd34d !important; }
+
+/* --- Shadows --- */
+.dark .shadow-sm         { box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4) !important; }
+
+/* --- Scrollbar (dark) --- */
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* --- SVG Scatter chart (dark) --- */
+.dark svg text:not([class*="fill-"]) { fill: #94a3b8; }
+.dark svg line[stroke="#94a3b8"] { stroke: #475569; }
+.dark svg line[stroke="#e2e8f0"] { stroke: #1e293b; }
+.dark svg rect[fill="#f8fafc"] { fill: #0f172a; }
+.dark svg rect[stroke="#cbd5e1"] { stroke: #334155; }
+
+/* --- Progress shimmer (dark) --- */
+.dark .progress-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    #4338ca 0%,
+    #6366f1 35%,
+    #818cf8 50%,
+    #6366f1 65%,
+    #4338ca 100%
+  );
+}
+
+/* --- Log panel pre/code --- */
+.dark pre,
+.dark code {
+  background-color: #0f172a !important;
+  color: #94a3b8 !important;
+}
+
+/* --- Ring (focus indicators) --- */
+.dark .ring-indigo-200 { --tw-ring-color: rgba(99, 102, 241, 0.35) !important; }
+
+/* --- Misc overrides --- */
+.dark .bg-slate-200      { background-color: #334155 !important; }
+.dark .bg-slate-300      { background-color: #475569 !important; }
+.dark .bg-slate-400      { background-color: #64748b !important; }
+.dark .text-white        { color: #f8fafc !important; }
+
+/* Dark mode toggle transition */
+.theme-toggle-enter {
+  transition: transform 0.2s ease-out, opacity 0.15s ease-out;
+}
