@@ -185,7 +185,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const accessionPlaceholder = ['例如：', 'AAC72747.1', 'KDQ24956.1', '9AVH_A', 'MF540777', 'P46881'].join('\n');
+const accessionPlaceholder = ['e.g.: ', 'AAC72747.1', 'KDQ24956.1', '9AVH_A', 'MF540777', 'P46881'].join('\n');
 
 const MAX_REFERENCE_FASTA_UPLOAD_BYTES = 20 * 1024 * 1024;
 
@@ -226,16 +226,16 @@ function formatRuntimeDurationLabel(startedAt: number | null | undefined, update
 
 function validateReferenceFastaUpload(file: File | null) {
   if (!file) {
-    throw new Error('请先选择一个 FASTA 文件');
+    throw new Error('Please select a FASTA file first');
   }
   if (!/\.(fasta|fa|faa|fas|fna|txt)$/i.test(file.name)) {
-    throw new Error('仅支持 .fasta, .fa, .faa, .fas, .fna 或 .txt 文件');
+    throw new Error('Only .fasta, .fa, .faa, .fas, .fna, or .txt files are supported');
   }
   if (file.size <= 0) {
-    throw new Error('所选文件为空');
+    throw new Error('The selected file is empty');
   }
   if (file.size > MAX_REFERENCE_FASTA_UPLOAD_BYTES) {
-    throw new Error(`文件过大，当前限制为 ${formatFileSize(MAX_REFERENCE_FASTA_UPLOAD_BYTES)}`);
+    throw new Error(`File too large, current limit is ${formatFileSize(MAX_REFERENCE_FASTA_UPLOAD_BYTES)}`);
   }
   return file;
 }
@@ -243,7 +243,7 @@ function validateReferenceFastaUpload(file: File | null) {
 function validateReferenceFastaText(text: string) {
   const trimmed = String(text || '').trim();
   if (!trimmed.startsWith('>')) {
-    throw new Error('FASTA 文件格式无效：内容必须以 > 开头');
+    throw new Error('Invalid FASTA file format: content must start with >');
   }
   return trimmed;
 }
@@ -325,32 +325,32 @@ function parseScoringRulesInput(raw: unknown): ScoringRule[] {
   const parsed = raw;
 
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error('规则必须是非空数组');
+    throw new Error('Rules must be a non-empty array');
   }
 
   return parsed.map((item, idx) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      throw new Error(`第 ${idx + 1} 条规则必须是对象`);
+      throw new Error(`Rule #${idx + 1} must be an object`);
     }
     const rule = item as Record<string, unknown>;
 
     const pos = Number(rule.pos);
     if (!Number.isInteger(pos) || pos <= 0) {
-      throw new Error(`第 ${idx + 1} 条规则的 pos 非法`);
+      throw new Error(`Rule #${idx + 1} has an invalid pos`);
     }
 
     const score = Number(rule.score);
     if (!Number.isFinite(score)) {
-      throw new Error(`第 ${idx + 1} 条规则的 score 非法`);
+      throw new Error(`Rule #${idx + 1} has an invalid score`);
     }
 
     const label = String(rule.label ?? '').trim();
     if (!label) {
-      throw new Error(`第 ${idx + 1} 条规则的 label 不能为空`);
+      throw new Error(`Rule #${idx + 1} label cannot be empty`);
     }
 
     if (!Array.isArray(rule.allowed) || rule.allowed.length === 0) {
-      throw new Error(`第 ${idx + 1} 条规则的 allowed 必须是非空数组`);
+      throw new Error(`Rule #${idx + 1} allowed must be a non-empty array`);
     }
 
     const allowed = Array.from(
@@ -362,7 +362,7 @@ function parseScoringRulesInput(raw: unknown): ScoringRule[] {
       ),
     );
     if (!allowed.length) {
-      throw new Error(`第 ${idx + 1} 条规则的 allowed 不能为空`);
+      throw new Error(`Rule #${idx + 1} allowed cannot be empty`);
     }
 
     return { pos, score, label, allowed };
@@ -557,7 +557,7 @@ function WeightBar({ weights, onChange }: { weights: RecommendWeights; onChange:
           className="ml-auto text-[10px] text-slate-400 hover:text-indigo-500 underline"
           onClick={() => onChange({ ...DEFAULT_WEIGHTS })}
         >
-          恢复默认
+          Reset to Default
         </button>
       </div>
     </div>
@@ -918,7 +918,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setRuntimeLogs([]);
     setStepState(initialStepState);
     setLastCompletedStep(null);
-    setJob({ loading: true, message: `加载任务进度: ${selectedTaskId}`, error: '' });
+    setJob({ loading: true, message: `Loading task progress: ${selectedTaskId}`, error: '' });
     setEbiStageJobId('');
     setEbiStagePageCount(null);
     setEbiStageFailedPages(null);
@@ -1170,13 +1170,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           });
         }
 
-        setJob({ loading: false, message: `已载入任务进度: ${selectedTaskId}`, error: '' });
+        setJob({ loading: false, message: `Task progress loaded: ${selectedTaskId}`, error: '' });
         if (staleRecommendCache) {
-          setCompletionToast('检测到旧版推荐缓存已失效，请重新计算推荐');
+          setCompletionToast('Detected outdated recommendation cache, please recompute recommendations');
         }
       } catch (err) {
         if (!cancelled) {
-          setJob({ loading: false, message: '', error: `载入任务进度失败: ${String(err)}` });
+          setJob({ loading: false, message: '', error: `Failed to load task progress: ${String(err)}` });
         }
       } finally {
         if (!cancelled) {
@@ -1328,7 +1328,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       }))
       .filter((x) => Number.isFinite(x.score) && Number.isFinite(x.length));
     
-    // 如果数量极大，前端渲染散点图会极度卡顿（特别是在框选触发渲染时），故进行均匀采样降级
+    // If the count is extremely large, rendering the scatter plot on the frontend can be very laggy (especially when box-selection triggers a re-render), so apply uniform downsampling
     if (raw.length > 2000) {
       const step = raw.length / 2000;
       const sampled = [];
@@ -1429,8 +1429,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             const markError = isLikelyErrorLogLine(tail);
             setJob({
               loading: false,
-              message: markError ? '' : '后端任务已结束，已自动解除前端运行锁',
-              error: markError ? '后端任务结束但返回失败，已自动解除前端运行锁' : '',
+              message: markError ? '' : 'Backend task has ended; the frontend running lock was automatically released',
+              error: markError ? 'Backend task ended but returned a failure; the frontend running lock was automatically released' : '',
             });
             setActiveStep(null);
             setStepState((prev) => {
@@ -1446,7 +1446,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         }
       } catch {
         if (!cancelled) {
-          setRuntimeLogs((prev) => (prev.length ? prev : ['[log] 暂时无法读取后端日志'])) ;
+          setRuntimeLogs((prev) => (prev.length ? prev : ['[log] Unable to read backend logs at the moment'])) ;
         }
       }
     };
@@ -1485,7 +1485,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       const parsed = parseScoringRulesInput(scoringRules);
       const maxScore = parsed.reduce((s, r) => s + (r.score ?? 0), 0);
       setScoringRulesError('');
-      setScoringRulesSuccess(`规则已自动校验通过，共 ${parsed.length} 条，满分 ${maxScore}`);
+      setScoringRulesSuccess(`Rules validated automatically: ${parsed.length} rules, max score ${maxScore}`);
     } catch (err) {
       setScoringRulesError(String(err));
       setScoringRulesSuccess('');
@@ -1515,7 +1515,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         attemptsUsed = attempt + 1;
         try {
           if (attempt > 0) {
-            setJob({ loading: true, message: `${label} 重试中 (${attempt}/${totalRetries})`, error: '' });
+            setJob({ loading: true, message: `${label} retrying (${attempt}/${totalRetries})`, error: '' });
           }
           await fn();
           lastError = null;
@@ -1549,14 +1549,14 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         }));
       }
 
-      setJob({ loading: false, message: `${label} 完成`, error: '' });
+      setJob({ loading: false, message: `${label} completed`, error: '' });
       if (step) {
         setStepState((prev) => ({ ...prev, [step]: 'success' }));
         setActiveStep(null);
         setLastCompletedStep(step);
       }
       const stepTitle = step ? (pipelineSteps.find((x) => x.key === step)?.title || label) : label;
-      setCompletionToast(customToast || `${stepTitle} 完成`);
+      setCompletionToast(customToast || `${stepTitle} Done`);
       return true;
     } catch (err) {
       if (step) {
@@ -1615,7 +1615,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
   const deleteSelectedTask = async () => {
     if (selectedTaskId === 'hmmer-default') {
-      throw new Error('默认任务不可删除');
+      throw new Error('The default task cannot be deleted');
     }
     await deleteTask(selectedTaskId);
     await refreshTasks();
@@ -1651,7 +1651,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     if (referenceUploadInputRef.current) {
       referenceUploadInputRef.current.value = '';
     }
-    setReferenceImportNotice(`已从文件 ${uploadFile.name} 导入 ${data.rows} 条参考序列`);
+    setReferenceImportNotice(`Imported ${data.rows} reference sequences from file ${uploadFile.name}`);
     setRefIdentityIds([]);
     setRefIdentityMatrix([]);
   };
@@ -1731,7 +1731,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
   const runEbiDownloadStep = async () => {
     if (!ebiStageJobId) {
-      throw new Error('请先执行第一步：提交任务');
+      throw new Error('Please complete step 1 first: submit task');
     }
     setEbiSubStepState((prev) => ({ ...prev, submit: 'success', download: 'running' }));
     try {
@@ -1771,10 +1771,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     if (!selectedTaskId) return;
     try {
       setEbiSubStepState((prev) => ({ ...prev, submit: 'success', download: 'success', enrich: 'running' }));
-      setJob({ loading: true, message: '正在补全UniProt数据（需拉取大量序列信息，由后端并发执行）...', error: '' });
+      setJob({ loading: true, message: 'Filling in UniProt data (fetching large amounts of sequence info, running concurrently on the backend)...', error: '' });
       const res = await fillUniProt(selectedTaskId);
       if (res.ok) {
-        setJob({ loading: true, message: 'UniProt 拉取完成，正在执行长度一致性检查...', error: '' });
+        setJob({ loading: true, message: 'UniProt fetch complete, running length consistency check...', error: '' });
         const consistency = await runSearchConsistencyCheck('hits_all');
         setConsistencyStats({
           total: consistency.total,
@@ -1794,7 +1794,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         setJob({ loading: false, message: '', error: '' });
       } else {
         setEbiSubStepState((prev) => ({ ...prev, enrich: 'error' }));
-        throw new Error('补全失败: ' + res.message);
+        throw new Error('Fill-in failed: ' + res.message);
       }
     } catch(err) {
       setEbiSubStepState((prev) => ({ ...prev, enrich: 'error' }));
@@ -1846,7 +1846,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       customRules = parseScoringRulesInput(scoringRules);
       const maxScore = customRules.reduce((s, r) => s + (r.score ?? 0), 0);
       setScoringRulesError('');
-      setScoringRulesSuccess(`规则校验通过，共 ${customRules.length} 条，满分 ${maxScore}`);
+      setScoringRulesSuccess(`Rules validated: ${customRules.length} rules, max score ${maxScore}`);
     } catch (err) {
       const msg = String(err);
       setScoringRulesError(msg);
@@ -1894,7 +1894,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       a.click();
       URL.revokeObjectURL(url);
       setScoringRulesSuccess((prev) => {
-        const note = `已自动下载打分结果: ${fileName}`;
+        const note = `Scoring results downloaded automatically: ${fileName}`;
         return prev ? `${prev} | ${note}` : note;
       });
     }
@@ -2013,16 +2013,16 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         setSimilarityConfirmState({ open: true, nodeTotal: status.nodeTotal, edgeTotal: status.edgeTotal });
         return;
       }
-      setJob({ loading: false, message: '已确认，开始重新计算序列相似性...', error: '' });
-      await runAction('计算序列相似性', runComputeSimilarity, 'similarity');
+      setJob({ loading: false, message: 'Confirmed, recomputing sequence similarity...', error: '' });
+      await runAction('Compute Sequence Similarity', runComputeSimilarity, 'similarity');
     } catch (err) {
-      setJob({ loading: false, message: '', error: `计算前检查失败: ${String(err)}` });
+      setJob({ loading: false, message: '', error: `Pre-computation check failed: ${String(err)}` });
     }
   };
 
   const cancelSimilarityRecompute = () => {
     setSimilarityConfirmState((prev) => ({ ...prev, open: false }));
-    setJob({ loading: false, message: '已取消重新计算，相似性结果保持不变', error: '' });
+    setJob({ loading: false, message: 'Recomputation cancelled, similarity results unchanged', error: '' });
   };
 
   const startSimilarityRecomputeFromModal = () => {
@@ -2034,8 +2034,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       ...prev,
       networkAlignProgress: { current: 0, total: 1, phase: 'prepare' },
     }));
-    setJob({ loading: false, message: '已确认，开始重新计算序列相似性...', error: '' });
-    void runAction('计算序列相似性', runComputeSimilarity, 'similarity');
+    setJob({ loading: false, message: 'Confirmed, recomputing sequence similarity...', error: '' });
+    void runAction('Compute Sequence Similarity', runComputeSimilarity, 'similarity');
   };
 
   const runPushToCytoscape = async () => {
@@ -2098,9 +2098,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         setBrowserGraphMaxEdges(data.maxEdges);
         setBrowserGraphVisible(true);
       }
-      setCompletionToast(`已在网络中高亮 ${recommendResults.length} 条推荐序列，请返回 Similarity Network 查看`);
+      setCompletionToast(`Highlighted ${recommendResults.length} recommended sequences in the network; return to Similarity Network to view`);
     } catch (err: any) {
-      alert('高亮失败: ' + (err?.message || err));
+      alert('Highlight failed: ' + (err?.message || err));
     }
   };
 
@@ -2236,7 +2236,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 text-slate-900 font-sans">
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
-          <button onClick={onBack} className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 transition-colors" title="返回主页">
+          <button onClick={onBack} className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 transition-colors" title="Back to home">
             <Activity className="w-6 h-6" />
             <span className="font-semibold text-lg tracking-tight text-slate-900">EnzyMiner</span>
           </button>
@@ -2264,15 +2264,15 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       </aside>
 
       <main className="flex-1 flex flex-col h-full overflow-hidden">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shadow-sm z-10">
-          <div className="flex items-center text-sm text-slate-500">
+        <header className="min-h-16 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-8 py-3 shadow-sm z-10">
+          <div className="flex items-center text-sm text-slate-500 shrink-0">
             <span>Pipeline</span>
             <ChevronRight className="w-4 h-4 mx-1" />
             <span className="font-medium text-slate-900 capitalize">{currentView.replace('-', ' ')}</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">任务</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-500">Task</span>
               <select
                 className="p-1.5 border border-slate-300 rounded text-xs bg-white"
                 value={selectedTaskId}
@@ -2289,36 +2289,36 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 className="p-1.5 border border-slate-300 rounded text-xs w-32"
                 value={newTaskId}
                 onChange={(e) => setNewTaskId(e.target.value)}
-                placeholder="新任务ID(可选)"
+                placeholder="New task ID (optional)"
                 disabled={job.loading}
               />
               <button
                 className="px-2 py-1.5 rounded bg-slate-900 text-white text-xs hover:bg-slate-800 disabled:opacity-50"
-                onClick={() => runAction('新建任务', createTaskAndSwitch)}
+                onClick={() => runAction('Create task', createTaskAndSwitch)}
                 disabled={job.loading}
               >
-                新建
+                New
               </button>
               <button
                 className="px-2 py-1.5 rounded bg-blue-600 text-white text-xs hover:bg-blue-700 disabled:opacity-50"
-                onClick={() => runAction('复制任务', duplicateSelectedTask)}
+                onClick={() => runAction('Duplicate task', duplicateSelectedTask)}
                 disabled={job.loading}
               >
-                复制
+                Copy
               </button>
               <button
                 className="px-2 py-1.5 rounded bg-red-600 text-white text-xs hover:bg-red-700 disabled:opacity-50"
-                onClick={() => runAction('删除任务', deleteSelectedTask)}
+                onClick={() => runAction('Delete task', deleteSelectedTask)}
                 disabled={job.loading || selectedTaskId === 'hmmer-default'}
               >
-                删除
+                Delete
               </button>
             </div>
             <StatusBadge job={job} />
             <button
               className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
               onClick={() => setDarkMode((v) => !v)}
-              title={darkMode ? '切换为浅色模式' : '切换为深色模式'}
+              title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
@@ -2360,13 +2360,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                   disabled={job.loading}
                   onClick={() =>
-                    runAction('检查后端状态', async () => {
+                    runAction('Check backend status', async () => {
                       const data = await healthCheck();
                       setHealth(data);
                     })
                   }
                 >
-                  检查后端健康状态
+                  Check backend health
                 </button>
                 {health && (
                   <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm space-y-2">
@@ -2393,18 +2393,18 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <h1 className="text-2xl font-semibold">1. Reference Input & Download</h1>
                 <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-5">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="text-sm font-semibold text-slate-700">两种加载参考序列的方法</div>
+                    <div className="text-sm font-semibold text-slate-700">Two ways to load reference sequences</div>
                     <div className="mt-1 text-sm text-slate-500">
-                      任选一种即可生成当前任务的 ref.csv 和 ref.fasta。只有序列号时用方式 A；已经有本地 FASTA 文件时直接用方式 B。
+                      Pick either one to generate this task's ref.csv and ref.fasta. Use Method A when you only have accession numbers; use Method B when you already have a local FASTA file.
                     </div>
                   </div>
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                     <section className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 space-y-3">
                       <div className="flex items-center gap-3">
-                        <span className="rounded-full bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white">方式 A</span>
+                        <span className="rounded-full bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white">Method A</span>
                         <div>
-                          <div className="text-sm font-semibold text-slate-800">按 accession 在线拉取</div>
-                          <div className="text-xs text-slate-500">适合只有 accession、protein_id 或 UniProt ID 的情况</div>
+                          <div className="text-sm font-semibold text-slate-800">Fetch online by accession</div>
+                          <div className="text-xs text-slate-500">Suitable when you only have accession, protein_id, or UniProt ID</div>
                         </div>
                       </div>
                       <div>
@@ -2414,7 +2414,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <div>
                         <label className="mb-1 block text-sm font-medium text-slate-700">Accession List</label>
                         <p className="mb-2 text-xs text-slate-500 leading-relaxed">
-                          支持 <strong>NCBI Protein</strong>、<strong>NCBI Nucleotide</strong>、<strong>UniProt</strong> 混合输入，系统会自动识别来源并拉取序列。
+                          Supports mixed input of <strong>NCBI Protein</strong>, <strong>NCBI Nucleotide</strong>, and <strong>UniProt</strong>; the system automatically detects the source and fetches sequences.
                         </p>
                         <textarea
                           className="h-56 w-full rounded-lg border border-slate-200 bg-white p-3 font-mono text-xs placeholder:text-slate-400"
@@ -2426,21 +2426,21 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <button
                         className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
                         disabled={job.loading}
-                        onClick={() => runAction('下载参考序列', runReferenceStep, 'reference')}
+                        onClick={() => runAction('Download reference sequences', runReferenceStep, 'reference')}
                       >
-                        在线拉取并生成 ref.csv / ref.fasta
+                        Fetch online and generate ref.csv / ref.fasta
                       </button>
                     </section>
                     <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 space-y-3">
                       <div className="flex items-center gap-3">
-                        <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white">方式 B</span>
+                        <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white">Method B</span>
                         <div>
-                          <div className="text-sm font-semibold text-slate-800">上传本地 FASTA 文件</div>
-                          <div className="text-xs text-slate-500">适合你已经整理好参考序列文件，想直接导入时使用</div>
+                          <div className="text-sm font-semibold text-slate-800">Upload a local FASTA file</div>
+                          <div className="text-xs text-slate-500">Suitable when you already have a prepared reference sequence file and want to import it directly</div>
                         </div>
                       </div>
                       <div className="rounded-xl border border-sky-200 bg-white/80 px-3 py-2 text-xs text-slate-500">
-                        支持 .fasta、.fa、.faa、.fas、.fna、.txt，单文件限制 20 MB。导入后会直接覆盖当前任务的参考集。
+                        Supports .fasta, .fa, .faa, .fas, .fna, .txt; single file limit 20 MB. Importing will directly overwrite the current task's reference set.
                       </div>
                       <input
                         ref={referenceUploadInputRef}
@@ -2451,15 +2451,15 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       />
                       <div className="rounded-xl border border-dashed border-sky-300 bg-white/80 px-3 py-3 text-sm text-slate-600">
                         {referenceUploadFile
-                          ? `已选择文件：${referenceUploadFile.name} · ${formatFileSize(referenceUploadFile.size)}`
-                          : '尚未选择文件。请选择一个本地 FASTA 文件后再导入。'}
+                          ? `Selected file: ${referenceUploadFile.name} · ${formatFileSize(referenceUploadFile.size)}`
+                          : 'No file selected yet. Please choose a local FASTA file before importing.'}
                       </div>
                       <button
                         className="w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
                         disabled={job.loading || !referenceUploadFile}
-                        onClick={() => runAction('上传参考 FASTA', runReferenceUploadStep, 'reference')}
+                        onClick={() => runAction('Upload reference FASTA', runReferenceUploadStep, 'reference')}
                       >
-                        上传导入并生成 ref.csv / ref.fasta
+                        Upload, import, and generate ref.csv / ref.fasta
                       </button>
                     </section>
                   </div>
@@ -2481,14 +2481,14 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     <button
                       className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm"
                       disabled={job.loading}
-                      onClick={() => runAction('计算参考序列 Pairwise Identity', runRefPairwiseIdentity, 'reference')}
+                      onClick={() => runAction('Compute reference sequence pairwise identity', runRefPairwiseIdentity, 'reference')}
                     >
-                      计算参考序列 Pairwise Identity（自动推荐 CD-HIT 阈值）
+                      Compute Reference Sequence Pairwise Identity (auto-recommend CD-HIT threshold)
                     </button>
                     <IdentityHeatmap
                       ids={refIdentityIds}
                       matrix={refIdentityMatrix}
-                      title="参考序列 Pairwise Identity 热图"
+                      title="Reference Sequence Pairwise Identity Heatmap"
                       lowerBound={identityLowerBound}
                       onLowerBoundChange={setIdentityLowerBound}
                     />
@@ -2503,47 +2503,47 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <h1 className="text-2xl font-semibold">2. HMM Build</h1>
                 <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div className="md:col-span-4">
-                    <label className="block text-sm font-medium mb-1">Reference FASTA（自动承接上一步；留空=后端默认）</label>
+                    <label className="block text-sm font-medium mb-1">Reference FASTA (auto-carried from previous step; leave blank = backend default)</label>
                     <input
                       className="w-full p-2 border rounded text-sm"
                       value={referenceFastaPath}
                       onChange={(e) => setReferenceFastaPath(e.target.value)}
-                      placeholder="例如: /path/to/ref.fasta"
+                      placeholder="e.g.: /path/to/ref.fasta"
                     />
                   </div>
-                  <InputNum label="Identity 下界 (%)" value={identityLowerBound} step={0.1} onChange={setIdentityLowerBound} />
-                  <InputNum label="去重上界 (%)" value={+(cdhitIdentity * 100).toFixed(1)} step={0.1} onChange={(v) => setCdhitIdentity(v / 100)} />
+                  <InputNum label="Identity Lower Bound (%)" value={identityLowerBound} step={0.1} onChange={setIdentityLowerBound} />
+                  <InputNum label="Dedup Upper Bound (%)" value={+(cdhitIdentity * 100).toFixed(1)} step={0.1} onChange={(v) => setCdhitIdentity(v / 100)} />
                   <div className="md:col-span-2 flex items-end">
                     <button
                       className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm h-10 flex items-center justify-center gap-2 w-full"
                       disabled={job.loading}
-                      onClick={() => runAction('构建 HMM', runHmmBuildStep, 'hmm')}
+                      onClick={() => runAction('Build HMM', runHmmBuildStep, 'hmm')}
                     >
                       <Play className="w-4 h-4" />
-                      运行 CD-HIT + MAFFT + hmmbuild
+                      Run CD-HIT + MAFFT + hmmbuild
                     </button>
                   </div>
                 </div>
                 {hmmBuildStats && (
                   <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
-                    <h3 className="text-sm font-semibold text-slate-700">CD-HIT 聚类统计</h3>
+                    <h3 className="text-sm font-semibold text-slate-700">CD-HIT Clustering Statistics</h3>
                     <div className="flex gap-6 text-sm flex-wrap">
-                      <span>输入序列: <strong>{hmmBuildStats.inputCount}</strong></span>
+                      <span>Input Sequences: <strong>{hmmBuildStats.inputCount}</strong></span>
                       {hmmBuildStats.lowerBoundRemoved && hmmBuildStats.lowerBoundRemoved.length > 0 && (
                         <span className="text-red-500">
-                          下界过滤移除: <strong>{hmmBuildStats.lowerBoundRemoved.length}</strong> 条
+                          Removed by lower-bound filter: <strong>{hmmBuildStats.lowerBoundRemoved.length}</strong>
                         </span>
                       )}
-                      <span>→ 聚类后代表序列: <strong>{hmmBuildStats.outputCount}</strong></span>
-                      <span>聚类数: <strong>{hmmBuildStats.clusterCount}</strong></span>
+                      <span>→ Representative sequences after clustering: <strong>{hmmBuildStats.outputCount}</strong></span>
+                      <span>Cluster count: <strong>{hmmBuildStats.clusterCount}</strong></span>
                       <span className="text-slate-400">
-                        (去除 {hmmBuildStats.inputCount - hmmBuildStats.outputCount} 条冗余，
-                        保留 {((hmmBuildStats.outputCount / Math.max(1, hmmBuildStats.inputCount)) * 100).toFixed(1)}%)
+                        (Removed {hmmBuildStats.inputCount - hmmBuildStats.outputCount} redundant, 
+                        kept {((hmmBuildStats.outputCount / Math.max(1, hmmBuildStats.inputCount)) * 100).toFixed(1)}%)
                       </span>
                     </div>
                     {hmmBuildStats.lowerBoundRemoved && hmmBuildStats.lowerBoundRemoved.length > 0 && (
                       <details className="text-xs text-red-500">
-                        <summary className="cursor-pointer hover:text-red-700">查看下界过滤移除的序列</summary>
+                        <summary className="cursor-pointer hover:text-red-700">View sequences removed by lower-bound filter</summary>
                         <div className="mt-1 flex flex-wrap gap-1">
                           {hmmBuildStats.lowerBoundRemoved.map((id) => (
                             <span key={id} className="bg-red-50 px-1.5 py-0.5 rounded">{id}</span>
@@ -2553,7 +2553,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     )}
                     {hmmBuildStats.clusters.length > 0 && hmmBuildStats.clusters.length <= 50 && (
                       <details className="text-xs text-slate-500">
-                        <summary className="cursor-pointer hover:text-slate-700">展开聚类详情</summary>
+                        <summary className="cursor-pointer hover:text-slate-700">Expand clustering details</summary>
                         <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-1">
                           {hmmBuildStats.clusters.map((c, i) => (
                             <span key={i} className="bg-slate-50 px-2 py-1 rounded">
@@ -2571,18 +2571,18 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   page={cdhitPreviewPage}
                   totalPages={cdhitPreviewTotalPages}
                   onPageChange={setCdhitPreviewPage}
-                  title="CD-HIT 聚类后代表序列"
+                  title="CD-HIT Post-Clustering Representative Sequences"
                 />
                 {hmmBuildStats && (
                   <div className="space-y-3">
                     <button
                       className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm"
                       disabled={job.loading}
-                      onClick={() => runAction('计算聚类后 Pairwise Identity', runPostCdhitPairwiseIdentity, 'hmm')}
+                      onClick={() => runAction('Compute post-clustering pairwise identity', runPostCdhitPairwiseIdentity, 'hmm')}
                     >
-                      计算聚类后序列 Pairwise Identity
+                      Compute Post-Clustering Sequence Pairwise Identity
                     </button>
-                    <IdentityHeatmap ids={postCdhitIdentityIds} matrix={postCdhitIdentityMatrix} title="CD-HIT 聚类后 Pairwise Identity 热图" />
+                    <IdentityHeatmap ids={postCdhitIdentityIds} matrix={postCdhitIdentityMatrix} title="CD-HIT Post-Clustering Pairwise Identity Heatmap" />
                   </div>
                 )}
                 {renderTailPanels('h-28')}
@@ -2594,7 +2594,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <h1 className="text-2xl font-semibold">3. Search & Filter</h1>
                 {runtimeTask === 'search/run' && runtimeMeta?.ebiJobId && (
                   <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-sm text-indigo-800">
-                    EBI 任务正在运行: Job ID = {runtimeMeta.ebiJobId}
+                    EBI job is running: Job ID = {runtimeMeta.ebiJobId}
                   </div>
                 )}
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
@@ -2611,7 +2611,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       </select>
                     </div>
                     <div className="md:col-span-2 text-xs text-slate-500 self-end pb-1">
-                      {searchMode === 'ebi' ? '当前走 EBI 在线服务器，可能更慢。' : '当前走本地 hmmsearch。'}
+                      {searchMode === 'ebi' ? 'Currently using the EBI online server, which may be slower.' : 'Currently using local hmmsearch.'}
                     </div>
                   </div>
                   {searchMode === 'ebi' ? (
@@ -2626,31 +2626,31 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     </div>
                   ) : (
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">Target FASTA 路径（留空=后端默认）</label>
+                      <label className="block text-xs text-slate-500 mb-1">Target FASTA path (leave blank = backend default)</label>
                       <input
                         className="w-full p-2 border rounded text-sm"
                         value={targetFasta}
                         onChange={(e) => setTargetFasta(e.target.value)}
-                        placeholder="例如: /path/to/target.fasta"
+                        placeholder="e.g.: /path/to/target.fasta"
                       />
                     </div>
                   )}
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">HMM 文件路径（留空=后端默认）</label>
+                    <label className="block text-xs text-slate-500 mb-1">HMM file path (leave blank = backend default)</label>
                     <input
                       className="w-full p-2 border rounded text-sm"
                       value={hmmFile}
                       onChange={(e) => setHmmFile(e.target.value)}
-                      placeholder="例如: /path/to/ref.hmm"
+                      placeholder="e.g.: /path/to/ref.hmm"
                     />
                   </div>
                   {searchMode === 'ebi' ? (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 overflow-x-auto pb-1">
                         {[
-                          { key: 'submit' as EbiSubStepKey, title: '1. 提交任务到服务器', desc: ebiStageJobId ? `Job ID: ${ebiStageJobId}` : '生成并提交 EBI job' },
-                          { key: 'download' as EbiSubStepKey, title: '2. 下载 HMMER 结果', desc: allHmmRows.length > 0 ? `已载入 ${allHmmRows.length} 条` : '分页下载并解析为 hits_all' },
-                          { key: 'enrich' as EbiSubStepKey, title: '3. 拉长度并一致性补齐', desc: consistencyStats ? `filled=${consistencyStats.filled}` : '补全 UniProt 后执行长度一致性检查' },
+                          { key: 'submit' as EbiSubStepKey, title: '1. Submit task to server', desc: ebiStageJobId ? `Job ID: ${ebiStageJobId}` : 'Generate and submit EBI job' },
+                          { key: 'download' as EbiSubStepKey, title: '2. Download HMMER results', desc: allHmmRows.length > 0 ? `Loaded ${allHmmRows.length}` : 'Paginated download and parse into hits_all' },
+                          { key: 'enrich' as EbiSubStepKey, title: '3. Fetch lengths & consistency fill', desc: consistencyStats ? `filled=${consistencyStats.filled}` : 'Run length consistency check after filling UniProt' },
                         ].map((item, idx, arr) => {
                           const status = ebiSubStepState[item.key];
                           const isDone = status === 'success';
@@ -2671,7 +2671,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                               >
                                 <div className="font-semibold">{item.title}</div>
                                 <div className="mt-1 opacity-90">{item.desc}</div>
-                                {isDone && <div className="mt-1 font-semibold">这一段完成</div>}
+                                {isDone && <div className="mt-1 font-semibold">This stage completed</div>}
                               </div>
                               {idx < arr.length - 1 && <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />}
                             </React.Fragment>
@@ -2681,9 +2681,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
                       {ebiStageFailedPages !== null && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-xs text-amber-800">
-                          下载阶段失败页数: {ebiStageFailedPages}
+                          Download stage failed pages: {ebiStageFailedPages}
                           {ebiStageFailedPageNumbers.length > 0 && (
-                            <span> | 失败页码: {ebiStageFailedPageNumbers.slice(0, 20).join(', ')}{ebiStageFailedPageNumbers.length > 20 ? ' ...' : ''}</span>
+                            <span> | Failed page numbers: {ebiStageFailedPageNumbers.slice(0, 20).join(', ')}{ebiStageFailedPageNumbers.length > 20 ? ' ...' : ''}</span>
                           )}
                         </div>
                       )}
@@ -2694,28 +2694,28 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         onClick={() => {
                           const next = getNextEbiSubStep();
                           const labelMap: Record<EbiSubStepKey, string> = {
-                            submit: '第一段：提交任务到服务器',
-                            download: '第二段：下载 HMMER 结果',
-                            enrich: '第三段：拉长度并一致性补齐',
+                            submit: 'Stage 1: Submit task to server',
+                            download: 'Stage 2: Download HMMER results',
+                            enrich: 'Stage 3: Fetch lengths & consistency fill',
                           };
                           const stepForProgress: PipelineStepKey | undefined = next === 'enrich' ? 'search' : undefined;
-                          runAction(labelMap[next], runNextEbiSubStep, stepForProgress, undefined, `${labelMap[next]} 完成`);
+                          runAction(labelMap[next], runNextEbiSubStep, stepForProgress, undefined, `${labelMap[next]} Done`);
                         }}
                       >
                         <Play className="inline w-4 h-4 mr-1" />
                         {ebiSubStepState.submit === 'success' && ebiSubStepState.download === 'success' && ebiSubStepState.enrich === 'success'
-                          ? '三段均已完成（可重跑第三段）'
-                          : `继续下一段：${getNextEbiSubStep() === 'submit' ? '提交任务' : getNextEbiSubStep() === 'download' ? '下载结果' : '拉长度并补齐'}`}
+                          ? 'All three stages completed (stage 3 can be re-run)'
+                          : `Continue to next stage: ${getNextEbiSubStep() === 'submit' ? 'Submit task' : getNextEbiSubStep() === 'download' ? 'Download results' : 'Fetch lengths & fill'}`}
                       </button>
                     </div>
                   ) : (
                     <button
                       className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                       disabled={job.loading}
-                      onClick={() => runAction('运行 hmmsearch', runSearchStep, 'search')}
+                      onClick={() => runAction('Run hmmsearch', runSearchStep, 'search')}
                     >
                       <Search className="inline w-4 h-4 mr-1" />
-                      提交 hmmsearch
+                      Submit hmmsearch
                     </button>
                   )}
 
@@ -2723,8 +2723,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     <div className="w-full mt-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
                       <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                         <span>
-                          🧬 正在并发拉取 UniProt 数据...
-                          {runtimeMeta.uniprotPhase === 'writing' ? '（正在写入结果文件）' : ''}
+                          🧬 Fetching UniProt data concurrently...
+                          {runtimeMeta.uniprotPhase === 'writing' ? ' (writing result file)' : ''}
                         </span>
                         <span>{runtimeMeta.uniprotProgress}%</span>
                       </div>
@@ -2739,7 +2739,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   {typeof runtimeMeta?.consistencyProgress === 'number' && runtimeTask === 'search/consistency-check' && (
                     <div className="w-full mt-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
                       <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
-                        <span>📏 正在执行长度一致性检查...</span>
+                        <span>📏 Running length consistency check...</span>
                         <span>{runtimeMeta.consistencyProgress}%</span>
                       </div>
                       <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
@@ -2753,7 +2753,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   {runtimeMeta?.ebiDownloadProgress && runtimeTask === 'search/ebi-download' && (
                     <div className="w-full mt-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
                       <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
-                        <span>⏬ 正在下载并解析结果页 ({runtimeMeta.ebiDownloadProgress.current} / {runtimeMeta.ebiDownloadProgress.total})</span>
+                        <span>⏬ Downloading and parsing result page ({runtimeMeta.ebiDownloadProgress.current} / {runtimeMeta.ebiDownloadProgress.total})</span>
                         <span>{Math.min(100, Math.round((runtimeMeta.ebiDownloadProgress.current / Math.max(1, runtimeMeta.ebiDownloadProgress.total)) * 100))}%</span>
                       </div>
                       <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
@@ -2773,9 +2773,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <button
                     className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm h-10"
                     disabled={job.loading}
-                    onClick={() => runAction('过滤 hits', runFilterStep, 'search')}
+                    onClick={() => runAction('Filter hits', runFilterStep, 'search')}
                   >
-                    {filterStats ? `保存过滤结果（已筛 ${filterStats.kept}/${filterStats.total}）` : '保存过滤结果'}
+                    {filterStats ? `Save filtered results (filtered ${filterStats.kept}/${filterStats.total}）` : 'Save filtered results'}
                   </button>
                 </div>
 
@@ -2918,10 +2918,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       const dom = plotDomain ?? (scatterBounds
                         ? { xMin: scatterBounds.minScore, xMax: scatterBounds.maxScore, yMin: scatterBounds.minLength, yMax: scatterBounds.maxLength }
                         : null);
-                      if (!dom || !W) return <div className="flex items-center justify-center h-full text-slate-400 text-sm">{hitsRows.length ? '数据加载中...' : '暂无数据'}</div>;
+                      if (!dom || !W) return <div className="flex items-center justify-center h-full text-slate-400 text-sm">{hitsRows.length ? 'Loading data...' : 'No data yet'}</div>;
                       const xRange = dom.xMax - dom.xMin;
                       const yRange = dom.yMax - dom.yMin;
-                      if (xRange <= 0 || yRange <= 0) return <div className="flex items-center justify-center h-full text-slate-400 text-sm">数据范围为零，无法绘图</div>;
+                      if (xRange <= 0 || yRange <= 0) return <div className="flex items-center justify-center h-full text-slate-400 text-sm">Data range is zero, cannot plot</div>;
                       const dx = (v: number) => CHART_M.left + (v - dom.xMin) / Math.max(1e-9, dom.xMax - dom.xMin) * pW;
                       const dy = (v: number) => CHART_M.top + (dom.yMax - v) / Math.max(1e-9, dom.yMax - dom.yMin) * pH;
                       const xTicks = niceTickValues(dom.xMin, dom.xMax, Math.max(3, Math.floor(pW / 80)));
@@ -2996,10 +2996,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div>
                     {selectionBoxes.length ? (
                       <span>
-                        已框选 {selectionBoxes.length} 个区域，命中 {filteredRows.length} 条。Shift + 拖拽可新增框选，拖动已有框可平移。
+                        Selected {selectionBoxes.length} region(s), matched {filteredRows.length} hit(s). Shift + drag to add a new selection box; drag an existing box to move it.
                       </span>
                     ) : (
-                      <span>先展示全部 HMM 结果。可在图上拖拽画框过滤，滚轮缩放，Shift + 拖拽可多框选择。</span>
+                      <span>Showing all HMM results by default. Drag on the chart to draw a filter box, scroll to zoom, Shift + drag for multiple selection boxes.</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
@@ -3007,15 +3007,15 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       className="px-3 py-1.5 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-100"
                       onClick={resetZoom}
                     >
-                      重置缩放
+                      Reset Zoom
                     </button>
                     <button
                       className="px-3 py-1.5 rounded border border-amber-300 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
                       disabled={!selectionBoxes.length}
                       onClick={syncBoxesToFilter}
-                      title="将框选区域的边界同步到上方的筛选输入框"
+                      title="Sync the selection box bounds to the filter inputs above"
                     >
-                      同步到筛选
+                      Sync to Filter
                     </button>
                     <button
                       className="px-3 py-1.5 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
@@ -3027,13 +3027,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         if (draftOverlayRef.current) draftOverlayRef.current.style.display = 'none';
                       }}
                     >
-                      清除框选
+                      Clear Selection
                     </button>
                     <button
                       className="px-3 py-1.5 rounded border border-indigo-300 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
                       disabled={!filteredRows.length || job.loading}
                       onClick={() =>
-                        runAction('保存框选结果到后端', async () => {
+                        runAction('Save selection results to backend', async () => {
                           const targets: string[] = Array.from(
                             new Set<string>(filteredRows.map((r) => String(r.target ?? '')).filter(Boolean)),
                           );
@@ -3048,7 +3048,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         }, 'search')
                       }
                     >
-                      保存框选为后端过滤
+                      Save Selection as Backend Filter
                     </button>
                   </div>
                 </div>
@@ -3065,7 +3065,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
                     disabled={job.loading || searchPage <= 1 || selectionBoxes.length > 0}
                     onClick={() =>
-                      runAction('加载上一页', async () => {
+                      runAction('Load previous page', async () => {
                         const target = Math.max(1, searchPage - 1);
                         const data = await loadSearchPage(target, searchPageSize, searchSource);
                         if (searchSource === 'filtered') {
@@ -3078,13 +3078,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       })
                     }
                   >
-                    上一页
+                    Previous Page
                   </button>
                   <button
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
                     disabled={job.loading || selectionBoxes.length > 0}
                     onClick={() =>
-                      runAction('刷新当前页', async () => {
+                      runAction('Refresh current page', async () => {
                         const data = await loadSearchPage(searchPage, searchPageSize, searchSource);
                         if (searchSource === 'filtered') {
                           setFilteredRows(data.preview.rows);
@@ -3096,13 +3096,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       })
                     }
                   >
-                    刷新
+                    Refresh
                   </button>
                   <button
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
                     disabled={job.loading || searchPage >= searchTotalPages || selectionBoxes.length > 0}
                     onClick={() =>
-                      runAction('加载下一页', async () => {
+                      runAction('Load next page', async () => {
                         const target = searchPage + 1;
                         const data = await loadSearchPage(target, searchPageSize, searchSource);
                         if (searchSource === 'filtered') {
@@ -3115,10 +3115,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       })
                     }
                   >
-                    下一页
+                    Next Page
                   </button>
                   <span className="text-sm text-slate-600">
-                    数据源: {searchSource} | 第 {searchPage} / {searchTotalPages} 页 {selectionBoxes.length > 0 ? '| 框选中（分页已锁定）' : ''}
+                    Data source: {searchSource} | Page {searchPage} / {searchTotalPages} {selectionBoxes.length > 0 ? '| Selecting (pagination locked)' : ''}
                   </span>
                 </div>
                 {renderTailPanels('h-36')}
@@ -3130,23 +3130,23 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <h1 className="text-2xl font-semibold">4. Alignment (MAFFT)</h1>
                 <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">筛选 FASTA（留空=后端默认）</label>
-                    <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="例如: /path/to/hits_filtered.fasta" />
+                    <label className="block text-xs text-slate-500 mb-1">Filter FASTA (leave blank = backend default)</label>
+                    <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="e.g.: /path/to/hits_filtered.fasta" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">参考 FASTA（留空=后端默认）</label>
-                    <input className="w-full p-2 border rounded text-sm" value={referenceFastaPath} onChange={(e) => setReferenceFastaPath(e.target.value)} placeholder="例如: /path/to/ref.fasta" />
+                    <label className="block text-xs text-slate-500 mb-1">Reference FASTA (leave blank = backend default)</label>
+                    <input className="w-full p-2 border rounded text-sm" value={referenceFastaPath} onChange={(e) => setReferenceFastaPath(e.target.value)} placeholder="e.g.: /path/to/ref.fasta" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">参考序列 ID</label>
-                    <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="留空=自动使用参考序列第一条" />
+                    <label className="block text-xs text-slate-500 mb-1">Reference Sequence ID</label>
+                    <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="Leave blank = automatically use the first reference sequence" />
                   </div>
                   <button
                     className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm h-10"
                     disabled={job.loading}
-                    onClick={() => runAction('生成对齐文件', runAlignmentStep, 'alignment')}
+                    onClick={() => runAction('Generate alignment file', runAlignmentStep, 'alignment')}
                   >
-                    生成对齐并载入预览
+                    Generate Alignment and Load Preview
                   </button>
                 </div>
 
@@ -3154,7 +3154,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100">
                     <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                       <span>
-                        🧬 正在准备 Alignment
+                        🧬 Preparing Alignment
                         {runtimeMeta.alignmentProgress.phase ? `（${runtimeMeta.alignmentProgress.phase}）` : ''}
                         ：{runtimeMeta.alignmentProgress.current} / {runtimeMeta.alignmentProgress.total}
                       </span>
@@ -3175,19 +3175,19 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                    <InputNum label="列起点" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
-                    <InputNum label="列终点" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
+                    <InputNum label="Column Start" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
+                    <InputNum label="Column End" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
                     <div className="text-xs text-slate-600 md:col-span-2">
-                      对齐文件: {alignmentPath || '(暂无)'}
+                      Alignment file: {alignmentPath || '(none)'}
                     </div>
                     <button
                       className="px-3 py-2 rounded border border-slate-300 text-sm"
                       disabled={job.loading || !alignmentPath}
-                      onClick={() => runAction('刷新对齐预览', async () => {
+                      onClick={() => runAction('Refresh alignment preview', async () => {
                         await loadAlignmentPreviewPage(0);
                       })}
                     >
-                      刷新预览
+                      Refresh Preview
                     </button>
                     <div className="text-xs text-slate-600">
                       rows: {alignmentPreviewRows.length}/{alignmentPreviewTotalRecords} | alnLen: {alignmentPreviewLength}
@@ -3198,20 +3198,20 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     <button
                       className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
                       disabled={job.loading || alignmentPreviewOffset <= 0 || !alignmentPath}
-                      onClick={() => runAction('对齐预览上一页', async () => {
+                      onClick={() => runAction('Previous alignment preview page', async () => {
                         await loadAlignmentPreviewPage(Math.max(0, alignmentPreviewOffset - alignmentPreviewLimit));
                       })}
                     >
-                      上一页
+                      Previous Page
                     </button>
                     <button
                       className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
                       disabled={job.loading || alignmentPreviewOffset + alignmentPreviewLimit >= alignmentPreviewTotalRecords || !alignmentPath}
-                      onClick={() => runAction('对齐预览下一页', async () => {
+                      onClick={() => runAction('Next alignment preview page', async () => {
                         await loadAlignmentPreviewPage(alignmentPreviewOffset + alignmentPreviewLimit);
                       })}
                     >
-                      下一页
+                      Next Page
                     </button>
                     <span className="text-xs text-slate-500">
                       offset: {alignmentPreviewOffset}
@@ -3223,7 +3223,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <thead className="bg-slate-50 border-b">
                         <tr>
                           <th className="px-2 py-2 text-left">ID</th>
-                          <th className="px-2 py-2 text-left">对齐片段（交互窗口）</th>
+                          <th className="px-2 py-2 text-left">Alignment Segment (Interactive Window)</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3245,54 +3245,54 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               <div className="space-y-4">
                 <h1 className="text-2xl font-semibold">5. Active Site Scoring</h1>
                 <div className="bg-white border border-slate-200 rounded-xl p-3 text-sm text-slate-700 space-y-1.5">
-                  <div className="font-semibold text-slate-900">当前运行状态</div>
+                  <div className="font-semibold text-slate-900">Current Run Status</div>
                   <div className="text-xs text-slate-600">
-                    最近一次对齐文件：{(scoringRunInfo?.alignmentUsed || alignmentPath || '(暂无)')}
+                    Most recent alignment file: {(scoringRunInfo?.alignmentUsed || alignmentPath || '(none)')}
                   </div>
                   <div className="text-xs text-slate-600">
-                    当前位点模式：
-                    {scoringPositionMode === 'pre' ? '对齐前残基编号' : '对齐后列号'}
+                    Current position mode:
+                    {scoringPositionMode === 'pre' ? 'Pre-alignment residue number' : 'Post-alignment column number'}
                     {scoringPositionMode === 'pre'
-                      ? (preAlignmentAnchor === 'first' ? '（默认跟随第一条序列）' : `（按参考ID锚定: ${refId || '(空)'})`)
+                      ? (preAlignmentAnchor === 'first' ? ' (default: follows the first sequence)' : ` (anchored by reference ID: ${refId || '(empty)'})`)
                       : ''}
                   </div>
                   {scoringRunInfo && (
                     <div className="text-xs text-slate-600">
-                      最近一次打分：{scoringRunInfo.passed}/{scoringRunInfo.total} 通过阈值
+                      Most recent scoring: {scoringRunInfo.passed}/{scoringRunInfo.total} passed threshold
                     </div>
                   )}
                   {scoringRunInfo?.passedFasta && (
                     <div className="text-xs text-slate-600">
-                      阈值筛选模块：已导出通过序列 FASTA ({scoringRunInfo.passedCount || 0} 条) → 路径 {scoringRunInfo.passedFasta}
+                      Threshold filter module: exported FASTA of passing sequences ({scoringRunInfo.passedCount || 0}) → path {scoringRunInfo.passedFasta}
                     </div>
                   )}
                   {alignmentPrepInfo && (
                     <div className="text-xs text-slate-600">
-                      最近一次仅对齐：records={alignmentPrepInfo.records} | {alignmentPrepInfo.alignment}
+                      Most recent alignment-only run: records={alignmentPrepInfo.records} | {alignmentPrepInfo.alignment}
                     </div>
                   )}
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">Alignment 路径（留空=后端默认）</label>
-                    <input className="w-full p-2 border rounded text-sm" value={alignmentPath} onChange={(e) => setAlignmentPath(e.target.value)} placeholder="例如: /path/to/alignment.fasta" />
+                    <label className="block text-xs text-slate-500 mb-1">Alignment path (leave blank = backend default)</label>
+                    <input className="w-full p-2 border rounded text-sm" value={alignmentPath} onChange={(e) => setAlignmentPath(e.target.value)} placeholder="e.g.: /path/to/alignment.fasta" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">参考序列 ID</label>
-                    <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="留空=自动使用参考序列第一条" />
+                    <label className="block text-xs text-slate-500 mb-1">Reference Sequence ID</label>
+                    <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="Leave blank = automatically use the first reference sequence" />
                   </div>
                 </div>
 
                 <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">位点坐标模式</label>
+                    <label className="block text-xs text-slate-500 mb-1">Position Coordinate Mode</label>
                     <select
                       className="w-full p-2 border rounded text-sm"
                       value={scoringPositionMode}
                       onChange={(e) => setScoringPositionMode((e.target.value === 'aligned' ? 'aligned' : 'pre'))}
                     >
-                      <option value="pre">对齐前（残基编号）</option>
-                      <option value="aligned">对齐后（MSA 列号）</option>
+                      <option value="pre">Pre-alignment (residue number)</option>
+                      <option value="aligned">Post-alignment (MSA column number)</option>
                     </select>
                   </div>
                   <label className="flex items-center gap-2 text-sm text-slate-700 pb-2">
@@ -3302,17 +3302,17 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       disabled={scoringPositionMode !== 'pre'}
                       onChange={(e) => setPreAlignmentAnchor(e.target.checked ? 'refid' : 'first')}
                     />
-                    对齐前模式使用参考ID锚定（关闭=默认第一条序列）
+                    Use reference ID anchoring in pre-alignment mode (off = default to the first sequence)
                   </label>
                   <div className="text-xs text-slate-500 pb-2">
-                    对齐前: 按锚序列残基编号自动映射到 MSA 列；对齐后: 直接把 pos 当列号。
+                    Pre-alignment: automatically maps anchor sequence residue numbers to MSA columns; Post-alignment: treats pos directly as the column number.
                   </div>
                 </div>
 
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="text-sm text-slate-700">打分规则（可直接编辑）</div>
-                    <div className="text-xs text-slate-500">当前规则数: {scoringRules.length}</div>
+                    <div className="text-sm text-slate-700">Scoring Rules (directly editable)</div>
+                    <div className="text-xs text-slate-500">Current rule count: {scoringRules.length}</div>
                   </div>
 
                   <div className="overflow-auto border rounded">
@@ -3323,7 +3323,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           <th className="px-2 py-2 text-left">Allowed (comma separated)</th>
                           <th className="px-2 py-2 text-left">Score</th>
                           <th className="px-2 py-2 text-left">Label</th>
-                          <th className="px-2 py-2 text-left">操作</th>
+                          <th className="px-2 py-2 text-left">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3391,7 +3391,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                                   setScoringRulesSuccess('');
                                 }}
                               >
-                                删除
+                                Delete
                               </button>
                             </td>
                           </tr>
@@ -3408,10 +3408,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         setScoringAllowedDrafts({});
                         setScoringRulesError('');
                         const maxScore = peAaoScoringRules.reduce((s, r) => s + (r.score ?? 0), 0);
-                        setScoringRulesSuccess(`已应用 PeAAO 规则模板，共 ${peAaoScoringRules.length} 条，满分 ${maxScore}`);
+                        setScoringRulesSuccess(`Applied PeAAO rule template: ${peAaoScoringRules.length} rules, max score ${maxScore}`);
                       }}
                     >
-                      应用 PeAAO 规则模板（覆盖）
+                      Apply PeAAO Rule Template (Overwrite)
                     </button>
                     <button
                       className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
@@ -3429,13 +3429,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         setScoringRulesSuccess('');
                       }}
                     >
-                      新增规则
+                      Add Rule
                     </button>
                     <button
                       className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
                       onClick={() => rulesImportRef.current?.click()}
                     >
-                      导入规则 JSON
+                      Import Rules JSON
                     </button>
                     <button
                       className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
@@ -3450,7 +3450,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         URL.revokeObjectURL(url);
                       }}
                     >
-                      导出规则 JSON
+                      Export Rules JSON
                     </button>
                     <input
                       ref={rulesImportRef}
@@ -3469,16 +3469,16 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           setScoringAllowedDrafts({});
                           setScoringRulesError('');
                           const maxScore = parsed.reduce((s, r) => s + (r.score ?? 0), 0);
-                          setScoringRulesSuccess(`导入成功，规则数 ${parsed.length}，满分 ${maxScore}`);
+                          setScoringRulesSuccess(`Import successful, ${parsed.length} rules, max score ${maxScore}`);
                         } catch (err) {
-                          setScoringRulesError(`导入失败: ${String(err)}`);
+                          setScoringRulesError(`Import failed: ${String(err)}`);
                           setScoringRulesSuccess('');
                         } finally {
                           e.currentTarget.value = '';
                         }
                       }}
                     />
-                    <div className="text-xs text-slate-500">支持导入/导出 JSON，字段为 pos / allowed / score / label；allowed 可含 "Uni"</div>
+                    <div className="text-xs text-slate-500">Supports importing/exporting JSON; fields are pos / allowed / score / label; allowed may include "Uni"</div>
                   </div>
 
                   {scoringRulesError && (
@@ -3496,12 +3496,12 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     disabled={job.loading || Boolean(scoringRulesError)}
                     title={
                       scoringRulesError
-                        ? `规则校验未通过: ${scoringRulesError}`
-                        : '执行打分（基于第4步 Alignment）'
+                        ? `Rule validation failed: ${scoringRulesError}`
+                        : 'Run Scoring (Based on Step 4 Alignment)'
                     }
-                    onClick={() => runAction('执行活性位点打分', runScoringStep, 'scoring')}
+                    onClick={() => runAction('Run active-site scoring', runScoringStep, 'scoring')}
                   >
-                    执行打分（基于第4步 Alignment）
+                    Run Scoring (Based on Step 4 Alignment)
                   </button>
 
                   <div className="pt-1 border-t border-slate-100">
@@ -3511,21 +3511,21 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         checked={autoDownloadScoringCsv}
                         onChange={(e) => setAutoDownloadScoringCsv(e.target.checked)}
                       />
-                      打分成功后自动下载完整 CSV
+                      Automatically download the full CSV after scoring succeeds
                     </label>
-                    <InputNum label="Threshold（打分后设置）" value={threshold} step={0.1} onChange={setThreshold} />
-                    <div className="text-xs text-slate-500 mt-1">建议先运行打分，再根据结果调整阈值并重跑统计。</div>
+                    <InputNum label="Threshold (set after scoring)" value={threshold} step={0.1} onChange={setThreshold} />
+                    <div className="text-xs text-slate-500 mt-1">Recommended to run scoring first, then adjust the threshold based on results and re-run the statistics.</div>
                     {thresholdPreview && (
                       <div className="mt-2 text-xs text-indigo-700 border border-indigo-200 bg-indigo-50 rounded p-2">
-                        阈值预估（基于当前 scored_results.csv）：阈值 {thresholdPreview.threshold} 时通过 {thresholdPreview.passed}/{thresholdPreview.total}（{(thresholdPreview.ratio * 100).toFixed(1)}%）。
-                        若要让聚类使用该阈值结果，请重跑一次打分。
+                        Threshold estimate (based on current scored_results.csv): at threshold {thresholdPreview.threshold}, {thresholdPreview.passed}/{thresholdPreview.total}（{(thresholdPreview.ratio * 100).toFixed(1)}%）.
+                        To have clustering use this threshold result, please re-run scoring.
                       </div>
                     )}
                   </div>
 
                   {Boolean(scoringRulesError) && (
                     <div className="text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded p-2">
-                      当前规则存在错误，已禁止运行打分。请先修正上方红色错误提示。
+                      There are errors in the current rules; scoring is disabled. Please fix the red error messages above first.
                     </div>
                   )}
                 </div>
@@ -3539,59 +3539,59 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <h1 className="text-2xl font-semibold">6. Clustering & Export</h1>
                 <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">Candidate FASTA 路径（留空=后端默认）</label>
-                    <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="例如: /path/to/hits_filtered.fasta" />
+                    <label className="block text-xs text-slate-500 mb-1">Candidate FASTA path (leave blank = backend default)</label>
+                    <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="e.g.: /path/to/hits_filtered.fasta" />
                   </div>
                   <InputNum label="Identity (-c)" value={clusterIdentity} step={0.01} onChange={setClusterIdentity} />
                   <InputNum label="Word size (-n)" value={clusterWordSize} step={1} onChange={setClusterWordSize} />
                   <button
                     className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm h-10"
                     disabled={job.loading}
-                    onClick={() => runAction(`运行 CD-HIT ${Math.round(clusterIdentity * 100)}%`, runClusteringStep, 'clustering')}
+                    onClick={() => runAction(`Run CD-HIT ${Math.round(clusterIdentity * 100)}%`, runClusteringStep, 'clustering')}
                   >
-                    运行聚类
+                    Run clustering
                   </button>
                   <button
                     className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-4 py-2 rounded-lg text-sm h-10 border border-slate-300"
                     disabled={job.loading}
-                    onClick={() => runAction('跳过 Clustering', skipClusteringStep, 'clustering', 0, '6. Clustering 已跳过，未执行任何比对')}
+                    onClick={() => runAction('Skip Clustering', skipClusteringStep, 'clustering', 0, '6. Clustering skipped, no alignment performed')}
                   >
-                    跳过聚类，进入 Similarity
+                    Skip Clustering, Proceed to Similarity
                   </button>
                 </div>
                 <div className="text-xs text-slate-500">
-                  第6步只负责 CD-HIT；若跳过，不会触发任何比对。序列比对仅在 Similarity 页点击“计算序列相似性”后执行。
+                  Step 6 only handles CD-HIT; if skipped, no alignment is triggered. Sequence alignment is only performed after clicking “Compute Sequence Similarity” on the Similarity page.
                 </div>
                 {clusteringRunInfo && (
                   <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-3 text-sm text-emerald-950">
                     <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <h2 className="text-base font-semibold text-emerald-900">聚类结果</h2>
+                      <h2 className="text-base font-semibold text-emerald-900">Clustering Results</h2>
                       <span className="text-xs text-emerald-700">
                         Identity {Math.round(clusterIdentity * 100)}% · Word Size {clusterWordSize}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div className="bg-white/70 rounded-lg border border-emerald-100 p-3">
-                        <div className="text-xs text-emerald-700">输入序列</div>
+                        <div className="text-xs text-emerald-700">Input Sequences</div>
                         <div className="text-xl font-semibold">{clusteringRunInfo.inputCount}</div>
                       </div>
                       <div className="bg-white/70 rounded-lg border border-emerald-100 p-3">
-                        <div className="text-xs text-emerald-700">去重后保留</div>
+                        <div className="text-xs text-emerald-700">Kept After Dedup</div>
                         <div className="text-xl font-semibold">{clusteringRunInfo.outputCount}</div>
                       </div>
                       <div className="bg-white/70 rounded-lg border border-emerald-100 p-3">
-                        <div className="text-xs text-emerald-700">去重掉</div>
+                        <div className="text-xs text-emerald-700">Removed by Dedup</div>
                         <div className="text-xl font-semibold">{clusteringRunInfo.deduplicatedCount}</div>
                       </div>
                       <div className="bg-white/70 rounded-lg border border-emerald-100 p-3">
-                        <div className="text-xs text-emerald-700">聚类数</div>
+                        <div className="text-xs text-emerald-700">Cluster Count</div>
                         <div className="text-xl font-semibold">{clusteringRunInfo.clusters}</div>
                       </div>
                     </div>
                     <div className="text-xs text-emerald-800 space-y-1 break-all">
-                      <div>输入: {clusteringRunInfo.inputFasta}</div>
-                      <div>输出 FASTA: {clusteringRunInfo.outputFasta}</div>
-                      <div>Cluster 文件: {clusteringRunInfo.clusterFile}</div>
+                      <div>Input: {clusteringRunInfo.inputFasta}</div>
+                      <div>Output FASTA: {clusteringRunInfo.outputFasta}</div>
+                      <div>Cluster file: {clusteringRunInfo.clusterFile}</div>
                     </div>
                   </div>
                 )}
@@ -3604,25 +3604,25 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <h1 className="text-2xl font-semibold">7. Sequence Similarity Calculation</h1>
                 <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="md:col-span-2">
-                    <label className="block text-xs text-slate-500 mb-1">Candidate FASTA 路径（留空=后端自动选择）</label>
+                    <label className="block text-xs text-slate-500 mb-1">Candidate FASTA path (leave blank = backend auto-select)</label>
                     <input
                       className="w-full p-2 border rounded text-sm"
                       value={networkSourceFasta}
                       onChange={(e) => setNetworkSourceFasta(e.target.value)}
-                      placeholder="例如: /path/to/scored_passed.fasta"
+                      placeholder="e.g.: /path/to/scored_passed.fasta"
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-xs text-slate-500 mb-1">Reference FASTA 路径（留空=后端默认参考）</label>
+                    <label className="block text-xs text-slate-500 mb-1">Reference FASTA path (leave blank = backend default reference)</label>
                     <input
                       className="w-full p-2 border rounded text-sm"
                       value={networkReferenceFasta}
                       onChange={(e) => setNetworkReferenceFasta(e.target.value)}
-                      placeholder="例如: /path/to/ref.fasta"
+                      placeholder="e.g.: /path/to/ref.fasta"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">相似性算法</label>
+                    <label className="block text-xs text-slate-500 mb-1">Similarity Algorithm</label>
                     <select
                       className="w-full p-2 border rounded text-sm"
                       value={networkSimilarityMethod}
@@ -3639,7 +3639,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       checked={networkIncludeReferenceLinks}
                       onChange={(e) => setNetworkIncludeReferenceLinks(e.target.checked)}
                     />
-                    参考序列与候选序列计算相似性连边
+                    Compute similarity edges between reference and candidate sequences
                   </label>
                   <div className="md:col-span-2 flex flex-wrap gap-2">
                     <button
@@ -3647,13 +3647,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       disabled={job.loading}
                       onClick={() => void confirmAndRunComputeSimilarity()}
                     >
-                      计算序列相似性
+                      Compute Sequence Similarity
                     </button>
                     <button
                       className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-4 py-2 rounded-lg text-sm border border-slate-300"
                       disabled={job.loading}
                       onClick={() =>
-                        runAction('读取网络数据', async () => {
+                        runAction('Load network data', async () => {
                           const data = await loadNetworkData();
                           setNetworkStats({
                             nodes: Number.isFinite(Number(data.nodeTotal)) ? Number(data.nodeTotal) : data.nodes.length,
@@ -3662,7 +3662,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         })
                       }
                     >
-                      读取 nodes.csv / edges_similarity.csv
+                      Load nodes.csv / edges_similarity.csv
                     </button>
                   </div>
                 </div>
@@ -3674,7 +3674,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                     <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                       <span>
-                        🧪 序列比对进行中
+                        🧪 Sequence Alignment In Progress
                         {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                         ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                       </span>
@@ -3694,7 +3694,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     {runtimeMeta?.networkAlignStages?.['reference-links'] && (
                       <div>
                         <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                          <span>参考序列 vs 候选序列</span>
+                          <span>Reference sequences vs Candidate sequences</span>
                           <span>
                             {runtimeMeta.networkAlignStages['reference-links'].current} / {runtimeMeta.networkAlignStages['reference-links'].total}
                           </span>
@@ -3713,7 +3713,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     {runtimeMeta?.networkAlignStages?.['candidate-pairwise'] && (
                       <div>
                         <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                          <span>候选序列两两比对</span>
+                          <span>Candidate sequences pairwise alignment</span>
                           <span>
                             {runtimeMeta.networkAlignStages['candidate-pairwise'].current} / {runtimeMeta.networkAlignStages['candidate-pairwise'].total}
                           </span>
@@ -3731,7 +3731,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   </div>
                 )}
                 <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm">
-                  <div className="text-slate-600">当前网络规模：</div>
+                  <div className="text-slate-600">Current network size:</div>
                   <div className="mt-2 flex gap-6">
                     <div>Nodes: <span className="font-semibold">{networkStats.nodes}</span></div>
                     <div>Edges: <span className="font-semibold">{networkStats.edges}</span></div>
@@ -3748,7 +3748,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 {/* ── Browser Graph (Primary) ── */}
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span className="text-base font-semibold text-slate-800">网络可视化</span>
+                    <span className="text-base font-semibold text-slate-800">Network Visualization</span>
                     <div className="flex items-center gap-2 flex-wrap">
                       <select className="p-1.5 border rounded text-xs" value={browserGraphMode} onChange={(e) => setBrowserGraphMode(e.target.value as any)}>
                         <option value="cytoscape">Cytoscape.js (Organic CoSE)</option>
@@ -3772,7 +3772,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         className="w-20 p-1.5 border rounded text-xs"
                         value={browserGraphThreshold}
                         onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
-                        title="浏览器图加载阈值"
+                        title="Browser Graph Load Threshold"
                       />
                       <button
                         className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded text-xs"
@@ -3788,7 +3788,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           setBrowserGraphVisible(true);
                         }}
                       >
-                        加载网络
+                        Load Network
                       </button>
                     </div>
                   </div>
@@ -3796,11 +3796,11 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     Nodes: <b className="text-slate-700">{networkStats.nodes}</b> · Edges: <b className="text-slate-700">{networkStats.edges}</b>
                   </div>
                   <div className="text-xs text-slate-500">
-                    上面的数字是加载阈值。点“加载网络”后，图内滑块只能在本次已加载边集的范围内调整。
+                    The number above is the load threshold. After clicking “Load Network”, the in-graph slider can only be adjusted within the range of the currently loaded edge set.
                   </div>
                   {browserGraphThresholdAdjusted && (
                     <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      浏览器图已自动将加载阈值提高到 {browserGraphLoadedThreshold}，以避免边数超过 {browserGraphMaxEdges} 导致页面卡死或白屏。
+                      The browser graph automatically raised the load threshold to {browserGraphLoadedThreshold} to avoid the edge count exceeding {browserGraphMaxEdges}, which could freeze or blank the page.
                     </div>
                   )}
                   {browserGraphVisible && (
@@ -3826,7 +3826,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                     <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                       <span>
-                        🧪 序列比对进行中
+                        🧪 Sequence Alignment In Progress
                         {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                         ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                       </span>
@@ -3846,7 +3846,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     {runtimeMeta?.networkAlignStages?.['reference-links'] && (
                       <div>
                         <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                          <span>参考连边比对</span>
+                          <span>Reference edge alignment</span>
                           <span>
                             {runtimeMeta.networkAlignStages['reference-links'].current} / {runtimeMeta.networkAlignStages['reference-links'].total}
                           </span>
@@ -3865,7 +3865,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     {runtimeMeta?.networkAlignStages?.['candidate-pairwise'] && (
                       <div>
                         <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                          <span>候选两两比对</span>
+                          <span>Candidate pairwise alignment</span>
                           <span>
                             {runtimeMeta.networkAlignStages['candidate-pairwise'].current} / {runtimeMeta.networkAlignStages['candidate-pairwise'].total}
                           </span>
@@ -3889,7 +3889,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 {/* ── Cytoscape Desktop Push (Secondary) ── */}
                 <details className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                   <summary className="px-4 py-3 cursor-pointer select-none text-sm font-medium text-slate-600 hover:bg-slate-50">
-                    推送到 Cytoscape Desktop（可选）
+                    Push to Cytoscape Desktop (optional)
                   </summary>
                   <div className="px-4 pb-4 pt-2 grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-slate-100">
                     <div>
@@ -3909,7 +3909,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <input className="w-full p-2 border rounded text-sm" value={cytoLayout} onChange={(e) => setCytoLayout(e.target.value)} placeholder="force-directed" />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">着色分类列</label>
+                      <label className="block text-xs text-slate-500 mb-1">Coloring Category Column</label>
                       <select className="w-full p-2 border rounded text-sm" value={cytoCategoryColumn} onChange={(e) => setCytoCategoryColumn(e.target.value)}>
                         <option value="phylum">Phylum</option>
                         <option value="class">Class</option>
@@ -3919,34 +3919,34 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">Pairwise 阈值（%）</label>
+                      <label className="block text-xs text-slate-500 mb-1">Pairwise Threshold (%)</label>
                       <input type="number" min={0} max={100} step={1} className="w-full p-2 border rounded text-sm" value={networkPairwiseThresholdPct} onChange={(e) => setNetworkPairwiseThresholdPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
                     </div>
                     <label className="flex items-center gap-2 text-xs text-slate-600">
                       <input type="checkbox" checked={cytoApplyStyle} onChange={(e) => setCytoApplyStyle(e.target.checked)} />
-                      自动应用样式（按所选分类列上色，按 weight 映射边宽）
+                      Auto-apply style (color by selected category column, map edge width by weight)
                     </label>
                     <div className="md:col-span-2 flex flex-wrap gap-2">
                       <button
                         className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg text-sm"
                         disabled={job.loading}
-                        onClick={() => runAction(`按阈值推送到 Cytoscape（${networkPairwiseThresholdPct}%）`, () => runPushToCytoscape(), 'network-push')}
+                        onClick={() => runAction(`Push to Cytoscape by threshold (${networkPairwiseThresholdPct}%)`, () => runPushToCytoscape(), 'network-push')}
                       >
-                        按阈值推送到 Cytoscape
+                        Push to Cytoscape by Threshold
                       </button>
                     </div>
                     {cytoPushInfo && (
                       <div className="md:col-span-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-900">
-                        已推送到 {cytoPushInfo.baseUrl}，networkSUID: <b>{String(cytoPushInfo.networkSuid ?? 'unknown')}</b>；
-                        节点 {cytoPushInfo.pushedNodes}，边 {cytoPushInfo.pushedEdges}。
-                        {cytoPushInfo.generated ? '（本次自动生成了网络 CSV）' : ''}
-                        {cytoPushInfo.styleApplied ? ` 样式已应用：${cytoPushInfo.styleName}${cytoPushInfo.categoryColumn ? `（分组列 ${cytoPushInfo.categoryColumn}）` : ''}` : ''}
+                        Pushed to {cytoPushInfo.baseUrl}, networkSUID: <b>{String(cytoPushInfo.networkSuid ?? 'unknown')}</b>; 
+                        Nodes {cytoPushInfo.pushedNodes}, Edges {cytoPushInfo.pushedEdges}.
+                        {cytoPushInfo.generated ? ' (network CSV was auto-generated this time)' : ''}
+                        {cytoPushInfo.styleApplied ? ` Style applied: ${cytoPushInfo.styleName}${cytoPushInfo.categoryColumn ? ` (grouping column ${cytoPushInfo.categoryColumn})` : ''}` : ''}
                         {cytoPushInfo.styleApplied && cytoPushInfo.categoryColumn && cytoPushInfo.categoryColumn !== cytoCategoryColumn
-                          ? <span className="text-amber-700 font-medium"> ⚠ 所选「{cytoCategoryColumn}」列无数据，已回退到「{cytoPushInfo.categoryColumn}」</span>
+                          ? <span className="text-amber-700 font-medium"> ⚠ Selected column “{cytoCategoryColumn}” has no data, fell back to “{cytoPushInfo.categoryColumn}”</span>
                           : null}
-                        {!cytoPushInfo.styleApplied && cytoPushInfo.styleError ? ` 样式未应用：${cytoPushInfo.styleError}` : ''}
-                        {cytoPushInfo.layoutApplied ? ` 布局已应用：${cytoPushInfo.layout}` : ''}
-                        {!cytoPushInfo.layoutApplied && cytoPushInfo.layoutError ? ` 布局未应用：${cytoPushInfo.layoutError}` : ''}
+                        {!cytoPushInfo.styleApplied && cytoPushInfo.styleError ? ` Style not applied: ${cytoPushInfo.styleError}` : ''}
+                        {cytoPushInfo.layoutApplied ? ` Layout applied: ${cytoPushInfo.layout}` : ''}
+                        {!cytoPushInfo.layoutApplied && cytoPushInfo.layoutError ? ` Layout not applied: ${cytoPushInfo.layoutError}` : ''}
                       </div>
                     )}
                   </div>
@@ -3962,38 +3962,38 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <h1 className="text-2xl font-semibold">Candidate Recommendation</h1>
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                   <p className="text-sm text-slate-600">
-                    综合相似度、分类学多样性和 cluster 大小，对候选序列进行多维评分排序。孤立点（cluster 仅含 1 条序列）默认排除。
+                    Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, and cluster size. Isolated points (clusters containing only 1 sequence) are excluded by default.
                   </p>
                   <details className="text-xs text-slate-400">
-                    <summary className="cursor-pointer select-none">参数说明</summary>
+                    <summary className="cursor-pointer select-none">Parameter Description</summary>
                     <ul className="mt-1 ml-4 list-disc space-y-0.5">
-                      <li><b>最小 Cluster 大小</b>：cluster 中序列数量必须 ≥ 此值，否则排除。设为 2 即过滤孤立点。</li>
-                      <li><b>Avg Ref Similarity 权重</b>：候选与所有参考序列平均相似度的评分权重。</li>
-                      <li><b>Max Ref Similarity 权重</b>：候选与最相似参考序列之间相似度的评分权重。</li>
-                      <li><b>Cluster Size 权重</b>：候选所在 cluster 越大得分越高，归一化后乘以此权重。</li>
-                      <li><b>Taxonomy Diversity 权重</b>：候选所在 cluster 的分类学多样性（纲的数量）评分权重。</li>
-                      <li><b>随机性 (Temperature)</b>：0 = 确定性选取（同参数同结果），&gt;0 时在每个 cluster 内按温度采样，值越大结果越随机。</li>
+                      <li><b>Minimum Cluster Size</b>: the number of sequences in a cluster must be ≥ this value, otherwise excluded. Set to 2 to filter out isolated points.</li>
+                      <li><b>Avg Ref Similarity Weight</b>: scoring weight for the candidate's average similarity to all reference sequences.</li>
+                      <li><b>Max Ref Similarity Weight</b>: scoring weight for the candidate's similarity to its most similar reference sequence.</li>
+                      <li><b>Cluster Size Weight</b>: the larger the candidate's cluster, the higher the score; normalized and multiplied by this weight.</li>
+                      <li><b>Taxonomy Diversity Weight</b>: scoring weight for the taxonomic diversity (number of classes) within the candidate's cluster.</li>
+                      <li><b>Randomness (Temperature)</b>: 0 = deterministic selection (same parameters give the same result); when &gt;0, sampling within each cluster uses temperature — the larger the value, the more random the result.</li>
                     </ul>
                   </details>
                   <details className="text-xs text-slate-400 mt-1">
-                    <summary className="cursor-pointer select-none">评分算法说明</summary>
+                    <summary className="cursor-pointer select-none">Scoring Algorithm Description</summary>
                     <div className="mt-1 ml-2 space-y-1">
-                      <p><b>评分公式</b>：Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
+                      <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
                       <ul className="ml-4 list-disc space-y-0.5">
-                        <li><b>avgRefSim</b>：候选与所有有边连接的参考序列的平均相似度 ÷ 100，范围 [0, 1]</li>
-                        <li><b>maxRefSim</b>：候选与最相似参考序列的相似度 ÷ 100，范围 [0, 1]</li>
-                        <li><b>clusterSizeNorm</b>：候选所在 cluster 大小 ÷ 最大 cluster 大小，范围 [0, 1]</li>
-                        <li><b>taxDiv</b>：候选所在 cluster 中 class 种类数 ÷ 最大 class 种类数，范围 [0, 1]</li>
+                        <li><b>avgRefSim</b>: average similarity of the candidate to all edge-connected reference sequences ÷ 100, range [0, 1]</li>
+                        <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
+                        <li><b>clusterSizeNorm</b>: size of the candidate's cluster ÷ the largest cluster size, range [0, 1]</li>
+                        <li><b>taxDiv</b>: number of distinct classes in the candidate's cluster ÷ the maximum number of classes, range [0, 1]</li>
                       </ul>
-                      <p><b>Cluster 来源</b>：cd-hit 按序列相似度阈值聚类的结果。同一 cluster 内的序列彼此高度相似。</p>
-                      <p><b>相似度数据来源</b>：edges_similarity.csv 中候选与参考节点（is_reference=1）之间的边。</p>
-                      <p><b>多样性选取</b>：支持两种策略——「按比例分配」按 cluster 大小分配名额（大 cluster 取更多），「均匀轮询」各 cluster 均匀轮流选取。</p>
-                      <p><b>随机性</b>：Temperature=0 时完全确定，&gt;0 时在 cluster 轮询中使用 softmax 温度采样：P(i) = exp(score_i/T) / Σexp(score_j/T)，T 越大越随机。</p>
+                      <p><b>Cluster Source</b>: result of cd-hit clustering by sequence similarity threshold. Sequences within the same cluster are highly similar to each other.</p>
+                      <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>
+                      <p><b>Diversity Selection</b>: supports two strategies — “Proportional” allocates slots by cluster size (larger clusters get more), “Round-robin” selects evenly and alternately across clusters.</p>
+                      <p><b>Randomness</b>: fully deterministic when Temperature=0; when &gt;0, softmax temperature sampling is used during cluster round-robin: P(i) = exp(score_i/T) / Σexp(score_j/T) — the larger T, the more random.</p>
                     </div>
                   </details>
                   <div className="grid grid-cols-5 gap-3 text-sm">
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">最小 Cluster 大小</label>
+                      <label className="block text-xs text-slate-500 mb-1">Minimum Cluster Size</label>
                       <input type="number" min={1} max={100} step={1} className="w-full p-2 border rounded text-sm"
                         value={recommendMinClusterSize}
                         onChange={(e) => setRecommendMinClusterSize(Math.max(1, Number(e.target.value) || 2))} />
@@ -4005,23 +4005,23 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         onChange={(e) => setRecommendTopN(Math.max(1, Math.min(5000, Number(e.target.value) || 50)))} />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">选取策略</label>
+                      <label className="block text-xs text-slate-500 mb-1">Selection Strategy</label>
                       <select className="w-full p-2 border rounded text-sm"
                         value={recommendDiversityMode}
                         onChange={(e) => setRecommendDiversityMode(e.target.value as 'proportional' | 'round-robin')}>
-                        <option value="proportional">按比例分配</option>
-                        <option value="round-robin">均匀轮询</option>
+                        <option value="proportional">Proportional</option>
+                        <option value="round-robin">Round-robin</option>
                       </select>
                     </div>
                     <div>
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">阈值: {recommendNetworkConnectivityThreshold}%</label>
+                      <label className="block text-xs text-slate-500 mb-1">Threshold: {recommendNetworkConnectivityThreshold}%</label>
                       <input type="range" min={0} max={100} step={1} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
                         style={{ touchAction: 'none' }}
                         value={recommendNetworkConnectivityThreshold}
                         onChange={(e) => setRecommendNetworkConnectivityThreshold(Number(e.target.value))} />
                     </div>
-                      <label className="block text-xs text-slate-500 mb-1">随机性 (Temperature): {recommendTemperature.toFixed(2)}</label>
+                      <label className="block text-xs text-slate-500 mb-1">Randomness (Temperature): {recommendTemperature.toFixed(2)}</label>
                       <input type="range" min={0} max={1} step={0.05} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
                         style={{ touchAction: 'none' }}
                         value={recommendTemperature}
@@ -4032,18 +4032,18 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="flex items-center gap-3">
                     <button className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm"
                       disabled={job.loading}
-                      onClick={() => runAction('候选推荐评分', runRecommendation, 'recommendation')}>
-                      计算推荐
+                      onClick={() => runAction('Candidate recommendation scoring', runRecommendation, 'recommendation')}>
+                      Compute Recommendations
                     </button>
                   </div>
                 </div>
                 {recommendMeta && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
-                    <div>候选 {recommendMeta.totalCandidates} 条，参考 {recommendMeta.totalReferences} 条，展示前 {recommendResults.length} 条</div>
+                    <div>Candidates {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, showing top {recommendResults.length}</div>
                     {(recommendMeta.filteredByClusterSize > 0 || recommendMeta.filteredBySimilarity > 0) && (
                       <div className="text-slate-500">
-                        已过滤：cluster 大小不足 {recommendMeta.filteredByClusterSize} 条
-                        {recommendMeta.filteredBySimilarity > 0 && `，相似度不足 ${recommendMeta.filteredBySimilarity} 条`}
+                        Filtered: {recommendMeta.filteredByClusterSize} below minimum cluster size
+                        {recommendMeta.filteredBySimilarity > 0 && `, ${recommendMeta.filteredBySimilarity} below similarity threshold`}
                       </div>
                     )}
                   </div>
@@ -4103,13 +4103,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           const a = document.createElement('a');
                           a.href = url; a.download = `recommended_candidates_${recommendResults.length}.fasta`;
                           a.click(); URL.revokeObjectURL(url);
-                        } catch (err: any) { alert('导出失败: ' + (err?.message || err)); }
+                        } catch (err: any) { alert('Export failed: ' + (err?.message || err)); }
                       }}>
-                      导出 FASTA（{recommendResults.length} 条）
+                      Export FASTA ({recommendResults.length})
                     </button>
                     <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                       onClick={highlightRecommendationsInNetwork}>
-                      在网络中高亮
+                      Highlight in Network
                     </button>
                   </div>
                 )}
@@ -4124,25 +4124,25 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       {similarityConfirmState.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
           <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl space-y-4">
-            <div className="text-base font-semibold text-slate-900">检测到已有相似性结果</div>
+            <div className="text-base font-semibold text-slate-900">Existing Similarity Results Detected</div>
             <div className="text-sm text-slate-600 leading-6">
-              当前任务已存在相似性文件：
+              This task already has similarity files:
               <div>nodes: {similarityConfirmState.nodeTotal}</div>
               <div>edges: {similarityConfirmState.edgeTotal}</div>
-              <div className="mt-2">是否重新计算并覆盖这些结果？</div>
+              <div className="mt-2">Recompute and overwrite these results?</div>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button
                 className="px-3 py-1.5 rounded border border-slate-300 text-slate-700 text-sm hover:bg-slate-50"
                 onClick={cancelSimilarityRecompute}
               >
-                取消
+                Cancel
               </button>
               <button
                 className="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-700"
                 onClick={startSimilarityRecomputeFromModal}
               >
-                重新计算
+                Recompute
               </button>
             </div>
           </div>
@@ -4173,8 +4173,8 @@ function BlastPipelineProgressPanel({
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-slate-700">Pipeline 进度（BLAST）</div>
-        <div className="text-xs text-slate-500">{doneCount}/{total} 已完成</div>
+        <div className="text-sm font-medium text-slate-700">Pipeline Progress (BLAST)</div>
+        <div className="text-xs text-slate-500">{doneCount}/{total} completed</div>
       </div>
       <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
         <div
@@ -4208,10 +4208,10 @@ function BlastPipelineProgressPanel({
                 <span className="font-medium text-slate-700">{step.title}</span>
               </div>
               <div className="mt-1 text-[11px] text-slate-500">
-                {status === 'success' && '完成'}
-                {status === 'error' && '失败'}
-                {status === 'running' && '运行中...'}
-                {status === 'idle' && '未开始'}
+                {status === 'success' && 'Done'}
+                {status === 'error' && 'Failed'}
+                {status === 'running' && 'Running...'}
+                {status === 'idle' && 'Not started'}
               </div>
             </div>
           );
@@ -4451,7 +4451,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setRuntimeLogs([]);
     setStepState(initialBlastStepState);
     setLastCompletedStep(null);
-    setJob({ loading: true, message: `加载任务进度: ${selectedTaskId}`, error: '' });
+    setJob({ loading: true, message: `Loading task progress: ${selectedTaskId}`, error: '' });
     setReferenceFastaPath('');
     setCandidateFasta('');
     setClusteringRunInfo(null);
@@ -4590,12 +4590,12 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           });
         }
 
-        setJob({ loading: false, message: `已载入任务进度: ${selectedTaskId}`, error: '' });
+        setJob({ loading: false, message: `Task progress loaded: ${selectedTaskId}`, error: '' });
         if (staleRecommendCache) {
-          setCompletionToast('检测到旧版推荐缓存已失效，请重新计算推荐');
+          setCompletionToast('Detected outdated recommendation cache, please recompute recommendations');
         }
       } catch (err) {
-        if (!cancelled) setJob({ loading: false, message: '', error: `载入任务进度失败: ${String(err)}` });
+        if (!cancelled) setJob({ loading: false, message: '', error: `Failed to load task progress: ${String(err)}` });
       } finally {
         if (!cancelled) hydratingStateRef.current = false;
       }
@@ -4733,7 +4733,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       for (let attempt = 0; attempt <= totalRetries; attempt++) {
         attemptsUsed = attempt + 1;
         try {
-          if (attempt > 0) setJob({ loading: true, message: `${label} 重试中 (${attempt}/${totalRetries})`, error: '' });
+          if (attempt > 0) setJob({ loading: true, message: `${label} retrying (${attempt}/${totalRetries})`, error: '' });
           await fn();
           lastError = null;
           break;
@@ -4747,14 +4747,14 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         const elapsed = Date.now() - started;
         setMetrics((prev) => ({ ...prev, [step]: { ...prev[step], runs: prev[step].runs + 1, success: prev[step].success + 1, totalMs: prev[step].totalMs + elapsed, retries: prev[step].retries + Math.max(0, attemptsUsed - 1), lastMs: elapsed, lastAttempts: attemptsUsed } }));
       }
-      setJob({ loading: false, message: `${label} 完成`, error: '' });
+      setJob({ loading: false, message: `${label} completed`, error: '' });
       if (step) {
         setStepState((prev) => ({ ...prev, [step]: 'success' }));
         setActiveStep(null);
         setLastCompletedStep(step);
       }
       const stepTitle = step ? (blastPipelineSteps.find((x) => x.key === step)?.title || label) : label;
-      setCompletionToast(customToast || `${stepTitle} 完成`);
+      setCompletionToast(customToast || `${stepTitle} Done`);
       return true;
     } catch (err) {
       if (step) {
@@ -4770,7 +4770,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   // ---- step functions ----
   async function runReferenceStep() {
     const list = accessions.split(/[,，;\n]+/).map((x) => x.trim()).filter(Boolean);
-    if (!list.length) throw new Error('请输入至少一个 accession');
+    if (!list.length) throw new Error('Please enter at least one accession');
     const data = await fetchReferences(list, entrezEmail);
     setReferencePreview(data.preview?.rows || []);
     setReferencePage(1);
@@ -4790,7 +4790,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     if (referenceUploadInputRef.current) {
       referenceUploadInputRef.current.value = '';
     }
-    setReferenceImportNotice(`已从文件 ${uploadFile.name} 导入 ${data.rows} 条参考序列`);
+    setReferenceImportNotice(`Imported ${data.rows} reference sequences from file ${uploadFile.name}`);
   }
 
   async function runRefPairwiseIdentity() {
@@ -4935,9 +4935,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         setBrowserGraphMaxEdges(data.maxEdges);
         setBrowserGraphVisible(true);
       }
-      setCompletionToast(`已在网络中高亮 ${recommendResults.length} 条推荐序列，请返回 Similarity Network 查看`);
+      setCompletionToast(`Highlighted ${recommendResults.length} recommended sequences in the network; return to Similarity Network to view`);
     } catch (err: any) {
-      alert('高亮失败: ' + (err?.message || err));
+      alert('Highlight failed: ' + (err?.message || err));
     }
   }
 
@@ -4957,7 +4957,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   }
 
   async function deleteSelectedTask() {
-    if (selectedTaskId === 'blast-default') throw new Error('默认任务不可删除');
+    if (selectedTaskId === 'blast-default') throw new Error('The default task cannot be deleted');
     await deleteTask(selectedTaskId);
     await refreshTasks();
   }
@@ -4990,7 +4990,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     <>
       {showRetry && (
         <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
-          <div className="text-sm font-medium text-slate-700">重试策略</div>
+          <div className="text-sm font-medium text-slate-700">Retry Strategy</div>
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3 items-end">
             {blastPipelineSteps.map((s) => (
               <div key={s.key}>
@@ -5001,7 +5001,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               </div>
             ))}
             <div>
-              <label className="block text-xs text-slate-500 mb-1">重试间隔(ms)</label>
+              <label className="block text-xs text-slate-500 mb-1">Retry Interval (ms)</label>
               <input type="number" min={100} step={100} value={retryIntervalMs}
                 onChange={(e) => setRetryIntervalMs(Math.max(100, Number(e.target.value)))}
                 className="w-full p-2 bg-slate-50 border border-slate-300 rounded text-sm" />
@@ -5038,7 +5038,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
-          <button onClick={onBack} className="flex items-center gap-2 text-emerald-600 hover:text-emerald-800 transition-colors" title="返回主页">
+          <button onClick={onBack} className="flex items-center gap-2 text-emerald-600 hover:text-emerald-800 transition-colors" title="Back to home">
             <Activity className="w-6 h-6" />
             <span className="font-semibold text-lg tracking-tight text-slate-900">EnzyMiner</span>
           </button>
@@ -5066,31 +5066,31 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
       {/* Main content */}
       <main className="flex-1 flex flex-col h-full overflow-hidden">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shadow-sm z-10">
-          <div className="flex items-center text-sm text-slate-500">
+        <header className="min-h-16 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-8 py-3 shadow-sm z-10">
+          <div className="flex items-center text-sm text-slate-500 shrink-0">
             <span>BLAST Pipeline</span>
             <ChevronRight className="w-4 h-4 mx-1" />
             <span className="font-medium text-slate-900 capitalize">{currentView.replace(/-/g, ' ')}</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">任务</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-500">Task</span>
               <select className="p-1.5 border border-slate-300 rounded text-xs bg-white" value={selectedTaskId}
                 onChange={(e) => setSelectedTaskId(e.target.value)} disabled={job.loading}>
                 {taskList.map((t) => (<option key={t.id} value={t.id}>{t.id}</option>))}
               </select>
               <input className="p-1.5 border border-slate-300 rounded text-xs w-32" value={newTaskId}
-                onChange={(e) => setNewTaskId(e.target.value)} placeholder="新任务ID(可选)" disabled={job.loading} />
+                onChange={(e) => setNewTaskId(e.target.value)} placeholder="New task ID (optional)" disabled={job.loading} />
               <button className="px-2 py-1.5 rounded bg-slate-900 text-white text-xs hover:bg-slate-800 disabled:opacity-50"
-                onClick={() => runAction('新建任务', createTaskAndSwitch)} disabled={job.loading}>新建</button>
+                onClick={() => runAction('Create task', createTaskAndSwitch)} disabled={job.loading}>New</button>
               <button className="px-2 py-1.5 rounded bg-blue-600 text-white text-xs hover:bg-blue-700 disabled:opacity-50"
-                onClick={() => runAction('复制任务', duplicateSelectedTask)} disabled={job.loading}>复制</button>
+                onClick={() => runAction('Duplicate task', duplicateSelectedTask)} disabled={job.loading}>Copy</button>
               <button className="px-2 py-1.5 rounded bg-red-600 text-white text-xs hover:bg-red-700 disabled:opacity-50"
-                onClick={() => runAction('删除任务', deleteSelectedTask)} disabled={job.loading || selectedTaskId === 'blast-default'}>删除</button>
+                onClick={() => runAction('Delete task', deleteSelectedTask)} disabled={job.loading || selectedTaskId === 'blast-default'}>Delete</button>
 
             </div>
             <button className="p-2 rounded-lg hover:bg-slate-100" onClick={() => setDarkMode((v) => !v)}
-              title={darkMode ? '浅色模式' : '深色模式'}>
+              title={darkMode ? 'Light Mode' : 'Dark Mode'}>
               {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
           </div>
@@ -5117,11 +5117,11 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           {/* ==== Dashboard ==== */}
           {currentView === 'dashboard' && (
             <div className="space-y-4">
-              <h1 className="text-2xl font-semibold">BLAST 酶挖掘工作流</h1>
-              <p className="text-sm text-slate-500">适用于参考序列较少（1-5条）的情况，基于 BLAST pairwise 搜索蛋白质数据库。</p>
+              <h1 className="text-2xl font-semibold">BLAST Enzyme Mining Workflow</h1>
+              <p className="text-sm text-slate-500">Suitable for cases with few reference sequences (1-5), using BLAST pairwise search against protein databases.</p>
               <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                onClick={() => runAction('检查后端状态', async () => { const data = await healthCheck(); setHealth(data); })}>
-                检查后端健康状态
+                onClick={() => runAction('Check backend status', async () => { const data = await healthCheck(); setHealth(data); })}>
+                Check backend health
               </button>
               {health && (
                 <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm space-y-2">
@@ -5147,18 +5147,18 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               <h1 className="text-2xl font-semibold">1. Reference Input & Download</h1>
               <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-5">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="text-sm font-semibold text-slate-700">两种加载参考序列的方法</div>
+                  <div className="text-sm font-semibold text-slate-700">Two ways to load reference sequences</div>
                   <div className="mt-1 text-sm text-slate-500">
-                    任选一种即可生成当前任务的 ref.csv 和 ref.fasta。只有 accession 时用方式 A；已有 FASTA 文件时直接用方式 B。
+                    Pick either one to generate this task's ref.csv and ref.fasta. Use Method A when you only have accessions; use Method B when you already have a FASTA file.
                   </div>
                 </div>
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 space-y-3">
                     <div className="flex items-center gap-3">
-                      <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">方式 A</span>
+                      <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">Method A</span>
                       <div>
-                        <div className="text-sm font-semibold text-slate-800">按 accession 在线拉取</div>
-                        <div className="text-xs text-slate-500">适合只有 accession、protein_id 或 UniProt ID 的情况</div>
+                        <div className="text-sm font-semibold text-slate-800">Fetch online by accession</div>
+                        <div className="text-xs text-slate-500">Suitable when you only have accession, protein_id, or UniProt ID</div>
                       </div>
                     </div>
                     <div>
@@ -5168,26 +5168,26 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     <div>
                       <label className="mb-1 block text-sm font-medium text-slate-700">Accession List</label>
                       <p className="mb-2 text-xs text-slate-500 leading-relaxed">
-                        支持 <strong>NCBI Protein</strong>、<strong>NCBI Nucleotide</strong>、<strong>UniProt</strong> 混合输入，系统会自动识别来源并拉取参考序列。
+                        Supports mixed input of <strong>NCBI Protein</strong>, <strong>NCBI Nucleotide</strong>, and <strong>UniProt</strong>; the system automatically detects the source and fetches reference sequences.
                       </p>
                       <textarea className="h-56 w-full rounded-lg border border-slate-200 bg-white p-3 font-mono text-xs placeholder:text-slate-400"
                         value={accessions} onChange={(e) => setAccessions(e.target.value)} placeholder={accessionPlaceholder} />
                     </div>
                     <button className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700" disabled={job.loading}
-                      onClick={() => runAction('下载参考序列', runReferenceStep, 'reference')}>
-                      在线拉取并生成 ref.csv / ref.fasta
+                      onClick={() => runAction('Download reference sequences', runReferenceStep, 'reference')}>
+                      Fetch online and generate ref.csv / ref.fasta
                     </button>
                   </section>
                   <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 space-y-3">
                     <div className="flex items-center gap-3">
-                      <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white">方式 B</span>
+                      <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white">Method B</span>
                       <div>
-                        <div className="text-sm font-semibold text-slate-800">上传本地 FASTA 文件</div>
-                        <div className="text-xs text-slate-500">适合你已经有参考序列文件，希望直接进入后续 BLAST 流程</div>
+                        <div className="text-sm font-semibold text-slate-800">Upload a local FASTA file</div>
+                        <div className="text-xs text-slate-500">Suitable when you already have a reference sequence file and want to proceed directly to the BLAST workflow</div>
                       </div>
                     </div>
                     <div className="rounded-xl border border-sky-200 bg-white/80 px-3 py-2 text-xs text-slate-500">
-                      支持 .fasta、.fa、.faa、.fas、.fna、.txt，单文件限制 20 MB。导入后会直接覆盖当前任务的参考集。
+                      Supports .fasta, .fa, .faa, .fas, .fna, .txt; single file limit 20 MB. Importing will directly overwrite the current task's reference set.
                     </div>
                     <input
                       ref={referenceUploadInputRef}
@@ -5198,15 +5198,15 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     />
                     <div className="rounded-xl border border-dashed border-sky-300 bg-white/80 px-3 py-3 text-sm text-slate-600">
                       {referenceUploadFile
-                        ? `已选择文件：${referenceUploadFile.name} · ${formatFileSize(referenceUploadFile.size)}`
-                        : '尚未选择文件。请选择一个本地 FASTA 文件后再导入。'}
+                        ? `Selected file: ${referenceUploadFile.name} · ${formatFileSize(referenceUploadFile.size)}`
+                        : 'No file selected yet. Please choose a local FASTA file before importing.'}
                     </div>
                     <button
                       className="w-full rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
                       disabled={job.loading || !referenceUploadFile}
-                      onClick={() => runAction('上传参考 FASTA', runReferenceUploadStep, 'reference')}
+                      onClick={() => runAction('Upload reference FASTA', runReferenceUploadStep, 'reference')}
                     >
-                      上传导入并生成 ref.csv / ref.fasta
+                      Upload, import, and generate ref.csv / ref.fasta
                     </button>
                   </section>
                 </div>
@@ -5221,10 +5221,10 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               {referencePreview.length > 0 && (
                 <div className="space-y-3">
                   <button className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                    onClick={() => runAction('计算 Pairwise Identity', runRefPairwiseIdentity, 'reference')}>
-                    计算参考序列 Pairwise Identity
+                    onClick={() => runAction('Compute Pairwise Identity', runRefPairwiseIdentity, 'reference')}>
+                    Compute reference sequence pairwise identity
                   </button>
-                  <IdentityHeatmap ids={refIdentityIds} matrix={refIdentityMatrix} title="参考序列 Pairwise Identity 热图" />
+                  <IdentityHeatmap ids={refIdentityIds} matrix={refIdentityMatrix} title="Reference Sequence Pairwise Identity Heatmap" />
                 </div>
               )}
               {renderTailPanels('h-28')}
@@ -5237,26 +5237,26 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               <h1 className="text-2xl font-semibold">2. BLAST DB Setup</h1>
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">数据库来源</label>
+                  <label className="block text-sm font-medium mb-1">Database Source</label>
                   <select className="w-full p-2 border rounded text-sm" value={blastDbSource}
                     onChange={(e) => setBlastDbSource(e.target.value as BlastDbSource)}>
-                    <option value="local">本地 FASTA → makeblastdb</option>
-                    <option value="ncbi-remote">NCBI 远程数据库</option>
+                    <option value="local">Local FASTA → makeblastdb</option>
+                    <option value="ncbi-remote">NCBI Remote Database</option>
                   </select>
                 </div>
 
                 {blastDbSource === 'local' && (
                   <div>
-                    <label className="block text-sm font-medium mb-1">目标蛋白质组 FASTA 路径</label>
+                    <label className="block text-sm font-medium mb-1">Target Proteome FASTA Path</label>
                     <input className="w-full p-2 border rounded text-sm font-mono" value={blastTargetFasta}
-                      onChange={(e) => setBlastTargetFasta(e.target.value)} placeholder="例如: /path/to/proteomes.fasta" />
-                    <p className="text-xs text-slate-500 mt-1">本地蛋白质序列集合，将用 makeblastdb 构建为 BLAST 数据库</p>
+                      onChange={(e) => setBlastTargetFasta(e.target.value)} placeholder="e.g.: /path/to/proteomes.fasta" />
+                    <p className="text-xs text-slate-500 mt-1">Local protein sequence collection, will be built into a BLAST database using makeblastdb</p>
                   </div>
                 )}
 
                 {blastDbSource === 'ncbi-remote' && (
                   <div>
-                    <label className="block text-sm font-medium mb-1">NCBI 数据库</label>
+                    <label className="block text-sm font-medium mb-1">NCBI Database</label>
                     <select className="w-full p-2 border rounded text-sm" value={blastNcbiDb}
                       onChange={(e) => setBlastNcbiDb(e.target.value)}>
                       <option value="nr">nr（Non-redundant protein）</option>
@@ -5264,7 +5264,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <option value="refseq_protein">RefSeq Protein</option>
                       <option value="pdb">PDB</option>
                     </select>
-                    <p className="text-xs text-slate-500 mt-1">使用 blastp -remote 直接搜索 NCBI 远程数据库（较慢但无需本地数据）</p>
+                    <p className="text-xs text-slate-500 mt-1">Uses blastp -remote to search the NCBI remote database directly (slower but requires no local data)</p>
                   </div>
                 )}
 
@@ -5272,11 +5272,11 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="flex items-center gap-3 mb-2">
                     <input type="checkbox" checked={blastDeduplicateRefs} onChange={(e) => setBlastDeduplicateRefs(e.target.checked)}
                       className="accent-emerald-600" />
-                    <label className="text-sm text-slate-700">对参考序列做 CD-HIT 去冗余</label>
+                    <label className="text-sm text-slate-700">Apply CD-HIT deduplication to reference sequences</label>
                   </div>
                   {blastDeduplicateRefs && (
                     <div className="ml-6">
-                      <label className="block text-xs text-slate-500 mb-1">去冗余 Identity 阈值</label>
+                      <label className="block text-xs text-slate-500 mb-1">Dedup Identity Threshold</label>
                       <input type="number" step={0.01} min={0.5} max={1} value={blastDeduplicateIdentity}
                         onChange={(e) => setBlastDeduplicateIdentity(Number(e.target.value))}
                         className="p-2 border rounded text-sm w-32" />
@@ -5285,17 +5285,17 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 </div>
 
                 <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                  onClick={() => runAction('构建 BLAST 数据库', runBlastDbSetup, 'blast-db')}>
-                  {blastDbSource === 'local' ? '构建本地 BLAST 数据库' : '配置远程 NCBI BLAST'}
+                  onClick={() => runAction('Build BLAST database', runBlastDbSetup, 'blast-db')}>
+                  {blastDbSource === 'local' ? 'Build Local BLAST Database' : 'Configure Remote NCBI BLAST'}
                 </button>
               </div>
 
               {blastDbInfo && (
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2 text-sm">
-                  <div className="font-medium text-slate-700">数据库构建结果</div>
-                  <div>数据库来源: <span className="font-mono">{blastDbInfo.dbSource}</span></div>
-                  {blastDbInfo.dbPath && <div>数据库路径: <span className="font-mono text-xs">{blastDbInfo.dbPath}</span></div>}
-                  <div>参考序列: {blastDbInfo.refInputCount} 条 → 去冗余后 {blastDbInfo.refDedupCount} 条</div>
+                  <div className="font-medium text-slate-700">Database Build Result</div>
+                  <div>Database source: <span className="font-mono">{blastDbInfo.dbSource}</span></div>
+                  {blastDbInfo.dbPath && <div>Database path: <span className="font-mono text-xs">{blastDbInfo.dbPath}</span></div>}
+                  <div>Reference sequences: {blastDbInfo.refInputCount} → after dedup {blastDbInfo.refDedupCount}</div>
                 </div>
               )}
 
@@ -5310,20 +5310,20 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
               {/* Search parameters */}
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-4">
-                <div className="text-sm font-medium text-slate-700">搜索参数</div>
+                <div className="text-sm font-medium text-slate-700">Search Parameters</div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">E-value 阈值</label>
+                    <label className="block text-xs text-slate-500 mb-1">E-value Threshold</label>
                     <input type="text" value={blastEvalue} onChange={(e) => setBlastEvalue(Number(e.target.value) || 1e-10)}
                       className="w-full p-2 border rounded text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">最低 Identity (%)</label>
+                    <label className="block text-xs text-slate-500 mb-1">Minimum Identity (%)</label>
                     <input type="number" value={blastIdentityMin} onChange={(e) => setBlastIdentityMin(Number(e.target.value))}
                       className="w-full p-2 border rounded text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">最低 Query Coverage (%)</label>
+                    <label className="block text-xs text-slate-500 mb-1">Minimum Query Coverage (%)</label>
                     <input type="number" value={blastQueryCovMin} onChange={(e) => setBlastQueryCovMin(Number(e.target.value))}
                       className="w-full p-2 border rounded text-sm" />
                   </div>
@@ -5333,17 +5333,17 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       className="w-full p-2 border rounded text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">Subject 最短长度</label>
+                    <label className="block text-xs text-slate-500 mb-1">Subject Minimum Length</label>
                     <input type="number" value={blastSubjectLenMin} onChange={(e) => setBlastSubjectLenMin(Number(e.target.value))}
                       className="w-full p-2 border rounded text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">Subject 最长长度</label>
+                    <label className="block text-xs text-slate-500 mb-1">Subject Maximum Length</label>
                     <input type="number" value={blastSubjectLenMax} onChange={(e) => setBlastSubjectLenMax(Number(e.target.value))}
                       className="w-full p-2 border rounded text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">替换矩阵</label>
+                    <label className="block text-xs text-slate-500 mb-1">Substitution Matrix</label>
                     <select className="w-full p-2 border rounded text-sm" value={blastMatrix}
                       onChange={(e) => setBlastMatrix(e.target.value)}>
                       <option>BLOSUM62</option>
@@ -5354,19 +5354,19 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">合并策略</label>
+                    <label className="block text-xs text-slate-500 mb-1">Merge Strategy</label>
                     <select className="w-full p-2 border rounded text-sm" value={blastMergeStrategy}
                       onChange={(e) => setBlastMergeStrategy(e.target.value as BlastMergeStrategy)}>
-                      <option value="best-evalue">Best E-value（每个 subject 保留最优）</option>
-                      <option value="union">Union（保留所有 query 的最优匹配）</option>
+                      <option value="best-evalue">Best E-value (keep the best match per subject)</option>
+                      <option value="union">Union (keep the best match from every query)</option>
                     </select>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 pt-2">
                   <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                    onClick={() => runAction('运行 BLAST 搜索', runBlastSearchStep, 'blast-search')}>
-                    运行 BLAST 搜索
+                    onClick={() => runAction('Run BLAST search', runBlastSearchStep, 'blast-search')}>
+                    Run BLAST search
                   </button>
                 </div>
               </div>
@@ -5391,10 +5391,10 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-medium text-slate-700">
-                        BLAST 搜索进度
+                        BLAST Search Progress
                       </div>
                       <div className="text-xs text-slate-500">
-                        {bp.current}/{bp.total} 序列
+                        {bp.current}/{bp.total} sequences
                       </div>
                     </div>
 
@@ -5410,7 +5410,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     {bp.queryId && (
                       <div className="flex items-center gap-2 text-sm">
                         <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                        <span className="text-slate-600">正在搜索:</span>
+                        <span className="text-slate-600">Searching:</span>
                         <span className="font-mono text-xs text-slate-800">{bp.queryId}</span>
                         <span className="text-slate-400">({bp.current + 1}/{bp.total})</span>
                       </div>
@@ -5419,14 +5419,14 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     {/* ETA */}
                     {bp.estimatedRemainingMs !== null && bp.estimatedRemainingMs > 0 && (
                       <div className="text-xs text-slate-500">
-                        预计剩余时间: <span className="font-medium text-slate-700">{formatTime(bp.estimatedRemainingMs)}</span>
+                        Estimated time remaining: <span className="font-medium text-slate-700">{formatTime(bp.estimatedRemainingMs)}</span>
                       </div>
                     )}
 
                     {/* Per-query timings table */}
                     {timings.length > 0 && (
                       <div className="border-t pt-2">
-                        <div className="text-xs font-medium text-slate-500 mb-1.5">各序列搜索耗时</div>
+                        <div className="text-xs font-medium text-slate-500 mb-1.5">Per-sequence Search Time</div>
                         <div className="flex flex-wrap gap-2">
                           {timings.map((t: { ms: number }, i: number) => (
                             <div key={i} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 text-xs">
@@ -5449,16 +5449,16 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
               {blastSearchStats && (
                 <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm space-y-1">
-                  <div className="font-medium text-slate-700">搜索结果概览</div>
-                  <div>使用 query 数: {blastSearchStats.queriesUsed}</div>
-                  <div>原始命中数: {blastSearchStats.totalHits}</div>
-                  <div>去重后 unique subjects: {blastSearchStats.uniqueSubjects}</div>
+                  <div className="font-medium text-slate-700">Search Results Overview</div>
+                  <div>Queries used: {blastSearchStats.queriesUsed}</div>
+                  <div>Raw hit count: {blastSearchStats.totalHits}</div>
+                  <div>Unique subjects after dedup: {blastSearchStats.uniqueSubjects}</div>
                 </div>
               )}
 
               {/* Filter section */}
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-4">
-                <div className="text-sm font-medium text-slate-700">过滤参数</div>
+                <div className="text-sm font-medium text-slate-700">Filter Parameters</div>
                 <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">E-value ≤</label>
@@ -5481,37 +5481,37 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       className="w-full p-2 border rounded text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">Subject 最短</label>
+                    <label className="block text-xs text-slate-500 mb-1">Subject Minimum</label>
                     <input type="number" value={blastFilterSubjectLenMin} onChange={(e) => setBlastFilterSubjectLenMin(Number(e.target.value))}
                       className="w-full p-2 border rounded text-sm" />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">Subject 最长</label>
+                    <label className="block text-xs text-slate-500 mb-1">Subject Maximum</label>
                     <input type="number" value={blastFilterSubjectLenMax} onChange={(e) => setBlastFilterSubjectLenMax(Number(e.target.value))}
                       className="w-full p-2 border rounded text-sm" />
                   </div>
                 </div>
                 <button className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                  onClick={() => runAction('过滤 BLAST 命中', runBlastFilterStep, 'blast-search')}>
-                  过滤 hits
+                  onClick={() => runAction('Filter BLAST hits', runBlastFilterStep, 'blast-search')}>
+                  Filter hits
                 </button>
                 {blastFilterStats && (
                   <div className="text-sm text-slate-600">
-                    {blastFilterStats.total} 条 → 保留 {blastFilterStats.kept} 条
+                    {blastFilterStats.total} → kept {blastFilterStats.kept}
                   </div>
                 )}
               </div>
 
               {/* NCBI Taxonomy Annotation */}
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                <div className="text-sm font-medium text-slate-700">NCBI 分类注释</div>
+                <div className="text-sm font-medium text-slate-700">NCBI Taxonomy Annotation</div>
                 <p className="text-xs text-slate-500">
-                  查询 NCBI Entrez 获取 BLAST 命中序列的分类学信息（kingdom / phylum / class / species），用于后续 Cytoscape 网络节点着色。
+                  Query NCBI Entrez to get taxonomy information (kingdom / phylum / class / species) for BLAST hit sequences, used later for Cytoscape network node coloring.
                 </p>
                 <button
                   className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg text-sm"
                   disabled={job.loading}
-                  onClick={() => runAction('注释 BLAST 命中', async () => {
+                  onClick={() => runAction('Annotate BLAST hits', async () => {
                     await annotateBlastHits();
                     // Refresh hits table after annotation
                     const data = await loadBlastSearchPage(1, blastSearchPageSize, blastSearchSource);
@@ -5521,7 +5521,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     else setBlastHitsRows(data.preview?.rows || []);
                   }, 'blast-search')}
                 >
-                  查询 NCBI 分类信息
+                  Query NCBI Taxonomy Info
                 </button>
                 {/* Annotation progress */}
                 {runtimeMeta && typeof (runtimeMeta as any).blastAnnotateProgress === 'number' && runtimeTask === 'blast/annotate' && job.loading && (() => {
@@ -5530,7 +5530,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   return (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-xs text-slate-500">
-                        <span>{phase === 'fetching' ? '正在从 NCBI 获取分类信息...' : phase === 'done' ? '完成' : '处理中...'}</span>
+                        <span>{phase === 'fetching' ? 'Fetching taxonomy info from NCBI...' : phase === 'done' ? 'Done' : 'Processing...'}</span>
                         <span>{pct}%</span>
                       </div>
                       <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
@@ -5549,29 +5549,29 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <div className="flex items-center gap-3 text-sm">
                   <select className="p-1.5 border rounded text-xs" value={blastSearchSource}
                     onChange={(e) => { setBlastSearchSource(e.target.value as any); setBlastSearchPage(1); }}>
-                    <option value="blast_hits_all">全部命中</option>
-                    <option value="blast_hits_filtered">过滤后</option>
+                    <option value="blast_hits_all">All Hits</option>
+                    <option value="blast_hits_filtered">Filtered</option>
                   </select>
                   <div className="flex gap-2">
                     <button className="px-2 py-1 border rounded text-xs disabled:opacity-50" disabled={blastSearchPage <= 1 || job.loading}
-                      onClick={() => runAction('加载上一页', async () => {
+                      onClick={() => runAction('Load previous page', async () => {
                         const prev = Math.max(1, blastSearchPage - 1);
                         const data = await loadBlastSearchPage(prev, blastSearchPageSize, blastSearchSource);
                         setBlastSearchPage(prev);
                         setBlastSearchTotalPages(data.totalPages);
                         if (blastSearchSource === 'blast_hits_filtered') setBlastFilteredRows(data.preview?.rows || []);
                         else setBlastHitsRows(data.preview?.rows || []);
-                      })}>上一页</button>
+                      })}>Previous Page</button>
                     <span className="text-xs text-slate-500 py-1">{blastSearchPage}/{blastSearchTotalPages}</span>
                     <button className="px-2 py-1 border rounded text-xs disabled:opacity-50" disabled={blastSearchPage >= blastSearchTotalPages || job.loading}
-                      onClick={() => runAction('加载下一页', async () => {
+                      onClick={() => runAction('Load next page', async () => {
                         const next = Math.min(blastSearchTotalPages, blastSearchPage + 1);
                         const data = await loadBlastSearchPage(next, blastSearchPageSize, blastSearchSource);
                         setBlastSearchPage(next);
                         setBlastSearchTotalPages(data.totalPages);
                         if (blastSearchSource === 'blast_hits_filtered') setBlastFilteredRows(data.preview?.rows || []);
                         else setBlastHitsRows(data.preview?.rows || []);
-                      })}>下一页</button>
+                      })}>Next Page</button>
                   </div>
                 </div>
                 <SimpleTable rows={blastSearchSource === 'blast_hits_filtered' ? blastFilteredRows : blastHitsRows} />
@@ -5587,41 +5587,41 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               <h1 className="text-2xl font-semibold">4. Alignment (MAFFT)</h1>
               <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">筛选 FASTA（留空=后端默认）</label>
-                  <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="例如: /path/to/hits_filtered.fasta" />
+                  <label className="block text-xs text-slate-500 mb-1">Filter FASTA (leave blank = backend default)</label>
+                  <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="e.g.: /path/to/hits_filtered.fasta" />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">参考 FASTA（留空=后端默认）</label>
-                  <input className="w-full p-2 border rounded text-sm" value={referenceFastaPath} onChange={(e) => setReferenceFastaPath(e.target.value)} placeholder="例如: /path/to/ref.fasta" />
+                  <label className="block text-xs text-slate-500 mb-1">Reference FASTA (leave blank = backend default)</label>
+                  <input className="w-full p-2 border rounded text-sm" value={referenceFastaPath} onChange={(e) => setReferenceFastaPath(e.target.value)} placeholder="e.g.: /path/to/ref.fasta" />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">参考序列 ID</label>
-                  <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="留空=自动使用参考序列第一条" />
+                  <label className="block text-xs text-slate-500 mb-1">Reference Sequence ID</label>
+                  <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="Leave blank = automatically use the first reference sequence" />
                 </div>
                 <button
                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm h-10"
                   disabled={job.loading}
-                  onClick={() => runAction('生成对齐文件', runAlignmentStep, 'alignment')}
+                  onClick={() => runAction('Generate alignment file', runAlignmentStep, 'alignment')}
                 >
-                  生成对齐并载入预览
+                  Generate Alignment and Load Preview
                 </button>
               </div>
 
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-                  <InputNum label="列起点" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
-                  <InputNum label="列终点" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
+                  <InputNum label="Column Start" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
+                  <InputNum label="Column End" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
                   <div className="text-xs text-slate-600 md:col-span-2">
-                    对齐文件: {alignmentPath || '(暂无)'}
+                    Alignment file: {alignmentPath || '(none)'}
                   </div>
                   <button
                     className="px-3 py-2 rounded border border-slate-300 text-sm"
                     disabled={job.loading || !alignmentPath}
-                    onClick={() => runAction('刷新对齐预览', async () => {
+                    onClick={() => runAction('Refresh alignment preview', async () => {
                       await loadAlignmentPreviewPage(0);
                     })}
                   >
-                    刷新预览
+                    Refresh Preview
                   </button>
                   <div className="text-xs text-slate-600">
                     rows: {alignmentPreviewRows.length}/{alignmentPreviewTotalRecords} | alnLen: {alignmentPreviewLength}
@@ -5632,20 +5632,20 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <button
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
                     disabled={job.loading || alignmentPreviewOffset <= 0 || !alignmentPath}
-                    onClick={() => runAction('对齐预览上一页', async () => {
+                    onClick={() => runAction('Previous alignment preview page', async () => {
                       await loadAlignmentPreviewPage(Math.max(0, alignmentPreviewOffset - alignmentPreviewLimit));
                     })}
                   >
-                    上一页
+                    Previous Page
                   </button>
                   <button
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
                     disabled={job.loading || alignmentPreviewOffset + alignmentPreviewLimit >= alignmentPreviewTotalRecords || !alignmentPath}
-                    onClick={() => runAction('对齐预览下一页', async () => {
+                    onClick={() => runAction('Next alignment preview page', async () => {
                       await loadAlignmentPreviewPage(alignmentPreviewOffset + alignmentPreviewLimit);
                     })}
                   >
-                    下一页
+                    Next Page
                   </button>
                   <span className="text-xs text-slate-500">
                     offset: {alignmentPreviewOffset}
@@ -5657,7 +5657,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     <thead className="bg-slate-50 border-b">
                       <tr>
                         <th className="px-2 py-2 text-left">ID</th>
-                        <th className="px-2 py-2 text-left">对齐片段（交互窗口）</th>
+                        <th className="px-2 py-2 text-left">Alignment Segment (Interactive Window)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5680,54 +5680,54 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             <div className="space-y-4">
               <h1 className="text-2xl font-semibold">5. Active Site Scoring</h1>
               <div className="bg-white border border-slate-200 rounded-xl p-3 text-sm text-slate-700 space-y-1.5">
-                <div className="font-semibold text-slate-900">当前运行状态</div>
+                <div className="font-semibold text-slate-900">Current Run Status</div>
                 <div className="text-xs text-slate-600">
-                  最近一次对齐文件：{(scoringRunInfo?.alignmentUsed || alignmentPath || '(暂无)')}
+                  Most recent alignment file: {(scoringRunInfo?.alignmentUsed || alignmentPath || '(none)')}
                 </div>
                 <div className="text-xs text-slate-600">
-                  当前位点模式：
-                  {scoringPositionMode === 'pre' ? '对齐前残基编号' : '对齐后列号'}
+                  Current position mode:
+                  {scoringPositionMode === 'pre' ? 'Pre-alignment residue number' : 'Post-alignment column number'}
                   {scoringPositionMode === 'pre'
-                    ? (preAlignmentAnchor === 'first' ? '（默认跟随第一条序列）' : `（按参考ID锚定: ${refId || '(空)'})`)
+                    ? (preAlignmentAnchor === 'first' ? ' (default: follows the first sequence)' : ` (anchored by reference ID: ${refId || '(empty)'})`)
                     : ''}
                 </div>
                 {scoringRunInfo && (
                   <div className="text-xs text-slate-600">
-                    最近一次打分：{scoringRunInfo.passed}/{scoringRunInfo.total} 通过阈值
+                    Most recent scoring: {scoringRunInfo.passed}/{scoringRunInfo.total} passed threshold
                   </div>
                 )}
                 {scoringRunInfo?.passedFasta && (
                   <div className="text-xs text-slate-600">
-                    阈值筛选模块：已导出通过序列 FASTA ({scoringRunInfo.passedCount || 0} 条) → 路径 {scoringRunInfo.passedFasta}
+                    Threshold filter module: exported FASTA of passing sequences ({scoringRunInfo.passedCount || 0}) → path {scoringRunInfo.passedFasta}
                   </div>
                 )}
                 {alignmentPrepInfo && (
                   <div className="text-xs text-slate-600">
-                    最近一次仅对齐：records={alignmentPrepInfo.records} | {alignmentPrepInfo.alignment}
+                    Most recent alignment-only run: records={alignmentPrepInfo.records} | {alignmentPrepInfo.alignment}
                   </div>
                 )}
               </div>
               <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">Alignment 路径（留空=后端默认）</label>
-                  <input className="w-full p-2 border rounded text-sm" value={alignmentPath} onChange={(e) => setAlignmentPath(e.target.value)} placeholder="例如: /path/to/alignment.fasta" />
+                  <label className="block text-xs text-slate-500 mb-1">Alignment path (leave blank = backend default)</label>
+                  <input className="w-full p-2 border rounded text-sm" value={alignmentPath} onChange={(e) => setAlignmentPath(e.target.value)} placeholder="e.g.: /path/to/alignment.fasta" />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">参考序列 ID</label>
-                  <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="留空=自动使用参考序列第一条" />
+                  <label className="block text-xs text-slate-500 mb-1">Reference Sequence ID</label>
+                  <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="Leave blank = automatically use the first reference sequence" />
                 </div>
               </div>
 
               <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">位点坐标模式</label>
+                  <label className="block text-xs text-slate-500 mb-1">Position Coordinate Mode</label>
                   <select
                     className="w-full p-2 border rounded text-sm"
                     value={scoringPositionMode}
                     onChange={(e) => setScoringPositionMode((e.target.value === 'aligned' ? 'aligned' : 'pre'))}
                   >
-                    <option value="pre">对齐前（残基编号）</option>
-                    <option value="aligned">对齐后（MSA 列号）</option>
+                    <option value="pre">Pre-alignment (residue number)</option>
+                    <option value="aligned">Post-alignment (MSA column number)</option>
                   </select>
                 </div>
                 <label className="flex items-center gap-2 text-sm text-slate-700 pb-2">
@@ -5737,17 +5737,17 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     disabled={scoringPositionMode !== 'pre'}
                     onChange={(e) => setPreAlignmentAnchor(e.target.checked ? 'refid' : 'first')}
                   />
-                  对齐前模式使用参考ID锚定（关闭=默认第一条序列）
+                  Use reference ID anchoring in pre-alignment mode (off = default to the first sequence)
                 </label>
                 <div className="text-xs text-slate-500 pb-2">
-                  对齐前: 按锚序列残基编号自动映射到 MSA 列；对齐后: 直接把 pos 当列号。
+                  Pre-alignment: automatically maps anchor sequence residue numbers to MSA columns; Post-alignment: treats pos directly as the column number.
                 </div>
               </div>
 
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div className="text-sm text-slate-700">打分规则（可直接编辑）</div>
-                  <div className="text-xs text-slate-500">当前规则数: {scoringRules.length}</div>
+                  <div className="text-sm text-slate-700">Scoring Rules (directly editable)</div>
+                  <div className="text-xs text-slate-500">Current rule count: {scoringRules.length}</div>
                 </div>
 
                 <div className="overflow-auto border rounded">
@@ -5758,7 +5758,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         <th className="px-2 py-2 text-left">Allowed (comma separated)</th>
                         <th className="px-2 py-2 text-left">Score</th>
                         <th className="px-2 py-2 text-left">Label</th>
-                        <th className="px-2 py-2 text-left">操作</th>
+                        <th className="px-2 py-2 text-left">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -5826,7 +5826,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                                 setScoringRulesSuccess('');
                               }}
                             >
-                              删除
+                              Delete
                             </button>
                           </td>
                         </tr>
@@ -5842,10 +5842,10 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       setScoringRules(clonePeAaoScoringRules());
                       setScoringAllowedDrafts({});
                       setScoringRulesError('');
-                      setScoringRulesSuccess(`已应用 PeAAO 规则模板，共 ${peAaoScoringRules.length} 条`);
+                      setScoringRulesSuccess(`Applied PeAAO rule template: ${peAaoScoringRules.length} rules`);
                     }}
                   >
-                    应用 PeAAO 规则模板（覆盖）
+                    Apply PeAAO Rule Template (Overwrite)
                   </button>
                   <button
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
@@ -5863,13 +5863,13 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       setScoringRulesSuccess('');
                     }}
                   >
-                    新增规则
+                    Add Rule
                   </button>
                   <button
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
                     onClick={() => rulesImportRef.current?.click()}
                   >
-                    导入规则 JSON
+                    Import Rules JSON
                   </button>
                   <button
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
@@ -5884,7 +5884,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       URL.revokeObjectURL(url);
                     }}
                   >
-                    导出规则 JSON
+                    Export Rules JSON
                   </button>
                   <input
                     ref={rulesImportRef}
@@ -5902,16 +5902,16 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         setScoringRules(parsed);
                         setScoringAllowedDrafts({});
                         setScoringRulesError('');
-                        setScoringRulesSuccess(`导入成功，规则数 ${parsed.length}`);
+                        setScoringRulesSuccess(`Import successful, ${parsed.length} rules`);
                       } catch (err) {
-                        setScoringRulesError(`导入失败: ${String(err)}`);
+                        setScoringRulesError(`Import failed: ${String(err)}`);
                         setScoringRulesSuccess('');
                       } finally {
                         e.currentTarget.value = '';
                       }
                     }}
                   />
-                  <div className="text-xs text-slate-500">支持导入/导出 JSON，字段为 pos / allowed / score / label；allowed 可含 "Uni"</div>
+                  <div className="text-xs text-slate-500">Supports importing/exporting JSON; fields are pos / allowed / score / label; allowed may include "Uni"</div>
                 </div>
 
                 {scoringRulesError && (
@@ -5929,12 +5929,12 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   disabled={job.loading || Boolean(scoringRulesError)}
                   title={
                     scoringRulesError
-                      ? `规则校验未通过: ${scoringRulesError}`
-                      : '执行打分（基于第4步 Alignment）'
+                      ? `Rule validation failed: ${scoringRulesError}`
+                      : 'Run Scoring (Based on Step 4 Alignment)'
                   }
-                  onClick={() => runAction('执行活性位点打分', runScoringStep, 'scoring')}
+                  onClick={() => runAction('Run active-site scoring', runScoringStep, 'scoring')}
                 >
-                  执行打分（基于第4步 Alignment）
+                  Run Scoring (Based on Step 4 Alignment)
                 </button>
 
                 <div className="pt-1 border-t border-slate-100">
@@ -5944,21 +5944,21 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       checked={autoDownloadScoringCsv}
                       onChange={(e) => setAutoDownloadScoringCsv(e.target.checked)}
                     />
-                    打分成功后自动下载完整 CSV
+                    Automatically download the full CSV after scoring succeeds
                   </label>
-                  <InputNum label="Threshold（打分后设置）" value={threshold} step={0.1} onChange={setThreshold} />
-                  <div className="text-xs text-slate-500 mt-1">建议先运行打分，再根据结果调整阈值并重跑统计。</div>
+                  <InputNum label="Threshold (set after scoring)" value={threshold} step={0.1} onChange={setThreshold} />
+                  <div className="text-xs text-slate-500 mt-1">Recommended to run scoring first, then adjust the threshold based on results and re-run the statistics.</div>
                   {thresholdPreview && (
                     <div className="mt-2 text-xs text-indigo-700 border border-indigo-200 bg-indigo-50 rounded p-2">
-                      阈值预估（基于当前 scored_results.csv）：阈值 {thresholdPreview.threshold} 时通过 {thresholdPreview.passed}/{thresholdPreview.total}（{(thresholdPreview.ratio * 100).toFixed(1)}%）。
-                      若要让聚类使用该阈值结果，请重跑一次打分。
+                      Threshold estimate (based on current scored_results.csv): at threshold {thresholdPreview.threshold}, {thresholdPreview.passed}/{thresholdPreview.total}（{(thresholdPreview.ratio * 100).toFixed(1)}%）.
+                      To have clustering use this threshold result, please re-run scoring.
                     </div>
                   )}
                 </div>
 
                 {Boolean(scoringRulesError) && (
                   <div className="text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded p-2">
-                    当前规则存在错误，已禁止运行打分。请先修正上方红色错误提示。
+                    There are errors in the current rules; scoring is disabled. Please fix the red error messages above first.
                   </div>
                 )}
               </div>
@@ -5976,44 +5976,44 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <InputNum label="CD-HIT Identity" value={clusterIdentity} step={0.01} onChange={setClusterIdentity} />
                   <InputNum label="Word Size" value={clusterWordSize} step={1} onChange={setClusterWordSize} />
                 </div>
-                <label className="block text-sm font-medium">输入 FASTA</label>
+                <label className="block text-sm font-medium">Input FASTA</label>
                 <input className="w-full p-2 border rounded text-sm font-mono" value={candidateFasta}
                   onChange={(e) => setCandidateFasta(e.target.value)} placeholder="scored_passed.fasta" />
                 <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                  onClick={() => runAction('运行聚类', runClusteringStep, 'clustering')}>
-                  运行 CD-HIT 聚类
+                  onClick={() => runAction('Run clustering', runClusteringStep, 'clustering')}>
+                  Run CD-HIT Clustering
                 </button>
               </div>
               {clusteringRunInfo && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-3 text-sm text-emerald-950">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <h2 className="text-base font-semibold text-emerald-900">聚类结果</h2>
+                    <h2 className="text-base font-semibold text-emerald-900">Clustering Results</h2>
                     <span className="text-xs text-emerald-700">
                       Identity {Math.round(clusterIdentity * 100)}% · Word Size {clusterWordSize}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-white/70 rounded-lg border border-emerald-100 p-3">
-                      <div className="text-xs text-emerald-700">输入序列</div>
+                      <div className="text-xs text-emerald-700">Input Sequences</div>
                       <div className="text-xl font-semibold">{clusteringRunInfo.inputCount}</div>
                     </div>
                     <div className="bg-white/70 rounded-lg border border-emerald-100 p-3">
-                      <div className="text-xs text-emerald-700">去重后保留</div>
+                      <div className="text-xs text-emerald-700">Kept After Dedup</div>
                       <div className="text-xl font-semibold">{clusteringRunInfo.outputCount}</div>
                     </div>
                     <div className="bg-white/70 rounded-lg border border-emerald-100 p-3">
-                      <div className="text-xs text-emerald-700">去重掉</div>
+                      <div className="text-xs text-emerald-700">Removed by Dedup</div>
                       <div className="text-xl font-semibold">{clusteringRunInfo.deduplicatedCount}</div>
                     </div>
                     <div className="bg-white/70 rounded-lg border border-emerald-100 p-3">
-                      <div className="text-xs text-emerald-700">聚类数</div>
+                      <div className="text-xs text-emerald-700">Cluster Count</div>
                       <div className="text-xl font-semibold">{clusteringRunInfo.clusters}</div>
                     </div>
                   </div>
                   <div className="text-xs text-emerald-800 space-y-1">
-                    <div>输入: {clusteringRunInfo.inputFasta}</div>
-                    <div>输出 FASTA: {clusteringRunInfo.outputFasta}</div>
-                    <div>Cluster 文件: {clusteringRunInfo.clusterFile}</div>
+                    <div>Input: {clusteringRunInfo.inputFasta}</div>
+                    <div>Output FASTA: {clusteringRunInfo.outputFasta}</div>
+                    <div>Cluster file: {clusteringRunInfo.clusterFile}</div>
                   </div>
                 </div>
               )}
@@ -6028,7 +6028,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm font-medium mb-1">相似性方法</label>
+                    <label className="block text-sm font-medium mb-1">Similarity Method</label>
                     <select className="w-full p-2 border rounded text-sm" value={networkSimilarityMethod}
                       onChange={(e) => setNetworkSimilarityMethod(e.target.value as 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2')}>
                       <option value="needleman-wunsch">Needleman-Wunsch (Global)</option>
@@ -6039,7 +6039,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="flex items-center gap-3 pt-6">
                     <input type="checkbox" checked={networkIncludeReferenceLinks}
                       onChange={(e) => setNetworkIncludeReferenceLinks(e.target.checked)} />
-                    <label className="text-sm text-slate-700">包含参考序列链接</label>
+                    <label className="text-sm text-slate-700">Include Reference Sequence Links</label>
                   </div>
                 </div>
                 <label className="block text-sm font-medium">Source FASTA</label>
@@ -6049,8 +6049,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <input className="w-full p-2 border rounded text-sm font-mono" value={networkReferenceFasta}
                   onChange={(e) => setNetworkReferenceFasta(e.target.value)} />
                 <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                  onClick={() => runAction('计算相似性', runComputeSimilarity, 'similarity')}>
-                  计算序列相似性
+                  onClick={() => runAction('Compute similarity', runComputeSimilarity, 'similarity')}>
+                  Compute Sequence Similarity
                 </button>
               </div>
               {networkStats.nodes > 0 && (
@@ -6066,7 +6066,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                   <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                     <span>
-                      🧪 序列比对进行中
+                      🧪 Sequence Alignment In Progress
                       {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                       ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                     </span>
@@ -6086,7 +6086,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   {runtimeMeta?.networkAlignStages?.['reference-links'] && (
                     <div>
                       <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                        <span>参考序列 vs 候选序列</span>
+                        <span>Reference sequences vs Candidate sequences</span>
                         <span>
                           {runtimeMeta.networkAlignStages['reference-links'].current} / {runtimeMeta.networkAlignStages['reference-links'].total}
                         </span>
@@ -6105,7 +6105,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   {runtimeMeta?.networkAlignStages?.['candidate-pairwise'] && (
                     <div>
                       <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                        <span>候选序列两两比对</span>
+                        <span>Candidate sequences pairwise alignment</span>
                         <span>
                           {runtimeMeta.networkAlignStages['candidate-pairwise'].current} / {runtimeMeta.networkAlignStages['candidate-pairwise'].total}
                         </span>
@@ -6134,7 +6134,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               {/* ── Browser Graph (Primary) ── */}
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <span className="text-base font-semibold text-slate-800">网络可视化</span>
+                  <span className="text-base font-semibold text-slate-800">Network Visualization</span>
                   <div className="flex items-center gap-2 flex-wrap">
                     <select className="p-1.5 border rounded text-xs" value={browserGraphMode} onChange={(e) => setBrowserGraphMode(e.target.value as any)}>
                       <option value="cytoscape">Cytoscape.js (Organic CoSE)</option>
@@ -6158,7 +6158,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       className="w-20 p-1.5 border rounded text-xs"
                       value={browserGraphThreshold}
                       onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
-                      title="浏览器图加载阈值"
+                      title="Browser Graph Load Threshold"
                     />
                     <button
                       className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded text-xs"
@@ -6174,16 +6174,16 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         setBrowserGraphVisible(true);
                       }}
                     >
-                      加载网络
+                      Load Network
                     </button>
                   </div>
                 </div>
                 <div className="text-xs text-slate-500">
-                  上面的数字是加载阈值。点“加载网络”后，图内滑块只能在本次已加载边集的范围内调整。
+                  The number above is the load threshold. After clicking “Load Network”, the in-graph slider can only be adjusted within the range of the currently loaded edge set.
                 </div>
                 {browserGraphThresholdAdjusted && (
                   <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    浏览器图已自动将加载阈值提高到 {browserGraphLoadedThreshold}，以避免边数超过 {browserGraphMaxEdges} 导致页面卡死或白屏。
+                    The browser graph automatically raised the load threshold to {browserGraphLoadedThreshold} to avoid the edge count exceeding {browserGraphMaxEdges}, which could freeze or blank the page.
                   </div>
                 )}
                 {browserGraphVisible && (
@@ -6203,7 +6203,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               {/* ── Cytoscape Desktop Push (Secondary) ── */}
               <details className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <summary className="px-4 py-3 cursor-pointer select-none text-sm font-medium text-slate-600 hover:bg-slate-50">
-                  推送到 Cytoscape Desktop（可选）
+                  Push to Cytoscape Desktop (optional)
                 </summary>
                 <div className="px-4 pb-4 pt-2 space-y-3 border-t border-slate-100">
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -6224,7 +6224,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <input className="w-full p-2 border rounded text-sm" value={cytoLayout} onChange={(e) => setCytoLayout(e.target.value)} />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium mb-1">着色分类列</label>
+                      <label className="block text-sm font-medium mb-1">Coloring Category Column</label>
                       <select className="w-full p-2 border rounded text-sm" value={cytoCategoryColumn} onChange={(e) => setCytoCategoryColumn(e.target.value)}>
                         <option value="phylum">Phylum</option>
                         <option value="class">Class</option>
@@ -6240,7 +6240,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     <label className="text-sm text-slate-700">Apply Style</label>
                   </div>
                   <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                    onClick={() => runAction('推送到 Cytoscape', runNetworkPush, 'network-push')}>
+                    onClick={() => runAction('Push to Cytoscape', runNetworkPush, 'network-push')}>
                     Push to Cytoscape
                   </button>
                   {cytoPushInfo && (
@@ -6248,9 +6248,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <div>Network SUID: {cytoPushInfo.networkSuid}</div>
                       <div>Pushed Nodes: {cytoPushInfo.pushedNodes} | Edges: {cytoPushInfo.pushedEdges}</div>
                       {cytoPushInfo.styleApplied && cytoPushInfo.categoryColumn && (
-                        <div>样式已应用：{cytoPushInfo.styleName}（分组列 {cytoPushInfo.categoryColumn}）
+                        <div>Style applied: {cytoPushInfo.styleName} (grouping column {cytoPushInfo.categoryColumn})
                           {cytoPushInfo.categoryColumn !== cytoCategoryColumn && (
-                            <span className="text-amber-700 font-medium"> ⚠ 所选「{cytoCategoryColumn}」列无数据，已回退到「{cytoPushInfo.categoryColumn}」</span>
+                            <span className="text-amber-700 font-medium"> ⚠ Selected column “{cytoCategoryColumn}” has no data, fell back to “{cytoPushInfo.categoryColumn}”</span>
                           )}
                         </div>
                       )}
@@ -6266,7 +6266,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                   <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                     <span>
-                      🧪 序列比对进行中
+                      🧪 Sequence Alignment In Progress
                       {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                       ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                     </span>
@@ -6286,7 +6286,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   {runtimeMeta?.networkAlignStages?.['reference-links'] && (
                     <div>
                       <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                        <span>参考连边比对</span>
+                        <span>Reference edge alignment</span>
                         <span>
                           {runtimeMeta.networkAlignStages['reference-links'].current} / {runtimeMeta.networkAlignStages['reference-links'].total}
                         </span>
@@ -6305,7 +6305,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   {runtimeMeta?.networkAlignStages?.['candidate-pairwise'] && (
                     <div>
                       <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                        <span>候选序列两两比对</span>
+                        <span>Candidate sequences pairwise alignment</span>
                         <span>
                           {runtimeMeta.networkAlignStages['candidate-pairwise'].current} / {runtimeMeta.networkAlignStages['candidate-pairwise'].total}
                         </span>
@@ -6333,38 +6333,38 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               <h1 className="text-2xl font-semibold">Candidate Recommendation</h1>
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                 <p className="text-sm text-slate-600">
-                  综合相似度、分类学多样性和 cluster 大小，对候选序列进行多维评分排序。孤立点（cluster 仅含 1 条序列）默认排除。
+                  Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, and cluster size. Isolated points (clusters containing only 1 sequence) are excluded by default.
                 </p>
                 <details className="text-xs text-slate-400">
-                  <summary className="cursor-pointer select-none">参数说明</summary>
+                  <summary className="cursor-pointer select-none">Parameter Description</summary>
                   <ul className="mt-1 ml-4 list-disc space-y-0.5">
-                    <li><b>最小 Cluster 大小</b>：cluster 中序列数量必须 ≥ 此值，否则排除。设为 2 即过滤孤立点。</li>
-                    <li><b>Avg Ref Similarity 权重</b>：候选与所有参考序列平均相似度的评分权重。</li>
-                    <li><b>Max Ref Similarity 权重</b>：候选与最相似参考序列之间相似度的评分权重。</li>
-                    <li><b>Cluster Size 权重</b>：候选所在 cluster 越大得分越高，归一化后乘以此权重。</li>
-                    <li><b>Taxonomy Diversity 权重</b>：候选所在 cluster 的分类学多样性（纲的数量）评分权重。</li>
-                    <li><b>随机性 (Temperature)</b>：0 = 确定性选取（同参数同结果），&gt;0 时在每个 cluster 内按温度采样，值越大结果越随机。</li>
+                    <li><b>Minimum Cluster Size</b>: the number of sequences in a cluster must be ≥ this value, otherwise excluded. Set to 2 to filter out isolated points.</li>
+                    <li><b>Avg Ref Similarity Weight</b>: scoring weight for the candidate's average similarity to all reference sequences.</li>
+                    <li><b>Max Ref Similarity Weight</b>: scoring weight for the candidate's similarity to its most similar reference sequence.</li>
+                    <li><b>Cluster Size Weight</b>: the larger the candidate's cluster, the higher the score; normalized and multiplied by this weight.</li>
+                    <li><b>Taxonomy Diversity Weight</b>: scoring weight for the taxonomic diversity (number of classes) within the candidate's cluster.</li>
+                    <li><b>Randomness (Temperature)</b>: 0 = deterministic selection (same parameters give the same result); when &gt;0, sampling within each cluster uses temperature — the larger the value, the more random the result.</li>
                   </ul>
                 </details>
                 <details className="text-xs text-slate-400 mt-1">
-                  <summary className="cursor-pointer select-none">评分算法说明</summary>
+                  <summary className="cursor-pointer select-none">Scoring Algorithm Description</summary>
                   <div className="mt-1 ml-2 space-y-1">
-                    <p><b>评分公式</b>：Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
+                    <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
                     <ul className="ml-4 list-disc space-y-0.5">
-                      <li><b>avgRefSim</b>：候选与所有有边连接的参考序列的平均相似度 ÷ 100，范围 [0, 1]</li>
-                      <li><b>maxRefSim</b>：候选与最相似参考序列的相似度 ÷ 100，范围 [0, 1]</li>
-                      <li><b>clusterSizeNorm</b>：候选所在 cluster 大小 ÷ 最大 cluster 大小，范围 [0, 1]</li>
-                      <li><b>taxDiv</b>：候选所在 cluster 中 class 种类数 ÷ 最大 class 种类数，范围 [0, 1]</li>
+                      <li><b>avgRefSim</b>: average similarity of the candidate to all edge-connected reference sequences ÷ 100, range [0, 1]</li>
+                      <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
+                      <li><b>clusterSizeNorm</b>: size of the candidate's cluster ÷ the largest cluster size, range [0, 1]</li>
+                      <li><b>taxDiv</b>: number of distinct classes in the candidate's cluster ÷ the maximum number of classes, range [0, 1]</li>
                     </ul>
-                    <p><b>Cluster 来源</b>：cd-hit 按序列相似度阈值聚类的结果。同一 cluster 内的序列彼此高度相似。</p>
-                    <p><b>相似度数据来源</b>：edges_similarity.csv 中候选与参考节点（is_reference=1）之间的边。</p>
-                    <p><b>多样性选取</b>：支持两种策略——「按比例分配」按 cluster 大小分配名额（大 cluster 取更多），「均匀轮询」各 cluster 均匀轮流选取。</p>
-                    <p><b>随机性</b>：Temperature=0 时完全确定，&gt;0 时在 cluster 轮询中使用 softmax 温度采样：P(i) = exp(score_i/T) / Σexp(score_j/T)，T 越大越随机。</p>
+                    <p><b>Cluster Source</b>: result of cd-hit clustering by sequence similarity threshold. Sequences within the same cluster are highly similar to each other.</p>
+                    <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>
+                    <p><b>Diversity Selection</b>: supports two strategies — “Proportional” allocates slots by cluster size (larger clusters get more), “Round-robin” selects evenly and alternately across clusters.</p>
+                    <p><b>Randomness</b>: fully deterministic when Temperature=0; when &gt;0, softmax temperature sampling is used during cluster round-robin: P(i) = exp(score_i/T) / Σexp(score_j/T) — the larger T, the more random.</p>
                   </div>
                 </details>
                 <div className="grid grid-cols-5 gap-3 text-sm">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">最小 Cluster 大小</label>
+                    <label className="block text-xs text-slate-500 mb-1">Minimum Cluster Size</label>
                     <input type="number" min={1} max={100} step={1} className="w-full p-2 border rounded text-sm"
                       value={recommendMinClusterSize}
                       onChange={(e) => setRecommendMinClusterSize(Math.max(1, Number(e.target.value) || 2))} />
@@ -6376,23 +6376,23 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       onChange={(e) => setRecommendTopN(Math.max(1, Math.min(5000, Number(e.target.value) || 50)))} />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">选取策略</label>
+                    <label className="block text-xs text-slate-500 mb-1">Selection Strategy</label>
                     <select className="w-full p-2 border rounded text-sm"
                       value={recommendDiversityMode}
                       onChange={(e) => setRecommendDiversityMode(e.target.value as 'proportional' | 'round-robin')}>
-                      <option value="proportional">按比例分配</option>
-                      <option value="round-robin">均匀轮询</option>
+                      <option value="proportional">Proportional</option>
+                      <option value="round-robin">Round-robin</option>
                     </select>
                   </div>
                   <div>
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">阈值: {recommendNetworkConnectivityThreshold}%</label>
+                      <label className="block text-xs text-slate-500 mb-1">Threshold: {recommendNetworkConnectivityThreshold}%</label>
                       <input type="range" min={0} max={100} step={1} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
                         style={{ touchAction: 'none' }}
                         value={recommendNetworkConnectivityThreshold}
                         onChange={(e) => setRecommendNetworkConnectivityThreshold(Number(e.target.value))} />
                     </div>
-                    <label className="block text-xs text-slate-500 mb-1">随机性 (Temperature): {recommendTemperature.toFixed(2)}</label>
+                    <label className="block text-xs text-slate-500 mb-1">Randomness (Temperature): {recommendTemperature.toFixed(2)}</label>
                     <input type="range" min={0} max={1} step={0.05} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
                       style={{ touchAction: 'none' }}
                       value={recommendTemperature}
@@ -6403,18 +6403,18 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <div className="flex items-center gap-3">
                   <button className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm"
                     disabled={job.loading}
-                    onClick={() => runAction('候选推荐评分', runRecommendation, 'recommendation')}>
-                    计算推荐
+                    onClick={() => runAction('Candidate recommendation scoring', runRecommendation, 'recommendation')}>
+                    Compute Recommendations
                   </button>
                 </div>
               </div>
               {recommendMeta && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
-                  <div>候选 {recommendMeta.totalCandidates} 条，参考 {recommendMeta.totalReferences} 条，展示前 {recommendResults.length} 条</div>
+                  <div>Candidates {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, showing top {recommendResults.length}</div>
                   {(recommendMeta.filteredByClusterSize > 0 || recommendMeta.filteredBySimilarity > 0) && (
                     <div className="text-slate-500">
-                      已过滤：cluster 大小不足 {recommendMeta.filteredByClusterSize} 条
-                      {recommendMeta.filteredBySimilarity > 0 && `，相似度不足 ${recommendMeta.filteredBySimilarity} 条`}
+                      Filtered: {recommendMeta.filteredByClusterSize} below minimum cluster size
+                      {recommendMeta.filteredBySimilarity > 0 && `, ${recommendMeta.filteredBySimilarity} below similarity threshold`}
                     </div>
                   )}
                 </div>
@@ -6470,13 +6470,13 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         const a = document.createElement('a');
                         a.href = url; a.download = `recommended_candidates_${recommendResults.length}.fasta`;
                         a.click(); URL.revokeObjectURL(url);
-                      } catch (err: any) { alert('导出失败: ' + (err?.message || err)); }
+                      } catch (err: any) { alert('Export failed: ' + (err?.message || err)); }
                     }}>
-                    导出 FASTA（{recommendResults.length} 条）
+                    Export FASTA ({recommendResults.length})
                   </button>
                   <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                     onClick={highlightRecommendationsInNetwork}>
-                    在网络中高亮
+                    Highlight in Network
                   </button>
                 </div>
               )}
@@ -6665,7 +6665,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
     setCytoPushInfo(null);
     setError('');
     setHydrating(true);
-    setStatusMessage(`加载任务进度: ${selectedTaskId}`);
+    setStatusMessage(`Loading task progress: ${selectedTaskId}`);
 
     let cancelled = false;
     hydratingStateRef.current = true;
@@ -6718,12 +6718,12 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
         if (!cancelled) {
           setStatusMessage(
             staleRecommendCache
-              ? `已载入任务进度: ${selectedTaskId}；检测到旧版推荐缓存已失效，请重新计算推荐`
-              : (data.exists ? `已载入任务进度: ${selectedTaskId}` : `新任务: ${selectedTaskId}`),
+              ? `Task progress loaded: ${selectedTaskId}; Detected outdated recommendation cache, please recompute recommendations`
+              : (data.exists ? `Task progress loaded: ${selectedTaskId}` : `New task: ${selectedTaskId}`),
           );
         }
       } catch (err) {
-        if (!cancelled) setError(`载入任务进度失败: ${String(err)}`);
+        if (!cancelled) setError(`Failed to load task progress: ${String(err)}`);
       } finally {
         if (!cancelled) {
           hydratingStateRef.current = false;
@@ -6834,7 +6834,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
         setBrowserGraphMaxEdges(data.maxEdges);
         setBrowserGraphVisible(true);
       }
-      setStatusMessage(`已在网络中高亮 ${recommendResults.length} 条推荐序列，请返回 Similarity Network 查看`);
+      setStatusMessage(`Highlighted ${recommendResults.length} recommended sequences in the network; return to Similarity Network to view`);
     } catch (err: any) {
       setError(String(err?.message || err));
     } finally {
@@ -6935,15 +6935,15 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
     <div className={`min-h-screen ${darkMode ? 'dark bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-900'} font-sans`}>
       {/* Header */}
       <header className={`${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} border-b shadow-sm`}>
-        <div className="max-w-6xl mx-auto px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button onClick={onBack} className="text-sm text-slate-500 hover:text-slate-700 mr-2">← 返回</button>
+        <div className="max-w-6xl mx-auto px-8 min-h-16 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <div className="flex items-center gap-3 shrink-0">
+            <button onClick={onBack} className="text-sm text-slate-500 hover:text-slate-700 mr-2">← Back</button>
             <GitCompareArrows className="w-6 h-6 text-amber-600" />
-            <span className="text-xl font-bold tracking-tight">网络对比</span>
+            <span className="text-xl font-bold tracking-tight">Network Comparison</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">任务</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-500">Task</span>
               <select
                 className="p-1.5 border border-slate-300 rounded text-xs bg-white"
                 value={selectedTaskId}
@@ -6951,7 +6951,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 disabled={loading}
               >
                 {compareTaskList.length === 0 && !selectedTaskId && (
-                  <option value="">-- 请新建任务 --</option>
+                  <option value="">-- Please create a task --</option>
                 )}
                 {compareTaskList.map((t) => (
                   <option key={t.id} value={t.id}>{t.id}</option>
@@ -6961,7 +6961,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 className="p-1.5 border border-slate-300 rounded text-xs w-32"
                 value={newTaskId}
                 onChange={(e) => setNewTaskId(e.target.value)}
-                placeholder="新任务ID(可选)"
+                placeholder="New task ID (optional)"
                 disabled={loading}
               />
               <button
@@ -6969,21 +6969,21 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 onClick={createTaskAndSwitch}
                 disabled={loading}
               >
-                新建
+                New
               </button>
               <button
                 className="px-2 py-1.5 rounded bg-blue-600 text-white text-xs hover:bg-blue-700 disabled:opacity-50"
                 onClick={duplicateSelectedTask}
                 disabled={loading || !selectedTaskId}
               >
-                复制
+                Copy
               </button>
               <button
                 className="px-2 py-1.5 rounded bg-red-600 text-white text-xs hover:bg-red-700 disabled:opacity-50"
                 onClick={deleteSelectedTask}
                 disabled={loading || !selectedTaskId}
               >
-                删除
+                Delete
               </button>
             </div>
             <button
@@ -7012,7 +7012,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
 
         {!selectedTaskId && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center text-sm text-amber-700">
-            请先在右上方新建一个对比任务，然后选择要对比的两个来源任务。
+            Please create a comparison task in the top right first, then select the two source tasks to compare.
           </div>
         )}
 
@@ -7021,40 +7021,40 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
           <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">1</span>
-              选择要对比的两个任务
+              Select the Two Tasks to Compare
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs text-slate-500 mb-1">任务 A</label>
+                <label className="block text-xs text-slate-500 mb-1">Task A</label>
                 <select className="w-full p-2 border rounded text-sm" value={taskAId} onChange={e => setTaskAId(e.target.value)}>
-                  <option value="">-- 选择任务 --</option>
+                  <option value="">-- Select a task --</option>
                   {sourceTasks.map(t => (
                     <option key={t.id} value={t.id}>[{moduleLabel(t.module)}] {t.name || t.id}</option>
                   ))}
                 </select>
                 {taskAInfo && (
                   <div className="mt-2 text-xs text-slate-600 bg-slate-50 rounded p-2 space-y-1">
-                    <div>类型：<b>{moduleLabel(taskAInfo.module)}</b></div>
-                    <div>参考序列：<b>{taskAInfo.referenceCount}</b></div>
-                    <div>候选序列：<b>{taskAInfo.candidateCount}</b></div>
-                    <div>Nodes.csv：{taskAInfo.hasNodesCsv ? <span className="text-green-600">{taskAInfo.nodesCount} 节点</span> : <span className="text-slate-400">无</span>}</div>
+                    <div>Type: <b>{moduleLabel(taskAInfo.module)}</b></div>
+                    <div>Reference sequences: <b>{taskAInfo.referenceCount}</b></div>
+                    <div>Candidate sequences: <b>{taskAInfo.candidateCount}</b></div>
+                    <div>Nodes.csv: {taskAInfo.hasNodesCsv ? <span className="text-green-600">{taskAInfo.nodesCount} nodes</span> : <span className="text-slate-400">None</span>}</div>
                   </div>
                 )}
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1">任务 B</label>
+                <label className="block text-xs text-slate-500 mb-1">Task B</label>
                 <select className="w-full p-2 border rounded text-sm" value={taskBId} onChange={e => setTaskBId(e.target.value)}>
-                  <option value="">-- 选择任务 --</option>
+                  <option value="">-- Select a task --</option>
                   {sourceTasks.map(t => (
                     <option key={t.id} value={t.id}>[{moduleLabel(t.module)}] {t.name || t.id}</option>
                   ))}
                 </select>
                 {taskBInfo && (
                   <div className="mt-2 text-xs text-slate-600 bg-slate-50 rounded p-2 space-y-1">
-                    <div>类型：<b>{moduleLabel(taskBInfo.module)}</b></div>
-                    <div>参考序列：<b>{taskBInfo.referenceCount}</b></div>
-                    <div>候选序列：<b>{taskBInfo.candidateCount}</b></div>
-                    <div>Nodes.csv：{taskBInfo.hasNodesCsv ? <span className="text-green-600">{taskBInfo.nodesCount} 节点</span> : <span className="text-slate-400">无</span>}</div>
+                    <div>Type: <b>{moduleLabel(taskBInfo.module)}</b></div>
+                    <div>Reference sequences: <b>{taskBInfo.referenceCount}</b></div>
+                    <div>Candidate sequences: <b>{taskBInfo.candidateCount}</b></div>
+                    <div>Nodes.csv: {taskBInfo.hasNodesCsv ? <span className="text-green-600">{taskBInfo.nodesCount} nodes</span> : <span className="text-slate-400">None</span>}</div>
                   </div>
                 )}
               </div>
@@ -7067,11 +7067,11 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
           <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">2</span>
-              交集 / 合并
+              Intersect / Merge
             </h2>
             <label className="flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={keepReferences} onChange={e => setKeepReferences(e.target.checked)} />
-              保留参考序列
+              Keep Reference Sequences
             </label>
             <div className="flex flex-wrap gap-3">
               <button
@@ -7079,26 +7079,26 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 disabled={loading}
                 onClick={doIntersect}
               >
-                {loading ? '处理中...' : '取交集'}
+                {loading ? 'Processing...' : 'Intersect'}
               </button>
               <button
                 className="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                 disabled={loading}
                 onClick={doMerge}
               >
-                {loading ? '处理中...' : '合并网络'}
+                {loading ? 'Processing...' : 'Merge Networks'}
               </button>
             </div>
 
             {compareResult && (
               <div className={`${compareResult.operation === 'intersect' ? 'bg-blue-50 border-blue-200' : 'bg-teal-50 border-teal-200'} border rounded-xl p-4 text-sm space-y-1`}>
-                <div className="font-semibold">{compareResult.operation === 'intersect' ? '交集' : '合并'}完成</div>
-                <div>目标任务：<b>{compareResult.targetTaskId}</b></div>
-                <div>总序列数：<b>{compareResult.totalSequences}</b>（候选 {compareResult.candidateCount} + 参考 {compareResult.referenceCount}）</div>
-                <div>匹配对数：<b>{compareResult.matchedPairs}</b></div>
+                <div className="font-semibold">{compareResult.operation === 'intersect' ? 'Intersect' : 'Merge'} Complete</div>
+                <div>Target task: <b>{compareResult.targetTaskId}</b></div>
+                <div>Total sequences: <b>{compareResult.totalSequences}</b> (candidates {compareResult.candidateCount} + references {compareResult.referenceCount})</div>
+                <div>Matched pairs: <b>{compareResult.matchedPairs}</b></div>
                 {compareResult.operation === 'merge' && (
                   <>
-                    <div>仅在 A：<b>{compareResult.uniqueToA ?? 0}</b> | 仅在 B：<b>{compareResult.uniqueToB ?? 0}</b> | 两者共有：<b>{compareResult.inBoth ?? 0}</b></div>
+                    <div>Only in A: <b>{compareResult.uniqueToA ?? 0}</b> | Only in B: <b>{compareResult.uniqueToB ?? 0}</b> | In both: <b>{compareResult.inBoth ?? 0}</b></div>
                   </>
                 )}
               </div>
@@ -7111,11 +7111,11 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
           <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">3</span>
-              计算序列相似性
+              Compute Sequence Similarity
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
               <div>
-                <label className="block text-xs text-slate-500 mb-1">比对方法</label>
+                <label className="block text-xs text-slate-500 mb-1">Alignment Method</label>
                 <select className="w-full p-2 border rounded text-sm" value={networkSimilarityMethod}
                   onChange={e => setNetworkSimilarityMethod(e.target.value as 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2')}>
                   <option value="needleman-wunsch">Needleman-Wunsch</option>
@@ -7126,7 +7126,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
               <label className="flex items-center gap-2 text-xs text-slate-600 col-span-2">
                 <input type="checkbox" checked={networkIncludeReferenceLinks}
                   onChange={e => setNetworkIncludeReferenceLinks(e.target.checked)} />
-                包含参考序列间连边
+                Include Edges Between Reference Sequences
               </label>
             </div>
             <button
@@ -7134,13 +7134,13 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
               disabled={loading}
               onClick={doComputeSimilarity}
             >
-              {loading ? '计算中...' : '计算序列相似性'}
+              {loading ? 'Computing...' : 'Compute Sequence Similarity'}
             </button>
             {loading && runtimeMeta?.networkAlignProgress && (
               <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                 <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                   <span>
-                    🧪 序列比对进行中
+                    🧪 Sequence Alignment In Progress
                     {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                     ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                   </span>
@@ -7159,7 +7159,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 {runtimeMeta?.networkAlignStages?.['reference-links'] && (
                   <div>
                     <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                      <span>参考序列 vs 候选序列</span>
+                      <span>Reference sequences vs Candidate sequences</span>
                       <span>{runtimeMeta.networkAlignStages['reference-links'].current} / {runtimeMeta.networkAlignStages['reference-links'].total}</span>
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
@@ -7171,7 +7171,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 {runtimeMeta?.networkAlignStages?.['candidate-pairwise'] && (
                   <div>
                     <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                      <span>候选序列两两比对</span>
+                      <span>Candidate sequences pairwise alignment</span>
                       <span>{runtimeMeta.networkAlignStages['candidate-pairwise'].current} / {runtimeMeta.networkAlignStages['candidate-pairwise'].total}</span>
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
@@ -7184,7 +7184,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
             )}
             {similarityStatus && (
               <div className="bg-indigo-50 border border-indigo-200 rounded p-3 text-sm">
-                相似性已计算：Nodes <b>{similarityStatus.nodes}</b>，Edges <b>{similarityStatus.edges}</b>
+                Similarity computed: Nodes <b>{similarityStatus.nodes}</b>, Edges <b>{similarityStatus.edges}</b>
               </div>
             )}
           </section>
@@ -7200,7 +7200,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
 
             {/* ── Browser Graph (Primary) ── */}
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <span className="text-base font-semibold text-slate-800">网络可视化</span>
+              <span className="text-base font-semibold text-slate-800">Network Visualization</span>
               <div className="flex items-center gap-2 flex-wrap">
                 <select className="p-1.5 border rounded text-xs" value={browserGraphMode} onChange={(e) => setBrowserGraphMode(e.target.value as any)}>
                   <option value="cytoscape">Cytoscape.js (Organic CoSE)</option>
@@ -7222,7 +7222,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                   className="w-20 p-1.5 border rounded text-xs"
                   value={browserGraphThreshold}
                   onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
-                  title="浏览器图加载阈值"
+                  title="Browser Graph Load Threshold"
                 />
                 <button
                   className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded text-xs disabled:opacity-50"
@@ -7246,16 +7246,16 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                     }
                   }}
                 >
-                  加载网络
+                  Load Network
                 </button>
               </div>
             </div>
             <div className="text-xs text-slate-500">
-              上面的数字是加载阈值。点“加载网络”后，图内滑块只能在本次已加载边集的范围内调整。
+              The number above is the load threshold. After clicking “Load Network”, the in-graph slider can only be adjusted within the range of the currently loaded edge set.
             </div>
             {browserGraphThresholdAdjusted && (
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                浏览器图已自动将加载阈值提高到 {browserGraphLoadedThreshold}，以避免边数超过 {browserGraphMaxEdges} 导致页面卡死或白屏。
+                The browser graph automatically raised the load threshold to {browserGraphLoadedThreshold} to avoid the edge count exceeding {browserGraphMaxEdges}, which could freeze or blank the page.
               </div>
             )}
             {browserGraphVisible && (
@@ -7274,12 +7274,12 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
             {/* ── Cytoscape Desktop Push (Secondary) ── */}
             <details className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden">
               <summary className="px-4 py-3 cursor-pointer select-none text-sm font-medium text-slate-600 hover:bg-slate-100">
-                推送到 Cytoscape Desktop（可选）
+                Push to Cytoscape Desktop (optional)
               </summary>
               <div className="px-4 pb-4 pt-2 space-y-3 border-t border-slate-100">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">Edge 阈值（%）</label>
+                    <label className="block text-xs text-slate-500 mb-1">Edge Threshold (%)</label>
                     <input type="number" min={0} max={100} step={1} className="w-full p-2 border rounded text-sm" value={networkPairwiseThresholdPct} onChange={e => setNetworkPairwiseThresholdPct(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} />
                   </div>
                   <div>
@@ -7291,9 +7291,9 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                     <input className="w-full p-2 border rounded text-sm" value={cytoLayout} onChange={e => setCytoLayout(e.target.value)} />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">着色分类列</label>
+                    <label className="block text-xs text-slate-500 mb-1">Coloring Category Column</label>
                     <select className="w-full p-2 border rounded text-sm" value={cytoCategoryColumn} onChange={e => setCytoCategoryColumn(e.target.value)}>
-                      <option value="source_task">Source Task（来源任务）</option>
+                      <option value="source_task">Source Task</option>
                       <option value="phylum">Phylum</option>
                       <option value="class">Class</option>
                       <option value="kingdom">Kingdom</option>
@@ -7304,21 +7304,21 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 </div>
                 <label className="flex items-center gap-2 text-xs text-slate-600">
                   <input type="checkbox" checked={cytoApplyStyle} onChange={e => setCytoApplyStyle(e.target.checked)} />
-                  自动应用样式
+                  Auto-apply Style
                 </label>
                 <button
                   className="bg-emerald-700 hover:bg-emerald-800 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                   disabled={loading}
                   onClick={doPushCytoscape}
                 >
-                  {loading ? '推送中...' : '推送到 Cytoscape'}
+                  {loading ? 'Pushing...' : 'Push to Cytoscape'}
                 </button>
                 {cytoPushInfo && (
                   <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-900">
-                    已推送 networkSUID: <b>{String(cytoPushInfo.networkSuid ?? 'unknown')}</b>；
-                    节点 {cytoPushInfo.pushedNodes}，边 {cytoPushInfo.pushedEdges}。
+                    Pushed. networkSUID: <b>{String(cytoPushInfo.networkSuid ?? 'unknown')}</b>; 
+                    Nodes {cytoPushInfo.pushedNodes}, Edges {cytoPushInfo.pushedEdges}.
                     {cytoPushInfo.styleApplied && cytoPushInfo.categoryColumn && (
-                      <span> 样式已应用：{cytoPushInfo.styleName}（分组列 {cytoPushInfo.categoryColumn}）</span>
+                      <span> Style applied: {cytoPushInfo.styleName} (grouping column {cytoPushInfo.categoryColumn})</span>
                     )}
                   </div>
                 )}
@@ -7332,41 +7332,41 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
           <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">5</span>
-              候选推荐
+              Candidate Recommendation
             </h2>
             <p className="text-sm text-slate-600">
-              综合相似度、分类学多样性和 cluster 大小，对候选序列进行多维评分排序。孤立点（cluster 仅含 1 条序列）默认排除。
+              Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, and cluster size. Isolated points (clusters containing only 1 sequence) are excluded by default.
             </p>
             <details className="text-xs text-slate-400">
-              <summary className="cursor-pointer select-none">参数说明</summary>
+              <summary className="cursor-pointer select-none">Parameter Description</summary>
               <ul className="mt-1 ml-4 list-disc space-y-0.5">
-                <li><b>最小 Cluster 大小</b>：cluster 中序列数量必须 ≥ 此值，否则排除。设为 2 即过滤孤立点。</li>
-                <li><b>Avg Ref Similarity 权重</b>：候选与所有参考序列平均相似度的评分权重。</li>
-                <li><b>Max Ref Similarity 权重</b>：候选与最相似参考序列之间相似度的评分权重。</li>
-                <li><b>Cluster Size 权重</b>：候选所在 cluster 越大得分越高，归一化后乘以此权重。</li>
-                <li><b>Taxonomy Diversity 权重</b>：候选所在 cluster 的分类学多样性（纲的数量）评分权重。</li>
-                <li><b>随机性 (Temperature)</b>：0 = 确定性选取（同参数同结果），&gt;0 时在每个 cluster 内按温度采样，值越大结果越随机。</li>
+                <li><b>Minimum Cluster Size</b>: the number of sequences in a cluster must be ≥ this value, otherwise excluded. Set to 2 to filter out isolated points.</li>
+                <li><b>Avg Ref Similarity Weight</b>: scoring weight for the candidate's average similarity to all reference sequences.</li>
+                <li><b>Max Ref Similarity Weight</b>: scoring weight for the candidate's similarity to its most similar reference sequence.</li>
+                <li><b>Cluster Size Weight</b>: the larger the candidate's cluster, the higher the score; normalized and multiplied by this weight.</li>
+                <li><b>Taxonomy Diversity Weight</b>: scoring weight for the taxonomic diversity (number of classes) within the candidate's cluster.</li>
+                <li><b>Randomness (Temperature)</b>: 0 = deterministic selection (same parameters give the same result); when &gt;0, sampling within each cluster uses temperature — the larger the value, the more random the result.</li>
               </ul>
             </details>
             <details className="text-xs text-slate-400 mt-1">
-              <summary className="cursor-pointer select-none">评分算法说明</summary>
+              <summary className="cursor-pointer select-none">Scoring Algorithm Description</summary>
               <div className="mt-1 ml-2 space-y-1">
-                <p><b>评分公式</b>：Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
+                <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
                 <ul className="ml-4 list-disc space-y-0.5">
-                  <li><b>avgRefSim</b>：候选与所有有边连接的参考序列的平均相似度 ÷ 100，范围 [0, 1]</li>
-                  <li><b>maxRefSim</b>：候选与最相似参考序列的相似度 ÷ 100，范围 [0, 1]</li>
-                  <li><b>clusterSizeNorm</b>：候选所在 cluster 大小 ÷ 最大 cluster 大小，范围 [0, 1]</li>
-                  <li><b>taxDiv</b>：候选所在 cluster 中 class 种类数 ÷ 最大 class 种类数，范围 [0, 1]</li>
+                  <li><b>avgRefSim</b>: average similarity of the candidate to all edge-connected reference sequences ÷ 100, range [0, 1]</li>
+                  <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
+                  <li><b>clusterSizeNorm</b>: size of the candidate's cluster ÷ the largest cluster size, range [0, 1]</li>
+                  <li><b>taxDiv</b>: number of distinct classes in the candidate's cluster ÷ the maximum number of classes, range [0, 1]</li>
                 </ul>
-                <p><b>Cluster 来源</b>：cd-hit 按序列相似度阈值聚类的结果。同一 cluster 内的序列彼此高度相似。</p>
-                <p><b>相似度数据来源</b>：edges_similarity.csv 中候选与参考节点（is_reference=1）之间的边。</p>
-                <p><b>多样性选取</b>：支持两种策略——「按比例分配」按 cluster 大小分配名额（大 cluster 取更多），「均匀轮询」各 cluster 均匀轮流选取。</p>
-                <p><b>随机性</b>：Temperature=0 时完全确定，&gt;0 时在 cluster 轮询中使用 softmax 温度采样：P(i) = exp(score_i/T) / Σexp(score_j/T)，T 越大越随机。</p>
+                <p><b>Cluster Source</b>: result of cd-hit clustering by sequence similarity threshold. Sequences within the same cluster are highly similar to each other.</p>
+                <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>
+                <p><b>Diversity Selection</b>: supports two strategies — “Proportional” allocates slots by cluster size (larger clusters get more), “Round-robin” selects evenly and alternately across clusters.</p>
+                <p><b>Randomness</b>: fully deterministic when Temperature=0; when &gt;0, softmax temperature sampling is used during cluster round-robin: P(i) = exp(score_i/T) / Σexp(score_j/T) — the larger T, the more random.</p>
               </div>
             </details>
             <div className="grid grid-cols-5 gap-3 text-sm">
               <div>
-                <label className="block text-xs text-slate-500 mb-1">最小 Cluster 大小</label>
+                <label className="block text-xs text-slate-500 mb-1">Minimum Cluster Size</label>
                 <input type="number" min={1} max={100} step={1} className="w-full p-2 border rounded text-sm"
                   value={recommendMinClusterSize}
                   onChange={(e) => setRecommendMinClusterSize(Math.max(1, Number(e.target.value) || 2))} />
@@ -7378,23 +7378,23 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                   onChange={(e) => setRecommendTopN(Math.max(1, Math.min(5000, Number(e.target.value) || 50)))} />
               </div>
               <div>
-                <label className="block text-xs text-slate-500 mb-1">选取策略</label>
+                <label className="block text-xs text-slate-500 mb-1">Selection Strategy</label>
                 <select className="w-full p-2 border rounded text-sm"
                   value={recommendDiversityMode}
                   onChange={(e) => setRecommendDiversityMode(e.target.value as 'proportional' | 'round-robin')}>
-                  <option value="proportional">按比例分配</option>
-                  <option value="round-robin">均匀轮询</option>
+                  <option value="proportional">Proportional</option>
+                  <option value="round-robin">Round-robin</option>
                 </select>
               </div>
               <div>
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">阈值: {recommendNetworkConnectivityThreshold}%</label>
+                      <label className="block text-xs text-slate-500 mb-1">Threshold: {recommendNetworkConnectivityThreshold}%</label>
                       <input type="range" min={0} max={100} step={1} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
                         style={{ touchAction: 'none' }}
                         value={recommendNetworkConnectivityThreshold}
                         onChange={(e) => setRecommendNetworkConnectivityThreshold(Number(e.target.value))} />
                     </div>
-                <label className="block text-xs text-slate-500 mb-1">随机性 (Temperature): {recommendTemperature.toFixed(2)}</label>
+                <label className="block text-xs text-slate-500 mb-1">Randomness (Temperature): {recommendTemperature.toFixed(2)}</label>
                 <input type="range" min={0} max={1} step={0.05} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
                   style={{ touchAction: 'none' }}
                   value={recommendTemperature}
@@ -7407,15 +7407,15 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
               disabled={loading}
               onClick={doRecommend}
             >
-              {loading ? '计算中...' : '计算推荐'}
+              {loading ? 'Computing...' : 'Compute Recommendations'}
             </button>
             {recommendMeta && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
-                <div>候选 {recommendMeta.totalCandidates} 条，参考 {recommendMeta.totalReferences} 条，展示前 {recommendResults.length} 条</div>
+                <div>Candidates {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, showing top {recommendResults.length}</div>
                 {(recommendMeta.filteredByClusterSize > 0 || recommendMeta.filteredBySimilarity > 0) && (
                   <div className="text-slate-500">
-                    已过滤：cluster 大小不足 {recommendMeta.filteredByClusterSize} 条
-                    {recommendMeta.filteredBySimilarity > 0 && `，相似度不足 ${recommendMeta.filteredBySimilarity} 条`}
+                    Filtered: {recommendMeta.filteredByClusterSize} below minimum cluster size
+                    {recommendMeta.filteredBySimilarity > 0 && `, ${recommendMeta.filteredBySimilarity} below similarity threshold`}
                   </div>
                 )}
               </div>
@@ -7471,13 +7471,13 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                       const a = document.createElement('a');
                       a.href = url; a.download = `recommended_candidates_${recommendResults.length}.fasta`;
                       a.click(); URL.revokeObjectURL(url);
-                    } catch (err: any) { alert('导出失败: ' + (err?.message || err)); }
+                    } catch (err: any) { alert('Export failed: ' + (err?.message || err)); }
                   }}>
-                  导出 FASTA（{recommendResults.length} 条）
+                  Export FASTA ({recommendResults.length})
                 </button>
                 <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                   onClick={highlightRecommendationsInNetwork}>
-                  在网络中高亮
+                  Highlight in Network
                 </button>
               </div>
             )}
@@ -7488,12 +7488,12 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
         {runtimeLogs.length > 0 && (
           <section className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-slate-700">运行日志</h3>
+              <h3 className="text-sm font-semibold text-slate-700">Run Log</h3>
               <div className="flex items-center gap-3 text-xs text-slate-500">
-                <span>总耗时：{formatRuntimeDurationLabel(runtimeStartedAt, runtimeUpdatedAt, runtimeActive) || '-'}</span>
+                <span>Total time: {formatRuntimeDurationLabel(runtimeStartedAt, runtimeUpdatedAt, runtimeActive) || '-'}</span>
                 <label className="flex items-center gap-1">
                   <input type="checkbox" checked={autoScrollLog} onChange={e => setAutoScrollLog(e.target.checked)} />
-                  自动滚动
+                  Auto-scroll
                 </label>
               </div>
             </div>
@@ -7562,7 +7562,7 @@ export default function App() {
           <button
             className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
             onClick={() => setDarkMode((v) => !v)}
-            title={darkMode ? '切换为浅色模式' : '切换为深色模式'}
+            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
@@ -7572,8 +7572,8 @@ export default function App() {
       {/* Main content */}
       <main className="max-w-6xl mx-auto px-8 py-12">
         <div className="mb-10">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">工作流模块</h1>
-          <p className="text-slate-500">选择一个模块开始工作</p>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Workflow Modules</h1>
+          <p className="text-slate-500">Select a module to start working</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -7586,14 +7586,14 @@ export default function App() {
               <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-100 transition-colors">
                 <Database className="w-5 h-5" />
               </div>
-              <h2 className="text-lg font-semibold text-slate-900">BLAST 酶挖掘工作流</h2>
+              <h2 className="text-lg font-semibold text-slate-900">BLAST Enzyme Mining Workflow</h2>
             </div>
             <p className="text-sm text-slate-500 mb-4 leading-relaxed">
-              基于 BLAST pairwise 搜索蛋白质数据库，适用于参考序列较少（1-5条）的情况。
-              支持本地数据库和 NCBI 远程搜索。
+              Based on BLAST pairwise search against protein databases; suitable when there are few reference sequences (1-5).
+              Supports local databases and NCBI remote search.
             </p>
             <div className="flex items-center gap-1 text-sm font-medium text-emerald-600 group-hover:text-emerald-700">
-              进入模块 <ArrowRight className="w-4 h-4" />
+              Enter Module <ArrowRight className="w-4 h-4" />
             </div>
           </button>
 
@@ -7606,14 +7606,14 @@ export default function App() {
               <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 group-hover:bg-indigo-100 transition-colors">
                 <Search className="w-5 h-5" />
               </div>
-              <h2 className="text-lg font-semibold text-slate-900">HMMER 新酶挖掘工作流</h2>
+              <h2 className="text-lg font-semibold text-slate-900">HMMER Novel Enzyme Mining Workflow</h2>
             </div>
             <p className="text-sm text-slate-500 mb-4 leading-relaxed">
-              基于 HMM profile 搜索蛋白质数据库，筛选候选酶序列，进行评分、聚类和相似性网络分析。
-              支持 NCBI Protein、UniProt 和核酸序列输入。
+              Uses HMM profile search against protein databases to screen candidate enzyme sequences, followed by scoring, clustering, and similarity network analysis.
+              Supports NCBI Protein, UniProt, and nucleotide sequence input.
             </p>
             <div className="flex items-center gap-1 text-sm font-medium text-indigo-600 group-hover:text-indigo-700">
-              进入模块 <ArrowRight className="w-4 h-4" />
+              Enter Module <ArrowRight className="w-4 h-4" />
             </div>
           </button>
 
@@ -7626,14 +7626,14 @@ export default function App() {
               <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 group-hover:bg-amber-100 transition-colors">
                 <GitCompareArrows className="w-5 h-5" />
               </div>
-              <h2 className="text-lg font-semibold text-slate-900">网络对比</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Network Comparison</h2>
             </div>
             <p className="text-sm text-slate-500 mb-4 leading-relaxed">
-              选择 HMMER 或 BLAST 的任意两个任务，取交集或合并序列集合。
-              支持跨模块比较，生成对比网络并推送到 Cytoscape。
+              Select any two tasks from HMMER or BLAST to intersect or merge their sequence sets.
+              Supports cross-module comparison, generating a comparison network and pushing it to Cytoscape.
             </p>
             <div className="flex items-center gap-1 text-sm font-medium text-amber-600 group-hover:text-amber-700">
-              进入模块 <ArrowRight className="w-4 h-4" />
+              Enter Module <ArrowRight className="w-4 h-4" />
             </div>
           </button>
         </div>
@@ -7651,7 +7651,7 @@ function StatusBadge({ job }: { job: JobState }) {
     return (
       <span className="text-sm text-blue-600 flex items-center gap-2">
         <span className="inline-block w-3 h-3 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
-        运行中...
+        Running...
       </span>
     );
   }
@@ -7689,8 +7689,8 @@ function PipelineProgressPanel({
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-slate-700">Pipeline 进度</div>
-        <div className="text-xs text-slate-500">{doneCount}/{total} 已完成</div>
+        <div className="text-sm font-medium text-slate-700">Pipeline Progress</div>
+        <div className="text-xs text-slate-500">{doneCount}/{total} completed</div>
       </div>
 
       <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
@@ -7726,10 +7726,10 @@ function PipelineProgressPanel({
                 <span className="font-medium text-slate-700">{step.title}</span>
               </div>
               <div className="mt-1 text-[11px] text-slate-500">
-                {status === 'success' && '完成'}
-                {status === 'error' && '失败'}
-                {status === 'running' && '运行中...'}
-                {status === 'idle' && '未开始'}
+                {status === 'success' && 'Done'}
+                {status === 'error' && 'Failed'}
+                {status === 'running' && 'Running...'}
+                {status === 'idle' && 'Not started'}
               </div>
             </div>
           );
@@ -7738,12 +7738,12 @@ function PipelineProgressPanel({
 
       {showSearchSubProgress && (
         <div className="border-t border-slate-100 pt-2">
-          <div className="text-xs text-slate-500 mb-2">Search 子进度（EBI 三段）</div>
+          <div className="text-xs text-slate-500 mb-2">Search Sub-progress (EBI 3 Stages)</div>
           <div className="flex items-center gap-2 overflow-x-auto">
             {[
-              { key: 'submit' as EbiSubStepKey, title: '提交' },
-              { key: 'download' as EbiSubStepKey, title: '下载' },
-              { key: 'enrich' as EbiSubStepKey, title: '补齐+一致性' },
+              { key: 'submit' as EbiSubStepKey, title: 'Submit' },
+              { key: 'download' as EbiSubStepKey, title: 'Download' },
+              { key: 'enrich' as EbiSubStepKey, title: 'Fill + Consistency' },
             ].map((item, idx, arr) => {
               const status = ebiSubStepState[item.key];
               return (
@@ -7759,7 +7759,7 @@ function PipelineProgressPanel({
                             : 'border-slate-200 bg-slate-50 text-slate-500'
                     }`}
                   >
-                    {item.title} · {status === 'success' ? '完成' : status === 'running' ? '运行中' : status === 'error' ? '失败' : '未开始'}
+                    {item.title} · {status === 'success' ? 'Done' : status === 'running' ? 'Running' : status === 'error' ? 'Failed' : 'Not started'}
                   </div>
                   {idx < arr.length - 1 && <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />}
                 </React.Fragment>
@@ -7775,7 +7775,7 @@ function PipelineProgressPanel({
 function ObservabilityPanel({ metrics }: { metrics: Record<PipelineStepKey, StepMetrics> }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
-      <div className="text-sm font-medium text-slate-700">接口观测面板</div>
+      <div className="text-sm font-medium text-slate-700">API Observability Panel</div>
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
         {pipelineSteps.map((s) => {
           const m = metrics[s.key];
@@ -7783,11 +7783,11 @@ function ObservabilityPanel({ metrics }: { metrics: Record<PipelineStepKey, Step
           return (
             <div key={s.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs space-y-1">
               <div className="font-medium text-slate-700">{s.title}</div>
-              <div className="text-slate-600">成功/失败: {m.success}/{m.fail}</div>
-              <div className="text-slate-600">平均耗时: {avg} ms</div>
-              <div className="text-slate-600">重试总数: {m.retries}</div>
-              <div className="text-slate-600">最近耗时: {m.lastMs} ms</div>
-              <div className="text-slate-600">最近尝试: {m.lastAttempts || 0} 次</div>
+              <div className="text-slate-600">Success/Fail: {m.success}/{m.fail}</div>
+              <div className="text-slate-600">Avg time: {avg} ms</div>
+              <div className="text-slate-600">Total retries: {m.retries}</div>
+              <div className="text-slate-600">Last time: {m.lastMs} ms</div>
+              <div className="text-slate-600">Last attempts: {m.lastAttempts || 0}</div>
             </div>
           );
         })}
@@ -7809,7 +7809,7 @@ function RetryPolicyPanel({
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
-      <div className="text-sm font-medium text-slate-700">重试策略</div>
+      <div className="text-sm font-medium text-slate-700">Retry Strategy</div>
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 items-end">
         {pipelineSteps.map((s) => (
           <div key={s.key}>
@@ -7830,7 +7830,7 @@ function RetryPolicyPanel({
           </div>
         ))}
         <div>
-          <label className="block text-xs text-slate-500 mb-1">重试间隔(ms)</label>
+          <label className="block text-xs text-slate-500 mb-1">Retry Interval (ms)</label>
           <input
             type="number"
             min={100}
@@ -7883,17 +7883,17 @@ function RuntimeLogsSection({
             className="px-2 py-0.5 border border-slate-600 rounded hover:bg-slate-800"
             onClick={onClearLogs}
           >
-            清空日志
+            Clear Log
           </button>
           <button
             className="px-2 py-0.5 border border-slate-600 rounded hover:bg-slate-800"
             onClick={() => setAutoScrollLog((v) => !v)}
           >
-            自动滚动: {autoScrollLog ? '开' : '关'}
+            Auto-scroll: {autoScrollLog ? 'On' : 'Off'}
           </button>
           {jobLoading && <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
           task: {runtimeTask}
-          {runtimeDurationLabel ? ` | 总耗时: ${runtimeDurationLabel}` : ''}
+          {runtimeDurationLabel ? ` | Total time: ${runtimeDurationLabel}` : ''}
           {runtimeMeta?.ebiJobId ? ` | EBI Job: ${runtimeMeta.ebiJobId}` : ''}
         </div>
       </div>
@@ -8052,7 +8052,7 @@ function LogPanel({
           value={level}
           onChange={(e) => setLevel(e.target.value as 'all' | 'stderr' | 'stdout' | 'cmd' | 'task')}
         >
-          <option value="all">全部</option>
+          <option value="all">All</option>
           <option value="stderr">stderr</option>
           <option value="stdout">stdout</option>
           <option value="cmd">cmd</option>
@@ -8062,21 +8062,21 @@ function LogPanel({
           className="px-2 py-1 border border-slate-700 rounded hover:bg-slate-900"
           onClick={() => setFoldRepeated((v) => !v)}
         >
-          折叠重复: {foldRepeated ? '开' : '关'}
+          Collapse repeats: {foldRepeated ? 'On' : 'Off'}
         </button>
         <button className="px-2 py-1 border border-slate-700 rounded hover:bg-slate-900" onClick={downloadLogs}>
-          下载日志
+          Download Log
         </button>
       </div>
 
       {errorLines.length > 0 && (
         <div className="mb-2 p-2 rounded border border-red-900 bg-red-950/40 text-[11px] font-mono space-y-1">
-          <div className="text-red-300 font-semibold">最近错误</div>
+          <div className="text-red-300 font-semibold">Recent Errors</div>
           {errorLines.map((line, idx) => (
             <div key={`${line}-${idx}`} className="text-red-200 break-all flex items-start gap-2">
               <span className="flex-1">{line}</span>
               <button className="px-1.5 py-0.5 border border-red-800 rounded text-[10px]" onClick={() => copyLine(line)}>
-                复制
+                Copy
               </button>
             </div>
           ))}
@@ -8085,7 +8085,7 @@ function LogPanel({
 
       <div ref={logContainerRef} className={`${heightClass ?? 'h-40'} overflow-auto font-mono text-[11px] leading-5 rounded border border-slate-800 bg-slate-950 p-2`}>
         {displayLogs.length === 0 ? (
-          <div className="text-slate-500">[log] 尚无输出</div>
+          <div className="text-slate-500">[log] No output yet</div>
         ) : (
           displayLogs.map((line, idx) => (
             <div key={`${line}-${idx}`} className={`${getLineClass(line)} break-all`}>
@@ -8260,31 +8260,31 @@ function IdentityHeatmap({
             className={`text-xs px-2 py-1 rounded ${sortMode === 'original' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
             onClick={() => setSortMode('original')}
           >
-            原始顺序
+            Original Order
           </button>
           <button
             className={`text-xs px-2 py-1 rounded ${sortMode === 'cluster' ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
             onClick={() => setSortMode('cluster')}
           >
-            按相似度排列
+            Sort by Similarity
           </button>
         </div>
       </div>
       <div className="flex gap-6 text-xs text-slate-500 dark:text-slate-400">
-        <span>序列数: {n}</span>
+        <span>Sequence count: {n}</span>
         <span>Min: {minVal.toFixed(1)}%</span>
         <span>Max: {maxVal.toFixed(1)}%</span>
         <span>Mean: {mean.toFixed(1)}%</span>
         <span>Median: {median.toFixed(1)}%</span>
         {belowLowerBound.size > 0 && (
           <span className="text-red-500 font-medium">
-            低于下界: {belowLowerBound.size} 条
+            Below lower bound: {belowLowerBound.size}
           </span>
         )}
       </div>
       {onLowerBoundChange !== undefined && (
         <div className="flex items-center gap-3">
-          <label className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">Identity 下界 (%):</label>
+          <label className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">Identity Lower Bound (%):</label>
           <input
             type="range"
             min={0}
@@ -8443,12 +8443,12 @@ function IdentityHeatmap({
       {excludedIds && excludedIds.size > 0 && (
         <div className="text-xs text-slate-500 space-y-1">
           <div className="flex items-center gap-2">
-            <span className="text-red-500 font-medium">手动排除: {excludedIds.size} 条</span>
+            <span className="text-red-500 font-medium">Manually excluded: {excludedIds.size}</span>
             <button
               className="text-indigo-600 hover:underline"
               onClick={() => onExcludedIdsChange?.(new Set())}
             >
-              清除全部
+              Clear All
             </button>
           </div>
           <div className="flex flex-wrap gap-1">
@@ -8571,7 +8571,7 @@ function ReferencePreviewTable({
     without.splice(lastAccIdx + 1, 0, 'length');
     return without;
   })();
-  const displayTitle = title || 'Reference 预览';
+  const displayTitle = title || 'Reference Preview';
   const pageSize = Math.ceil(allRows.length / totalPages);
   const start = (page - 1) * pageSize + 1;
   const end = start + rows.length - 1;
@@ -8579,21 +8579,21 @@ function ReferencePreviewTable({
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-auto">
       <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 text-xs text-slate-600">
-        <span>{displayTitle}：第 {page}/{totalPages} 页（{start}-{end} / {allRows.length}）</span>
+        <span>{displayTitle}: page {page}/{totalPages} ({start}-{end} / {allRows.length})</span>
         <div className="flex items-center gap-2">
           <button
             className="px-2 py-1 border rounded disabled:opacity-50"
             disabled={page <= 1}
             onClick={() => onPageChange(Math.max(1, page - 1))}
           >
-            上一页
+            Previous Page
           </button>
           <button
             className="px-2 py-1 border rounded disabled:opacity-50"
             disabled={page >= totalPages}
             onClick={() => onPageChange(Math.min(totalPages, page + 1))}
           >
-            下一页
+            Next Page
           </button>
         </div>
       </div>

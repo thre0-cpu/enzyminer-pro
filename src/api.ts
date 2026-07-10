@@ -53,7 +53,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<ApiResult<T>
   if (!response.ok || payload?.ok === false) {
     if (response.status === 409) {
       const taskMsg = payload?.message ? `（${payload.message}）` : '';
-      throw new Error(`后台当前已有任务在运行，请等待完成后再试${taskMsg}`);
+      throw new Error(`A task is already running in the backend, please wait for it to finish before trying again${taskMsg}`);
     }
     const message = payload?.message || `Request failed: ${response.status}`;
     const details = payload?.details || '';

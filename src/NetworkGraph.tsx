@@ -699,15 +699,15 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
 
   const updateControlRefs = useCallback((summary: VisibilitySummary, nextHideSingletons: boolean) => {
     if (countRef.current) {
-      countRef.current.textContent = `(${summary.visibleEdgeCount} / ${edges.length} 边)`;
+      countRef.current.textContent = `(${summary.visibleEdgeCount} / ${edges.length} edges)`;
     }
     if (visibleNodesRef.current) {
-      visibleNodesRef.current.textContent = `当前可见 ${summary.visibleNodeCount} / ${nodes.length} 节点`;
+      visibleNodesRef.current.textContent = `Visible ${summary.visibleNodeCount} / ${nodes.length} nodes`;
     }
     if (singletonRef.current) {
       singletonRef.current.textContent = nextHideSingletons
-        ? `已隐藏 ${summary.hiddenSingletonCount} 个非参考单点`
-        : `可隐藏 ${summary.hiddenSingletonCount} 个非参考单点`;
+        ? `Hidden ${summary.hiddenSingletonCount} non-reference singleton(s)`
+        : `Hideable ${summary.hiddenSingletonCount} non-reference singleton(s)`;
     }
   }, [edges.length, nodes.length]);
 
@@ -773,7 +773,7 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
   }, [defaultHideSingletons, edges, highlightIds, initialThreshold, nodes, updateControlRefs]);
 
   if (!nodes.length) {
-    return <div className="text-sm text-slate-400 p-4">无网络数据。请先计算序列相似性。</div>;
+    return <div className="text-sm text-slate-400 p-4">No network data. Please compute sequence similarity first.</div>;
   }
 
   const initSummary = computeVisibilitySummary(nodes, edges, initialThreshold, defaultHideSingletons, highlightIds || []);
@@ -784,12 +784,12 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
       <div className={`${isFullscreen ? 'sticky top-0 z-20 space-y-2 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur' : 'space-y-2'}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <GraphLegend nodes={nodes} categoryColumn={categoryColumn} />
-          {isFullscreen && <span className="text-xs text-slate-500">按 Esc 或右上角按钮退出全屏</span>}
+          {isFullscreen && <span className="text-xs text-slate-500">Press Esc or the button in the top right to exit fullscreen</span>}
         </div>
         <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-[320px] flex-1 flex-col gap-3">
           <div className="flex items-center gap-3">
-            <label className="text-xs text-slate-600 whitespace-nowrap">图内可视阈值</label>
+            <label className="text-xs text-slate-600 whitespace-nowrap">In-graph Visibility Threshold</label>
             <input
               ref={sliderRef}
               type="range" min={minThreshold} max={100} step={0.1}
@@ -799,11 +799,11 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
             />
             <span ref={labelRef} className="text-xs font-mono text-slate-700 w-12 text-right">{initialThreshold.toFixed(1)}</span>
             <span ref={countRef} className="text-xs text-slate-500">
-              ({initSummary.visibleEdgeCount} / {edges.length} 边)
+              ({initSummary.visibleEdgeCount} / {edges.length} edges)
             </span>
           </div>
           <div className="text-xs text-slate-500">
-            当前这张图只加载了相似性不低于 {minThreshold.toFixed(1)} 的边，所以滑块最低只能到 {minThreshold.toFixed(1)}。想看更低阈值，需要回到上方“加载阈值”重新加载。
+            This graph only loaded edges with similarity no lower than {minThreshold.toFixed(1)}, so the slider can only go as low as {minThreshold.toFixed(1)}. To view a lower threshold, go back to the “Load Threshold” above and reload.
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs">
@@ -812,19 +812,19 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
                 className={`rounded-md px-3 py-1.5 transition-colors ${!hideSingletons ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 onClick={() => handleSingletonToggle(false)}
               >
-                显示全部
+                Show All
               </button>
               <button
                 type="button"
                 className={`rounded-md px-3 py-1.5 transition-colors ${hideSingletons ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 onClick={() => handleSingletonToggle(true)}
               >
-                隐藏单点
+                Hide Singletons
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-              <span ref={visibleNodesRef}>当前可见 {initSummary.visibleNodeCount} / {nodes.length} 节点</span>
-              <span ref={singletonRef}>可隐藏 {initSummary.hiddenSingletonCount} 个非参考单点</span>
+              <span ref={visibleNodesRef}>Visible {initSummary.visibleNodeCount} / {nodes.length} nodes</span>
+              <span ref={singletonRef}>Hideable {initSummary.hiddenSingletonCount} non-reference singleton(s)</span>
             </div>
           </div>
         </div>
@@ -833,7 +833,7 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
           className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
           onClick={handleFullscreenToggle}
         >
-          {isFullscreen ? '退出全屏' : '全屏展示'}
+          {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
         </button>
       </div>
       </div>
@@ -863,7 +863,7 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
         />
       )}
       <div className="text-xs text-slate-400">
-        {nodes.length} 节点 · {edges.length} 边 · 渲染器: {mode === 'd3' ? 'D3 Force' : 'Cytoscape.js (Organic CoSE)'}
+        {nodes.length} nodes · {edges.length} edges · Renderer: {mode === 'd3' ? 'D3 Force' : 'Cytoscape.js (Organic CoSE)'}
       </div>
     </div>
   );
