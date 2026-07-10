@@ -147,26 +147,56 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 - `POST /api/clustering/run` — CD-HIT 聚类
 - `POST /api/network/compute-similarity` — 相似性计算
 - `POST /api/network/push-cytoscape` — 推送到 Cytoscape
-- `POST /api/network/recommend-candidates` — 候选序列推荐
+- `POST /api/network/predict-metrics` — 性质预测（kcat/solubility/Tm），结果缓存到 `predicted_metrics.csv`
+- `POST /api/network/recommend-candidates` — 候选序列推荐（六维加权，含 Strategy 1 预测评分）
 - `POST /api/network/export-recommended-fasta` — 导出推荐候选 FASTA
 - `POST /api/network/highlight-cytoscape` — 在 Cytoscape 中高亮选中节点
 
 ## 8. 候选推荐系统
 
-### 评分算法
+### Strategy 1: Property Prediction Score（性质预测评分）
 
-候选序列通过四维加权评分公式进行排序：
+在 Recommendation 页面新增「Strategy 1」卡片，可一键对网络中所有候选序列运行以下三个预测：
+
+| 预测指标 | 说明 | 评分逻辑 |
+|----------|------|----------|
+| **kcat** | 催化速率常数 | 值越大越好（min-max 归一化） |
+| **Solubility** | 溶解度 (%) | 值越大越好（min-max 归一化） |
+| **Tm** | 熔解温度 (°C) | 越接近「目标温度」越好（高斯衰减） |
+
+三个指标通过**可拖拽权重条**（默认各 1/3）实时调整占比，并计算加权综合评分（`predictedScore`）。
+
+**参数配置：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| kcat 权重 | 33% | kcat 预测值占比 |
+| Solubility 权重 | 33% | 溶解度预测值占比 |
+| Tm 权重 | 33% | 熔解温度占比 |
+| Tm 目标温度 | 60°C | 序列 Tm 越接近此值得分越高 |
+
+**结果缓存**：预测结果缓存到任务目录下的 `predicted_metrics.csv`，重复打开不会重新调用 API；"Recompute All" 按钮可强制重新计算。
+
+> **后端说明**：当前预测 API 使用确定性哈希伪随机数模拟（同一序列每次结果一致），`server.mjs` 中的 `predictKcatMock` / `predictSolubilityMock` / `predictTmMock` 三个函数带有 `TODO` 注释，等真实 API 就绪后只需替换函数体即可。
+
+### Strategy 2: Comprehensive Recommendation（综合推荐）
+
+候选序列通过六维加权评分公式进行排序：
 
 $$
-\text{Score} = w_1 \cdot \overline{S}_{\text{ref}} + w_2 \cdot S_{\text{ref,max}} + w_3 \cdot \hat{C} + w_4 \cdot D_{\text{tax}}
+\text{Score} = w_1 \cdot \overline{S}_{\text{ref}} + w_2 \cdot S_{\text{ref,max}} + w_3 \cdot \hat{C} + w_4 \cdot D_{\text{tax}} + w_5 \cdot \text{NetComp} + w_6 \cdot \text{PredictedScore}
 $$
 
 | 维度 | 说明 | 默认权重 |
 |------|------|----------|
-| `avgRefSimilarity` | 与所有参考序列的平均相似性 | 0.4 |
-| `maxRefSimilarity` | 与最相似参考序列的相似性 | 0.3 |
-| `clusterSize` | 所在聚类的归一化大小（$\hat{C} = \text{size} / \max(\text{sizes})$） | 0.2 |
-| `taxonomyDiversity` | 所在聚类的分类多样性（独特 phylum 数 / 聚类大小） | 0.1 |
+| `avgRefSimilarity` | 与所有参考序列的平均相似性 | 0.28 |
+| `maxRefSimilarity` | 与最相似参考序列的相似性 | 0.20 |
+| `clusterSize` | 所在聚类的归一化大小 | 0.12 |
+| `networkComponentSize` | 所在网络连通分量的归一化大小 | 0.12 |
+| `taxonomyDiversity` | 所在聚类的分类多样性 | 0.08 |
+| `predictedScore` | Strategy 1 的综合预测评分 | **0.20** |
+
+> 原有 5 个指标权重整体按比例缩小到 80%，新增 `predictedScore` 默认占 20%。如果该任务还没跑过 Strategy 1，该权重贡献为 0（页面有黄色提示）。
 
 ### 多样性选择（Cluster Round-Robin）
 
@@ -187,15 +217,18 @@ $$
 | 最小 Cluster 大小 | 2 | 过滤孤立节点（cluster_size < 阈值的候选被排除） |
 | Top N | 50 | 推荐候选数量 |
 | Temperature | 0 | 采样温度（0 = 确定性，越大越随机） |
-| Weights | 见上表 | 四维权重（通过可视化拖拽条调节，自动归一化至总和 = 1） |
+| Network Connectivity Threshold | 85% | 网络连通性阈值 |
+| Weights | 见上表 | 六维权重（通过可视化拖拽条调节，自动归一化至总和 = 1） |
 
 ### 权重调节 UI（WeightBar）
 
-前端提供多段式彩色比例条，四种颜色分别对应四个评分维度：
+前端提供多段式彩色比例条，六种颜色分别对应六个评分维度：
 - 🟣 **靛蓝** — avgRefSimilarity
 - 🔵 **天蓝** — maxRefSimilarity
 - 🟢 **翠绿** — clusterSize
+- 🟣 **紫色** — networkComponentSize
 - 🟡 **琥珀** — taxonomyDiversity
+- 🩷 **粉色** — predictedScore
 
 通过拖拽分隔线调整权重比例，「恢复默认」按钮一键重置。
 
@@ -203,7 +236,7 @@ $$
 
 - **FASTA 导出**：将推荐候选序列导出为 FASTA 格式文件下载
 - **Cytoscape 高亮**：一键在 Cytoscape 桌面端选中/高亮推荐的候选节点（通过 CyREST Commands API）
-- **状态持久化**：推荐结果和所有参数在页面刷新后自动恢复
+- **状态持久化**：推荐结果和所有参数（包括 Strategy 1 的 kcat/solubility/Tm 权重、Tm 目标温度、网络连通性阈值等）在页面刷新后自动恢复
 
 ## 9. 项目结构
 

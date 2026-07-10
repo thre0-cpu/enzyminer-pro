@@ -1227,6 +1227,11 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         if (typeof state.recommendMinSimilarity === 'number') setRecommendMinSimilarity(state.recommendMinSimilarity);
         if (typeof state.recommendTemperature === 'number') setRecommendTemperature(state.recommendTemperature);
         if (state.recommendDiversityMode === 'proportional' || state.recommendDiversityMode === 'round-robin') setRecommendDiversityMode(state.recommendDiversityMode);
+        if (typeof state.recommendNetworkConnectivityThreshold === 'number' && Number.isFinite(state.recommendNetworkConnectivityThreshold)) setRecommendNetworkConnectivityThreshold(state.recommendNetworkConnectivityThreshold);
+
+        // Predicted metrics (Strategy 1) parameters
+        if (state.predictedSubWeights && typeof state.predictedSubWeights === 'object') setPredictedSubWeights(normalizePredictedSubWeights(state.predictedSubWeights));
+        if (typeof state.predictedTmTarget === 'number' && Number.isFinite(state.predictedTmTarget)) setPredictedTmTarget(state.predictedTmTarget);
         const normalizedRecommend = normalizeSavedRecommendResults(state.recommendResults, state.recommendTopN);
         setRecommendResults(normalizedRecommend.results || []);
         staleRecommendCache = normalizedRecommend.stale;
@@ -1412,6 +1417,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         recommendDiversityMode,
         recommendResults,
         recommendMeta,
+        recommendNetworkConnectivityThreshold,
+        // Predicted metrics (Strategy 1) parameters
+        predictedSubWeights,
+        predictedTmTarget,
       };
       void savePipelineState(state, 'hmmer').catch(() => {});
     }, 500);
@@ -1467,6 +1476,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     recommendDiversityMode,
     recommendResults,
     recommendMeta,
+    recommendNetworkConnectivityThreshold,
+    predictedSubWeights,
+    predictedTmTarget,
   ]);
 
   useEffect(() => {
@@ -4705,6 +4717,10 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         if (typeof state.recommendMinSimilarity === 'number') setRecommendMinSimilarity(state.recommendMinSimilarity);
         if (typeof state.recommendTemperature === 'number') setRecommendTemperature(state.recommendTemperature);
         if (state.recommendDiversityMode === 'proportional' || state.recommendDiversityMode === 'round-robin') setRecommendDiversityMode(state.recommendDiversityMode);
+        if (typeof state.recommendNetworkConnectivityThreshold === 'number' && Number.isFinite(state.recommendNetworkConnectivityThreshold)) setRecommendNetworkConnectivityThreshold(state.recommendNetworkConnectivityThreshold);
+        // Predicted metrics (Strategy 1) parameters
+        if (state.predictedSubWeights && typeof state.predictedSubWeights === 'object') setPredictedSubWeights(normalizePredictedSubWeights(state.predictedSubWeights));
+        if (typeof state.predictedTmTarget === 'number' && Number.isFinite(state.predictedTmTarget)) setPredictedTmTarget(state.predictedTmTarget);
         const normalizedRecommend = normalizeSavedRecommendResults(state.recommendResults, state.recommendTopN);
         setRecommendResults(normalizedRecommend.results || []);
         staleRecommendCache = normalizedRecommend.stale;
@@ -4834,6 +4850,10 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         recommendDiversityMode,
         recommendResults,
         recommendMeta,
+        recommendNetworkConnectivityThreshold,
+        // Predicted metrics (Strategy 1) parameters
+        predictedSubWeights,
+        predictedTmTarget,
       };
       void savePipelineState(state, 'blast').catch(() => {});
     }, 500);
@@ -4848,6 +4868,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     clusterIdentity, clusterWordSize, clusteringRunInfo, networkPairwiseThresholdPct, networkIncludeReferenceLinks, networkSimilarityMethod,
     cytoBaseUrl, cytoCollection, cytoNetworkTitle, cytoLayout, cytoCategoryColumn, cytoApplyStyle,
     recommendWeights, recommendTopN, recommendMinClusterSize, recommendMinSimilarity, recommendTemperature, recommendDiversityMode, recommendResults, recommendMeta,
+    recommendNetworkConnectivityThreshold,
+    predictedSubWeights,
+    predictedTmTarget,
   ]);
 
   useEffect(() => {
@@ -6883,6 +6906,10 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
         if (typeof state.recommendMinClusterSize === 'number') setRecommendMinClusterSize(state.recommendMinClusterSize);
         if (typeof state.recommendMinSimilarity === 'number') setRecommendMinSimilarity(state.recommendMinSimilarity);
         if (typeof state.recommendTemperature === 'number') setRecommendTemperature(state.recommendTemperature);
+        if (typeof state.recommendNetworkConnectivityThreshold === 'number' && Number.isFinite(state.recommendNetworkConnectivityThreshold)) setRecommendNetworkConnectivityThreshold(state.recommendNetworkConnectivityThreshold);
+        // Predicted metrics (Strategy 1) parameters
+        if (state.predictedSubWeights && typeof state.predictedSubWeights === 'object') setPredictedSubWeights(normalizePredictedSubWeights(state.predictedSubWeights));
+        if (typeof state.predictedTmTarget === 'number' && Number.isFinite(state.predictedTmTarget)) setPredictedTmTarget(state.predictedTmTarget);
         const normalizedRecommend = normalizeSavedRecommendResults(state.recommendResults, state.recommendTopN);
         setRecommendResults(normalizedRecommend.results || []);
         staleRecommendCache = normalizedRecommend.stale;
@@ -6945,11 +6972,15 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
         recommendTemperature,
         recommendResults,
         recommendMeta,
+        recommendNetworkConnectivityThreshold,
+        // Predicted metrics (Strategy 1) parameters
+        predictedSubWeights,
+        predictedTmTarget,
       };
       void savePipelineState(state, 'compare').catch(() => {});
     }, 500);
     return () => clearTimeout(timer);
-  }, [selectedTaskId, taskAId, taskBId, keepReferences, compareResult, networkPairwiseThresholdPct, networkIncludeReferenceLinks, networkSimilarityMethod, cytoBaseUrl, cytoLayout, cytoCategoryColumn, cytoApplyStyle, recommendWeights, recommendTopN, recommendMinClusterSize, recommendMinSimilarity, recommendTemperature, recommendResults, recommendMeta]);
+  }, [selectedTaskId, taskAId, taskBId, keepReferences, compareResult, networkPairwiseThresholdPct, networkIncludeReferenceLinks, networkSimilarityMethod, cytoBaseUrl, cytoLayout, cytoCategoryColumn, cytoApplyStyle, recommendWeights, recommendTopN, recommendMinClusterSize, recommendMinSimilarity, recommendTemperature, recommendResults, recommendMeta, recommendNetworkConnectivityThreshold, predictedSubWeights, predictedTmTarget]);
 
   // ── Task actions ──
   const createTaskAndSwitch = async () => {
