@@ -44,6 +44,7 @@ import {
   fetchBrowserGraphData,
   recommendCandidates,
   exportRecommendedFasta,
+  predictNetworkMetrics,
   loadPipelineState,
   loadTaskArtifacts,
   downloadEbiHmmSearchResults,
@@ -68,7 +69,7 @@ import {
   compareIntersect,
   compareMerge,
 } from './api';
-import type { BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, BrowserGraphNode, BrowserGraphEdge } from './api';
+import type { BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, BrowserGraphNode, BrowserGraphEdge } from './api';
 import NetworkGraph from './NetworkGraph';
 
 type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'recommendation';
@@ -415,14 +416,22 @@ function isLikelyErrorLogLine(line: string): boolean {
 }
 
 // ── Multi-segment weight bar component ──
-const WEIGHT_COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b']; // indigo, sky, emerald, amber
-const DEFAULT_WEIGHTS: RecommendWeights = { avgRefSimilarity: 0.35, maxRefSimilarity: 0.25, clusterSize: 0.15, networkComponentSize: 0.15, taxonomyDiversity: 0.1 };
+const WEIGHT_COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b', '#ec4899']; // indigo, sky, emerald, violet, amber, pink
+const DEFAULT_WEIGHTS: RecommendWeights = { avgRefSimilarity: 0.28, maxRefSimilarity: 0.2, clusterSize: 0.12, networkComponentSize: 0.12, taxonomyDiversity: 0.08, predictedScore: 0.2 };
 const WEIGHT_LABELS: { key: keyof RecommendWeights; label: string }[] = [
   { key: 'avgRefSimilarity', label: 'Avg Ref Sim' },
   { key: 'maxRefSimilarity', label: 'Max Ref Sim' },
   { key: 'clusterSize', label: 'Cluster Size' },
   { key: 'networkComponentSize', label: 'Net Comp Size' },
   { key: 'taxonomyDiversity', label: 'Tax Diversity' },
+  { key: 'predictedScore', label: 'Predicted Score' },
+];
+
+const DEFAULT_PREDICTED_SUB_WEIGHTS: PredictedSubWeights = { kcat: 1 / 3, solubility: 1 / 3, tm: 1 / 3 };
+const PREDICTED_SUB_WEIGHT_LABELS: { key: keyof PredictedSubWeights; label: string }[] = [
+  { key: 'kcat', label: 'kcat' },
+  { key: 'solubility', label: 'Solubility' },
+  { key: 'tm', label: 'Tm' },
 ];
 
 function normalizeSavedRecommendResults(results: unknown, topN: unknown): { results: RecommendCandidate[] | null; stale: boolean } {
@@ -436,49 +445,79 @@ function normalizeSavedRecommendResults(results: unknown, topN: unknown): { resu
   return { results: results as RecommendCandidate[], stale: false };
 }
 
-function normalizeRecommendWeights(weights: unknown): RecommendWeights {
-  if (!weights || typeof weights !== 'object') {
-    return { ...DEFAULT_WEIGHTS };
+// Generic normalizer: given a partial weights record, a set of keys, and defaults,
+// clamps to >= 0 and rescales so the values sum to 1.
+function normalizeWeightRecord<K extends string>(
+  raw: unknown,
+  keys: readonly K[],
+  defaults: Record<K, number>,
+): Record<K, number> {
+  if (!raw || typeof raw !== 'object') {
+    return { ...defaults };
   }
-
-  const raw = weights as Partial<Record<keyof RecommendWeights, unknown>>;
-  const parsed: RecommendWeights = {
-    avgRefSimilarity: Number.isFinite(Number(raw.avgRefSimilarity)) ? Math.max(0, Number(raw.avgRefSimilarity)) : 0,
-    maxRefSimilarity: Number.isFinite(Number(raw.maxRefSimilarity)) ? Math.max(0, Number(raw.maxRefSimilarity)) : 0,
-    clusterSize: Number.isFinite(Number(raw.clusterSize)) ? Math.max(0, Number(raw.clusterSize)) : 0,
-    networkComponentSize: Number.isFinite(Number(raw.networkComponentSize)) ? Math.max(0, Number(raw.networkComponentSize)) : 0,
-    taxonomyDiversity: Number.isFinite(Number(raw.taxonomyDiversity)) ? Math.max(0, Number(raw.taxonomyDiversity)) : 0,
-  };
-
-  const total = Object.values(parsed).reduce((s, v) => s + v, 0);
+  const rawRecord = raw as Partial<Record<K, unknown>>;
+  const parsed = {} as Record<K, number>;
+  for (const key of keys) {
+    const v = Number(rawRecord[key]);
+    parsed[key] = Number.isFinite(v) ? Math.max(0, v) : 0;
+  }
+  const total = keys.reduce((s, k) => s + parsed[k], 0);
   if (!Number.isFinite(total) || total <= 0) {
-    return { ...DEFAULT_WEIGHTS };
+    return { ...defaults };
   }
-
-  return {
-    avgRefSimilarity: parsed.avgRefSimilarity / total,
-    maxRefSimilarity: parsed.maxRefSimilarity / total,
-    clusterSize: parsed.clusterSize / total,
-    networkComponentSize: parsed.networkComponentSize / total,
-    taxonomyDiversity: parsed.taxonomyDiversity / total,
-  };
+  const out = {} as Record<K, number>;
+  for (const key of keys) {
+    out[key] = parsed[key] / total;
+  }
+  return out;
 }
 
-function WeightBar({ weights, onChange }: { weights: RecommendWeights; onChange: (w: RecommendWeights) => void }) {
+function normalizeRecommendWeights(weights: unknown): RecommendWeights {
+  return normalizeWeightRecord(
+    weights,
+    WEIGHT_LABELS.map((w) => w.key),
+    DEFAULT_WEIGHTS,
+  ) as RecommendWeights;
+}
+
+function normalizePredictedSubWeights(weights: unknown): PredictedSubWeights {
+  return normalizeWeightRecord(
+    weights,
+    PREDICTED_SUB_WEIGHT_LABELS.map((w) => w.key),
+    DEFAULT_PREDICTED_SUB_WEIGHTS,
+  ) as PredictedSubWeights;
+}
+
+// Generic N-segment draggable weight bar. Works for both the 6-way recommendation
+// weights and the 3-way predicted-metric sub-weights.
+function WeightBar<K extends string>({
+  weights,
+  onChange,
+  labels,
+  colors,
+  defaults,
+}: {
+  weights: Record<K, number>;
+  onChange: (w: Record<K, number>) => void;
+  labels: { key: K; label: string }[];
+  colors?: string[];
+  defaults: Record<K, number>;
+}) {
   const barRef = useRef<HTMLDivElement>(null);
   const dragging = useRef<number | null>(null);
+  const keys = useMemo(() => labels.map((l) => l.key), [labels]);
+  const palette = colors || WEIGHT_COLORS;
 
-  // Convert weights to cumulative positions (3 dividers)
-  const normalizedWeights = useMemo(() => normalizeRecommendWeights(weights), [weights]);
-  const vals = WEIGHT_LABELS.map(({ key }) => normalizedWeights[key]);
+  const normalizedWeights = useMemo(() => normalizeWeightRecord(weights, keys, defaults), [weights, keys, defaults]);
+  const vals = keys.map((k) => normalizedWeights[k]);
   const total = vals.reduce((s, v) => s + v, 0) || 1;
-  const normed = vals.map(v => v / total);
+  const normed = vals.map((v) => v / total);
   const cumulative = normed.reduce<number[]>((acc, v, i) => {
     acc.push((acc[i - 1] ?? 0) + v);
     return acc;
   }, []);
-  // divider positions: cumulative[0], cumulative[1], cumulative[2]  (cumulative[3] = 1)
-  const dividers = cumulative.slice(0, 4);
+  const dividerCount = keys.length - 1;
+  const dividers = cumulative.slice(0, dividerCount);
 
   const handlePointerDown = (idx: number) => (e: React.PointerEvent) => {
     e.preventDefault();
@@ -491,21 +530,22 @@ function WeightBar({ weights, onChange }: { weights: RecommendWeights; onChange:
     const rect = barRef.current.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const idx = dragging.current;
-    const minGap = 0;
-    const lo = idx === 0 ? minGap : dividers[idx - 1] + minGap;
-    const hi = idx === 3 ? 1 - minGap : dividers[idx + 1] - minGap;
+    const lo = idx === 0 ? 0 : dividers[idx - 1];
+    const hi = idx === dividerCount - 1 ? 1 : dividers[idx + 1];
     const clamped = Math.max(lo, Math.min(hi, pct));
     const newDiv = [...dividers];
     newDiv[idx] = clamped;
-    // Derive weights from divider positions
-    const segs = [newDiv[0], newDiv[1] - newDiv[0], newDiv[2] - newDiv[1], newDiv[3] - newDiv[2], 1 - newDiv[3]];
-    const next: RecommendWeights = {
-      avgRefSimilarity: Number(segs[0].toFixed(2)),
-      maxRefSimilarity: Number(segs[1].toFixed(2)),
-      clusterSize: Number(segs[2].toFixed(2)),
-      networkComponentSize: Number(segs[3].toFixed(2)),
-      taxonomyDiversity: Number(segs[4].toFixed(2)),
-    };
+    // Derive segment widths from divider positions
+    const segs: number[] = [];
+    for (let i = 0; i < keys.length; i++) {
+      const left = i === 0 ? 0 : newDiv[i - 1];
+      const right = i === keys.length - 1 ? 1 : newDiv[i];
+      segs.push(Math.max(0, right - left));
+    }
+    const next = {} as Record<K, number>;
+    keys.forEach((k, i) => {
+      next[k] = Number(segs[i].toFixed(3));
+    });
     onChange(next);
   };
 
@@ -528,7 +568,7 @@ function WeightBar({ weights, onChange }: { weights: RecommendWeights; onChange:
             <div
               key={i}
               className="absolute top-0 h-full flex items-center justify-center text-[10px] text-white font-medium"
-              style={{ left: `${left * 100}%`, width: `${w * 100}%`, backgroundColor: WEIGHT_COLORS[i] }}
+              style={{ left: `${left * 100}%`, width: `${w * 100}%`, backgroundColor: palette[i % palette.length] }}
             >
               {w >= 0.08 && `${(w * 100).toFixed(0)}%`}
             </div>
@@ -545,21 +585,137 @@ function WeightBar({ weights, onChange }: { weights: RecommendWeights; onChange:
           </div>
         ))}
       </div>
-      <div className="flex items-center gap-3 text-[10px] text-slate-500">
-        {WEIGHT_LABELS.map(({ key, label }, i) => (
+      <div className="flex items-center gap-3 text-[10px] text-slate-500 flex-wrap">
+        {labels.map(({ key, label }, i) => (
           <span key={key} className="flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: WEIGHT_COLORS[i] }} />
+            <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: palette[i % palette.length] }} />
             {label} {(normalizedWeights[key] * 100).toFixed(0)}%
           </span>
         ))}
         <button
           type="button"
           className="ml-auto text-[10px] text-slate-400 hover:text-indigo-500 underline"
-          onClick={() => onChange({ ...DEFAULT_WEIGHTS })}
+          onClick={() => onChange({ ...defaults })}
         >
           Reset to Default
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Strategy 1: property-prediction based scoring (kcat / solubility / Tm) ──
+// Self-contained panel: fetches (and caches) raw predictions from the backend,
+// then normalizes + weights them client-side into a single "Predicted Score"
+// per candidate. The sub-weights and Tm target are lifted to the parent view
+// so the same values can be reused as the 6th weight in the comprehensive
+// recommendation strategy below.
+function PredictedMetricsPanel({
+  subWeights,
+  onSubWeightsChange,
+  tmTarget,
+  onTmTargetChange,
+}: {
+  subWeights: PredictedSubWeights;
+  onSubWeightsChange: (w: PredictedSubWeights) => void;
+  tmTarget: number;
+  onTmTargetChange: (v: number) => void;
+}) {
+  const [rows, setRows] = useState<PredictedMetricsRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [lastRunInfo, setLastRunInfo] = useState<{ count: number; recomputedCount: number } | null>(null);
+
+  const runPredict = async (forceRecompute: boolean) => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await predictNetworkMetrics({
+        forceRecompute,
+        subWeights: normalizePredictedSubWeights(subWeights),
+        tmTarget,
+      });
+      setRows(data.rows);
+      setLastRunInfo({ count: data.count, recomputedCount: data.recomputedCount });
+    } catch (err: any) {
+      setError(String(err?.message || err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-slate-900">Strategy 1: Property Prediction Score</h2>
+      </div>
+      <p className="text-sm text-slate-600">
+        Runs kcat, solubility, and Tm (melting temperature) predictors on every candidate sequence in the network, then combines
+        the three (min-max normalized) values into a single weighted score. Results are cached per task; use "Recompute All" to
+        force fresh predictions.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Tm Target (°C)</label>
+          <input type="number" step={0.5} className="w-full p-2 border rounded text-sm"
+            value={tmTarget}
+            onChange={(e) => onTmTargetChange(Number(e.target.value))} />
+          <p className="text-[10px] text-slate-400 mt-1">Sequences with Tm closest to this target score highest.</p>
+        </div>
+      </div>
+      <WeightBar
+        weights={subWeights}
+        onChange={onSubWeightsChange}
+        labels={PREDICTED_SUB_WEIGHT_LABELS}
+        colors={['#0ea5e9', '#10b981', '#f59e0b']}
+        defaults={DEFAULT_PREDICTED_SUB_WEIGHTS}
+      />
+      <div className="flex items-center gap-3 flex-wrap">
+        <button className="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+          disabled={loading}
+          onClick={() => runPredict(false)}>
+          {loading ? 'Predicting...' : 'Run Property Prediction'}
+        </button>
+        <button className="text-xs text-slate-400 hover:text-indigo-500 underline disabled:opacity-50"
+          disabled={loading}
+          onClick={() => runPredict(true)}>
+          Recompute All
+        </button>
+        {lastRunInfo && (
+          <span className="text-xs text-slate-500">
+            {lastRunInfo.count} candidate(s) scored, {lastRunInfo.recomputedCount} newly predicted
+          </span>
+        )}
+      </div>
+      {error && <div className="text-sm text-red-600">{error}</div>}
+      {rows.length > 0 && (
+        <div className="border border-slate-200 rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 sticky top-0">
+              <tr>
+                <th className="px-2 py-2 text-left">#</th>
+                <th className="px-2 py-2 text-left">ID</th>
+                <th className="px-2 py-2 text-right">kcat</th>
+                <th className="px-2 py-2 text-right">Solubility</th>
+                <th className="px-2 py-2 text-right">Tm</th>
+                <th className="px-2 py-2 text-right">Predicted Score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                  <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
+                  <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{r.id}</td>
+                  <td className="px-2 py-1.5 text-right">{r.kcat.toFixed(2)}</td>
+                  <td className="px-2 py-1.5 text-right">{r.solubility.toFixed(1)}%</td>
+                  <td className="px-2 py-1.5 text-right">{r.tm.toFixed(1)}°C</td>
+                  <td className="px-2 py-1.5 text-right font-semibold">{r.predictedScore.toFixed(4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -822,14 +978,16 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
   // ── Recommendation state ──
   const [recommendResults, setRecommendResults] = useState<RecommendCandidate[]>([]);
-  const [recommendWeights, setRecommendWeights] = useState<RecommendWeights>({ avgRefSimilarity: 0.35, maxRefSimilarity: 0.25, clusterSize: 0.15, networkComponentSize: 0.15, taxonomyDiversity: 0.1 });
+  const [recommendWeights, setRecommendWeights] = useState<RecommendWeights>({ ...DEFAULT_WEIGHTS });
   const [recommendNetworkConnectivityThreshold, setRecommendNetworkConnectivityThreshold] = useState<number>(85);
   const [recommendTopN, setRecommendTopN] = useState(50);
   const [recommendMinClusterSize, setRecommendMinClusterSize] = useState(2);
   const [recommendMinSimilarity, setRecommendMinSimilarity] = useState(0);
   const [recommendTemperature, setRecommendTemperature] = useState(0);
   const [recommendDiversityMode, setRecommendDiversityMode] = useState<'proportional' | 'round-robin'>('proportional');
-  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number } | null>(null);
+  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number; predictedMetricsAvailable: boolean } | null>(null);
+  const [predictedSubWeights, setPredictedSubWeights] = useState<PredictedSubWeights>({ ...DEFAULT_PREDICTED_SUB_WEIGHTS });
+  const [predictedTmTarget, setPredictedTmTarget] = useState(60);
 
   const getDerivedEbiSearchStepStatus = (): StepStatus => {
     const { submit, download, enrich } = ebiSubStepState;
@@ -2079,9 +2237,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   };
 
   const runRecommendation = async () => {
-    const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold });
+    const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget });
     setRecommendResults(data.candidates);
-    setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity });
+    setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
   };
 
   const highlightRecommendationsInNetwork = async () => {
@@ -3960,9 +4118,16 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             {currentView === 'recommendation' && (
               <div className="space-y-4">
                 <h1 className="text-2xl font-semibold">Candidate Recommendation</h1>
+                <PredictedMetricsPanel
+                  subWeights={predictedSubWeights}
+                  onSubWeightsChange={setPredictedSubWeights}
+                  tmTarget={predictedTmTarget}
+                  onTmTargetChange={setPredictedTmTarget}
+                />
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                  <h2 className="text-base font-semibold text-slate-900">Strategy 2: Comprehensive Recommendation</h2>
                   <p className="text-sm text-slate-600">
-                    Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, and cluster size. Isolated points (clusters containing only 1 sequence) are excluded by default.
+                    Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Strategy 1 predicted property score. Isolated points (clusters containing only 1 sequence) are excluded by default.
                   </p>
                   <details className="text-xs text-slate-400">
                     <summary className="cursor-pointer select-none">Parameter Description</summary>
@@ -4028,7 +4193,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         onChange={(e) => setRecommendTemperature(Number(e.target.value))} />
                     </div>
                   </div>
-                  <WeightBar weights={recommendWeights} onChange={setRecommendWeights} />
+                  <WeightBar weights={recommendWeights} onChange={setRecommendWeights} labels={WEIGHT_LABELS} defaults={DEFAULT_WEIGHTS} />
                   <div className="flex items-center gap-3">
                     <button className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm"
                       disabled={job.loading}
@@ -4046,6 +4211,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         {recommendMeta.filteredBySimilarity > 0 && `, ${recommendMeta.filteredBySimilarity} below similarity threshold`}
                       </div>
                     )}
+                    {!recommendMeta.predictedMetricsAvailable && (
+                      <div className="text-amber-700">⚠ Strategy 1 predictions haven't been run yet for this task, so the Predicted Score weight contributed 0.</div>
+                    )}
                   </div>
                 )}
                 {recommendResults.length > 0 && (
@@ -4056,6 +4224,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           <th className="px-2 py-2 text-left">#</th>
                           <th className="px-2 py-2 text-left">ID</th>
                           <th className="px-2 py-2 text-right">Score</th>
+                          <th className="px-2 py-2 text-right">Predicted Score</th>
                           <th className="px-2 py-2 text-right">Avg Ref Sim</th>
                           <th className="px-2 py-2 text-right">Max Ref Sim</th>
                           <th className="px-2 py-2 text-right">Ref Edges</th>
@@ -4075,6 +4244,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                             <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
                             <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{c.id}</td>
                             <td className="px-2 py-1.5 text-right font-semibold">{c.score.toFixed(4)}</td>
+                            <td className="px-2 py-1.5 text-right">{c.predictedScore.toFixed(4)}</td>
                             <td className="px-2 py-1.5 text-right">{(c.avgRefSimilarity * 100).toFixed(1)}%</td>
                             <td className="px-2 py-1.5 text-right">{(c.maxRefSimilarity * 100).toFixed(1)}%</td>
                             <td className="px-2 py-1.5 text-right">{c.refEdgeCount}</td>
@@ -4400,14 +4570,16 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
   // ── Recommendation state ──
   const [recommendResults, setRecommendResults] = useState<RecommendCandidate[]>([]);
-  const [recommendWeights, setRecommendWeights] = useState<RecommendWeights>({ avgRefSimilarity: 0.35, maxRefSimilarity: 0.25, clusterSize: 0.15, networkComponentSize: 0.15, taxonomyDiversity: 0.1 });
+  const [recommendWeights, setRecommendWeights] = useState<RecommendWeights>({ ...DEFAULT_WEIGHTS });
   const [recommendNetworkConnectivityThreshold, setRecommendNetworkConnectivityThreshold] = useState<number>(85);
   const [recommendTopN, setRecommendTopN] = useState(50);
   const [recommendMinClusterSize, setRecommendMinClusterSize] = useState(2);
   const [recommendMinSimilarity, setRecommendMinSimilarity] = useState(0);
   const [recommendTemperature, setRecommendTemperature] = useState(0);
   const [recommendDiversityMode, setRecommendDiversityMode] = useState<'proportional' | 'round-robin'>('proportional');
-  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number } | null>(null);
+  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number; predictedMetricsAvailable: boolean } | null>(null);
+  const [predictedSubWeights, setPredictedSubWeights] = useState<PredictedSubWeights>({ ...DEFAULT_PREDICTED_SUB_WEIGHTS });
+  const [predictedTmTarget, setPredictedTmTarget] = useState(60);
 
   // ---- effects ----
   useEffect(() => {
@@ -4916,9 +5088,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   }
 
   async function runRecommendation() {
-    const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold });
+    const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget });
     setRecommendResults(data.candidates);
-    setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity });
+    setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
   }
 
   async function highlightRecommendationsInNetwork() {
@@ -6331,9 +6503,16 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           {currentView === 'recommendation' && (
             <div className="space-y-4">
               <h1 className="text-2xl font-semibold">Candidate Recommendation</h1>
+              <PredictedMetricsPanel
+                subWeights={predictedSubWeights}
+                onSubWeightsChange={setPredictedSubWeights}
+                tmTarget={predictedTmTarget}
+                onTmTargetChange={setPredictedTmTarget}
+              />
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                <h2 className="text-base font-semibold text-slate-900">Strategy 2: Comprehensive Recommendation</h2>
                 <p className="text-sm text-slate-600">
-                  Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, and cluster size. Isolated points (clusters containing only 1 sequence) are excluded by default.
+                  Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Strategy 1 predicted property score. Isolated points (clusters containing only 1 sequence) are excluded by default.
                 </p>
                 <details className="text-xs text-slate-400">
                   <summary className="cursor-pointer select-none">Parameter Description</summary>
@@ -6399,7 +6578,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       onChange={(e) => setRecommendTemperature(Number(e.target.value))} />
                   </div>
                 </div>
-                <WeightBar weights={recommendWeights} onChange={setRecommendWeights} />
+                <WeightBar weights={recommendWeights} onChange={setRecommendWeights} labels={WEIGHT_LABELS} defaults={DEFAULT_WEIGHTS} />
                 <div className="flex items-center gap-3">
                   <button className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm"
                     disabled={job.loading}
@@ -6417,6 +6596,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       {recommendMeta.filteredBySimilarity > 0 && `, ${recommendMeta.filteredBySimilarity} below similarity threshold`}
                     </div>
                   )}
+                  {!recommendMeta.predictedMetricsAvailable && (
+                    <div className="text-amber-700">⚠ Strategy 1 predictions haven't been run yet for this task, so the Predicted Score weight contributed 0.</div>
+                  )}
                 </div>
               )}
               {recommendResults.length > 0 && (
@@ -6427,6 +6609,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         <th className="px-2 py-2 text-left">#</th>
                         <th className="px-2 py-2 text-left">ID</th>
                         <th className="px-2 py-2 text-right">Score</th>
+                        <th className="px-2 py-2 text-right">Predicted Score</th>
                         <th className="px-2 py-2 text-right">Avg Ref Sim</th>
                         <th className="px-2 py-2 text-right">Max Ref Sim</th>
                         <th className="px-2 py-2 text-right">Ref Edges</th>
@@ -6446,6 +6629,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
                           <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{c.id}</td>
                           <td className="px-2 py-1.5 text-right font-semibold">{c.score.toFixed(4)}</td>
+                          <td className="px-2 py-1.5 text-right">{c.predictedScore.toFixed(4)}</td>
                           <td className="px-2 py-1.5 text-right">{(c.avgRefSimilarity * 100).toFixed(1)}%</td>
                           <td className="px-2 py-1.5 text-right">{(c.maxRefSimilarity * 100).toFixed(1)}%</td>
                           <td className="px-2 py-1.5 text-right">{c.refEdgeCount}</td>
@@ -6540,14 +6724,16 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
 
   // Recommendation state
   const [recommendResults, setRecommendResults] = useState<RecommendCandidate[]>([]);
-  const [recommendWeights, setRecommendWeights] = useState<RecommendWeights>({ avgRefSimilarity: 0.35, maxRefSimilarity: 0.25, clusterSize: 0.15, networkComponentSize: 0.15, taxonomyDiversity: 0.1 });
+  const [recommendWeights, setRecommendWeights] = useState<RecommendWeights>({ ...DEFAULT_WEIGHTS });
   const [recommendNetworkConnectivityThreshold, setRecommendNetworkConnectivityThreshold] = useState<number>(85);
   const [recommendTopN, setRecommendTopN] = useState(50);
   const [recommendMinClusterSize, setRecommendMinClusterSize] = useState(2);
   const [recommendMinSimilarity, setRecommendMinSimilarity] = useState(0);
   const [recommendTemperature, setRecommendTemperature] = useState(0);
   const [recommendDiversityMode, setRecommendDiversityMode] = useState<'proportional' | 'round-robin'>('proportional');
-  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number } | null>(null);
+  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number; predictedMetricsAvailable: boolean } | null>(null);
+  const [predictedSubWeights, setPredictedSubWeights] = useState<PredictedSubWeights>({ ...DEFAULT_PREDICTED_SUB_WEIGHTS });
+  const [predictedTmTarget, setPredictedTmTarget] = useState(60);
 
   // Runtime logs + progress
   const [runtimeMeta, setRuntimeMeta] = useState<{
@@ -6808,9 +6994,9 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
     setError('');
     try {
       setActiveTaskId(selectedTaskId);
-      const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold });
+      const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget });
       setRecommendResults(data.candidates);
-      setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity });
+      setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
     } catch (err: any) {
       setError(String(err?.message || err));
     } finally {
@@ -7334,8 +7520,15 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
               <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">5</span>
               Candidate Recommendation
             </h2>
+            <PredictedMetricsPanel
+              subWeights={predictedSubWeights}
+              onSubWeightsChange={setPredictedSubWeights}
+              tmTarget={predictedTmTarget}
+              onTmTargetChange={setPredictedTmTarget}
+            />
+            <h3 className="text-base font-semibold text-slate-900">Strategy 2: Comprehensive Recommendation</h3>
             <p className="text-sm text-slate-600">
-              Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, and cluster size. Isolated points (clusters containing only 1 sequence) are excluded by default.
+              Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Strategy 1 predicted property score. Isolated points (clusters containing only 1 sequence) are excluded by default.
             </p>
             <details className="text-xs text-slate-400">
               <summary className="cursor-pointer select-none">Parameter Description</summary>
@@ -7401,7 +7594,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                   onChange={(e) => setRecommendTemperature(Number(e.target.value))} />
               </div>
             </div>
-            <WeightBar weights={recommendWeights} onChange={setRecommendWeights} />
+            <WeightBar weights={recommendWeights} onChange={setRecommendWeights} labels={WEIGHT_LABELS} defaults={DEFAULT_WEIGHTS} />
             <button
               className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
               disabled={loading}
@@ -7418,6 +7611,9 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                     {recommendMeta.filteredBySimilarity > 0 && `, ${recommendMeta.filteredBySimilarity} below similarity threshold`}
                   </div>
                 )}
+                {!recommendMeta.predictedMetricsAvailable && (
+                  <div className="text-amber-700">⚠ Strategy 1 predictions haven't been run yet for this task, so the Predicted Score weight contributed 0.</div>
+                )}
               </div>
             )}
             {recommendResults.length > 0 && (
@@ -7428,6 +7624,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                       <th className="px-2 py-2 text-left">#</th>
                       <th className="px-2 py-2 text-left">ID</th>
                       <th className="px-2 py-2 text-right">Score</th>
+                      <th className="px-2 py-2 text-right">Predicted Score</th>
                       <th className="px-2 py-2 text-right">Avg Ref Sim</th>
                       <th className="px-2 py-2 text-right">Max Ref Sim</th>
                       <th className="px-2 py-2 text-right">Ref Edges</th>
@@ -7443,6 +7640,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                         <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
                         <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{c.id}</td>
                         <td className="px-2 py-1.5 text-right font-semibold">{c.score.toFixed(4)}</td>
+                        <td className="px-2 py-1.5 text-right">{c.predictedScore.toFixed(4)}</td>
                         <td className="px-2 py-1.5 text-right">{(c.avgRefSimilarity * 100).toFixed(1)}%</td>
                         <td className="px-2 py-1.5 text-right">{(c.maxRefSimilarity * 100).toFixed(1)}%</td>
                         <td className="px-2 py-1.5 text-right">{c.refEdgeCount}</td>

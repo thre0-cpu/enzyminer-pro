@@ -521,6 +521,91 @@ async function writeCsvRows(csvPath, headers, rows) {
   await fs.writeFile(csvPath, lines.join('\n'), 'utf-8');
 }
 
+// ── Mock property predictors (kcat / solubility / Tm) ──────────────────────
+// TODO: replace the bodies of predictKcatMock / predictSolubilityMock /
+// predictTmMock with real HTTP calls to the actual prediction APIs once they
+// are available. Keep the `(seq) => Promise<number>` signature so the rest of
+// the pipeline (caching, normalization, scoring) doesn't need to change.
+function hashSeqToUnit(seq, salt) {
+  let hash = 2166136261;
+  const s = `${salt}:${seq}`;
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return ((hash >>> 0) % 1000000) / 1000000;
+}
+
+async function predictKcatMock(seq) {
+  // Placeholder range: 0.01 - 100 s^-1
+  return Number((0.01 + hashSeqToUnit(seq, 'kcat') * 99.99).toFixed(3));
+}
+
+async function predictSolubilityMock(seq) {
+  // Placeholder range: 0 - 100 (%)
+  return Number((hashSeqToUnit(seq, 'solubility') * 100).toFixed(2));
+}
+
+async function predictTmMock(seq) {
+  // Placeholder range: 30 - 90 °C
+  return Number((30 + hashSeqToUnit(seq, 'tm') * 60).toFixed(2));
+}
+
+function resolvePredictedMetricsPath(workDir) {
+  return path.join(workDir, 'predicted_metrics.csv');
+}
+
+// Normalizes raw predicted kcat/solubility/Tm values into [0, 1] scores and
+// combines them into a single weighted "predictedScore" per candidate id.
+// Tm is scored by closeness to `tmTarget` (not simply "higher is better").
+function computePredictedNormalization(rows, subWeights, tmTarget) {
+  const minMaxScaler = (values) => {
+    const finite = values.filter((v) => Number.isFinite(v));
+    if (!finite.length) return () => 0.5;
+    const min = Math.min(...finite);
+    const max = Math.max(...finite);
+    const span = max - min;
+    return (v) => (Number.isFinite(v) && span > 1e-9 ? (v - min) / span : (finite.length ? 0.5 : 0));
+  };
+
+  const kcatScaler = minMaxScaler(rows.map((r) => r.kcat));
+  const solubilityScaler = minMaxScaler(rows.map((r) => r.solubility));
+  const tmDiffScaler = minMaxScaler(rows.map((r) => -Math.abs(r.tm - tmTarget)));
+
+  const wSum = (subWeights.kcat + subWeights.solubility + subWeights.tm) || 1;
+  const out = new Map();
+  for (const r of rows) {
+    const kcatNorm = Number(kcatScaler(r.kcat).toFixed(4));
+    const solubilityNorm = Number(solubilityScaler(r.solubility).toFixed(4));
+    const tmNorm = Number(tmDiffScaler(-Math.abs(r.tm - tmTarget)).toFixed(4));
+    const predictedScore = Number((
+      (subWeights.kcat * kcatNorm + subWeights.solubility * solubilityNorm + subWeights.tm * tmNorm) / wSum
+    ).toFixed(4));
+    out.set(r.id, { kcatNorm, solubilityNorm, tmNorm, predictedScore });
+  }
+  return out;
+}
+
+function normalizePredictedSubWeights(raw) {
+  const kcat = Number.isFinite(Number(raw?.kcat)) ? Math.max(0, Number(raw.kcat)) : 1 / 3;
+  const solubility = Number.isFinite(Number(raw?.solubility)) ? Math.max(0, Number(raw.solubility)) : 1 / 3;
+  const tm = Number.isFinite(Number(raw?.tm)) ? Math.max(0, Number(raw.tm)) : 1 / 3;
+  return { kcat, solubility, tm };
+}
+
+async function loadPredictedMetricsMap(workDir) {
+  try {
+    const { rows } = await readCsvRows(resolvePredictedMetricsPath(workDir));
+    const map = new Map();
+    for (const r of rows) {
+      map.set(r.id, { id: r.id, kcat: Number(r.kcat), solubility: Number(r.solubility), tm: Number(r.tm) });
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 function sanitizeFastaId(value) {
   return String(value || '')
     .trim()
@@ -4563,6 +4648,68 @@ app.post('/api/network/push-cytoscape', async (req, res) => {
   });
 });
 
+// ── Candidate property prediction (kcat / solubility / Tm) ─────────────────
+app.post('/api/network/predict-metrics', async (req, res) => {
+  const { taskId } = await resolveWorkDirForReq(req);
+  if (!beginRuntimeTaskOrReject(res, 'network/predict-metrics', taskId)) return;
+
+  await runInTaskContext(taskId, async () => {
+    try {
+      const { workDir } = await resolveWorkDirForReq(req);
+      setRuntimeMeta({ taskId });
+
+      const forceRecompute = Boolean(req.body?.forceRecompute);
+      const tmTarget = Number.isFinite(Number(req.body?.tmTarget)) ? Number(req.body.tmTarget) : 60;
+      const subWeights = normalizePredictedSubWeights(req.body?.subWeights);
+
+      const { rows: nodeRows } = await readCsvRows(path.join(workDir, 'nodes.csv'));
+      const candidateIds = nodeRows.filter((n) => String(n.is_reference) !== '1').map((n) => n.id);
+      if (!candidateIds.length) throw new Error('No candidate sequences found in nodes.csv – run similarity computation first');
+
+      const metricsPath = resolvePredictedMetricsPath(workDir);
+      const existing = forceRecompute ? new Map() : await loadPredictedMetricsMap(workDir);
+
+      const missingIds = candidateIds.filter((id) => !existing.has(id));
+      if (missingIds.length) {
+        const candFastaPath = await firstExistingPath(resolveNetworkSourceFasta(workDir));
+        if (!candFastaPath) throw new Error('Could not find candidate FASTA to run predictions on');
+        const text = await fs.readFile(candFastaPath, 'utf-8');
+        const seqLookup = buildSequenceLookup(parseFastaRecords(text));
+
+        pushRuntimeLine(`[predict-metrics] running mock predictors for ${missingIds.length} sequence(s)`);
+        let done = 0;
+        for (const id of missingIds) {
+          const seq = seqLookup.get(id);
+          if (!seq) continue;
+          const [kcat, solubility, tm] = await Promise.all([
+            predictKcatMock(seq),
+            predictSolubilityMock(seq),
+            predictTmMock(seq),
+          ]);
+          existing.set(id, { id, kcat, solubility, tm });
+          done++;
+          if (done % 50 === 0) pushRuntimeLine(`[predict-metrics] ${done}/${missingIds.length} done`);
+        }
+        pushRuntimeLine(`[predict-metrics] finished ${done}/${missingIds.length} new prediction(s)`);
+      }
+
+      const allRows = candidateIds.map((id) => existing.get(id)).filter(Boolean);
+      await writeCsvRows(metricsPath, ['id', 'kcat', 'solubility', 'tm'], allRows);
+
+      const normMap = computePredictedNormalization(allRows, subWeights, tmTarget);
+      const rows = allRows
+        .map((r) => ({ id: r.id, kcat: r.kcat, solubility: r.solubility, tm: r.tm, ...normMap.get(r.id) }))
+        .sort((a, b) => b.predictedScore - a.predictedScore);
+
+      res.json({ ok: true, taskId, count: rows.length, recomputedCount: missingIds.length, tmTarget, subWeights, rows });
+      finishRuntimeTask('network/predict-metrics', true);
+    } catch (err) {
+      finishRuntimeTask('network/predict-metrics', false);
+      jsonError(res, 'Failed to predict candidate metrics', String(err));
+    }
+  });
+});
+
 // ── Candidate Recommendation ──────────────────────────────────────
 app.post('/api/network/recommend-candidates', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
@@ -4574,12 +4721,15 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
       setRuntimeMeta({ taskId });
 
       const weights = {
-        avgRefSimilarity: Number(req.body?.weights?.avgRefSimilarity ?? 0.35),
-        maxRefSimilarity: Number(req.body?.weights?.maxRefSimilarity ?? 0.25),
-        clusterSize: Number(req.body?.weights?.clusterSize ?? 0.15),
-        networkComponentSize: Number(req.body?.weights?.networkComponentSize ?? 0.15),
-        taxonomyDiversity: Number(req.body?.weights?.taxonomyDiversity ?? 0.1),
+        avgRefSimilarity: Number(req.body?.weights?.avgRefSimilarity ?? 0.28),
+        maxRefSimilarity: Number(req.body?.weights?.maxRefSimilarity ?? 0.2),
+        clusterSize: Number(req.body?.weights?.clusterSize ?? 0.12),
+        networkComponentSize: Number(req.body?.weights?.networkComponentSize ?? 0.12),
+        taxonomyDiversity: Number(req.body?.weights?.taxonomyDiversity ?? 0.08),
+        predictedScore: Number(req.body?.weights?.predictedScore ?? 0.2),
       };
+      const predictedSubWeights = normalizePredictedSubWeights(req.body?.predictedSubWeights);
+      const predictedTmTarget = Number.isFinite(Number(req.body?.predictedTmTarget)) ? Number(req.body.predictedTmTarget) : 60;
       const topN = Math.max(1, Math.min(Number(req.body?.topN) || 50, 5000));
       const minClusterSize = Math.max(1, Number(req.body?.minClusterSize) || 2);
       const minSimilarity = Math.max(0, Math.min(100, Number(req.body?.minSimilarity) || 0));
@@ -4667,6 +4817,13 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
       }
       const maxClassCount = Math.max(1, ...Array.from(clusterClasses.values()).map((s) => s.size));
 
+      // Predicted property score (kcat / solubility / Tm), if predict-metrics has been run for this task.
+      const predictedMetricsMap = await loadPredictedMetricsMap(workDir);
+      const predictedMetricsAvailable = predictedMetricsMap.size > 0;
+      const predictedNormMap = predictedMetricsAvailable
+        ? computePredictedNormalization(Array.from(predictedMetricsMap.values()), predictedSubWeights, predictedTmTarget)
+        : new Map();
+
       // Score each non-reference candidate
       const candidates = [];
       let filteredByClusterSize = 0;
@@ -4687,13 +4844,15 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
         
         const classCount = clusterClasses.get(node.cluster || '')?.size || 1;
         const taxonomyDiv = classCount / maxClassCount;
+        const predictedScore = predictedNormMap.get(node.id)?.predictedScore ?? 0;
 
         const score =
           weights.avgRefSimilarity * avgRefSim +
           weights.maxRefSimilarity * maxRefSim +
           weights.clusterSize * clusterSizeNorm +
           weights.networkComponentSize * compSizeNorm +
-          weights.taxonomyDiversity * taxonomyDiv;
+          weights.taxonomyDiversity * taxonomyDiv +
+          weights.predictedScore * predictedScore;
 
         candidates.push({
           id: node.id,
@@ -4715,6 +4874,7 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
           clusterSizeNorm: Number(clusterSizeNorm.toFixed(4)),
           networkComponentSizeNorm: Number(compSizeNorm.toFixed(4)),
           taxonomyDiversity: Number(taxonomyDiv.toFixed(4)),
+          predictedScore: Number(predictedScore.toFixed(4)),
           score: Number(score.toFixed(4)),
           refEdgeCount: sims.length,
         });
@@ -4908,7 +5068,9 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
                     weights.avgRefSimilarity * avgSim +
                     weights.maxRefSimilarity * maxSim +
                     weights.clusterSize * cand.clusterSizeNorm +
-                    weights.taxonomyDiversity * cand.taxonomyDiversity
+                    weights.networkComponentSize * cand.networkComponentSizeNorm +
+                    weights.taxonomyDiversity * cand.taxonomyDiversity +
+                    weights.predictedScore * cand.predictedScore
                   ).toFixed(4));
                 }
                 pushRuntimeLine(`[recommend] ref similarity computed for ${candRefSims.size} candidates`);
@@ -4934,6 +5096,9 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
         temperature,
         diversityMode,
         weights,
+        predictedSubWeights,
+        predictedTmTarget,
+        predictedMetricsAvailable,
         candidates: diverseTopN,
       });
       finishRuntimeTask('network/recommend', true);

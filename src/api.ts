@@ -705,6 +705,7 @@ export type RecommendCandidate = {
   clusterSizeNorm: number;
   networkComponentSizeNorm: number;
   taxonomyDiversity: number;
+  predictedScore: number;
   score: number;
   refEdgeCount: number;
 };
@@ -715,7 +716,47 @@ export type RecommendWeights = {
   clusterSize: number;
   networkComponentSize: number;
   taxonomyDiversity: number;
+  predictedScore: number;
 };
+
+export type PredictedSubWeights = {
+  kcat: number;
+  solubility: number;
+  tm: number;
+};
+
+export type PredictedMetricsRow = {
+  id: string;
+  kcat: number;
+  solubility: number;
+  tm: number;
+  kcatNorm: number;
+  solubilityNorm: number;
+  tmNorm: number;
+  predictedScore: number;
+};
+
+export function predictNetworkMetrics(opts?: {
+  forceRecompute?: boolean;
+  subWeights?: Partial<PredictedSubWeights>;
+  tmTarget?: number;
+}) {
+  return request<{
+    count: number;
+    recomputedCount: number;
+    tmTarget: number;
+    subWeights: PredictedSubWeights;
+    rows: PredictedMetricsRow[];
+  }>('/api/network/predict-metrics', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      forceRecompute: opts?.forceRecompute,
+      subWeights: opts?.subWeights,
+      tmTarget: opts?.tmTarget,
+    }),
+  });
+}
 
 export function recommendCandidates(opts?: {
   weights?: Partial<RecommendWeights>;
@@ -725,6 +766,8 @@ export function recommendCandidates(opts?: {
   temperature?: number;
   networkConnectivityThreshold?: number;
   diversityMode?: 'proportional' | 'round-robin';
+  predictedSubWeights?: Partial<PredictedSubWeights>;
+  predictedTmTarget?: number;
 }) {
   return request<{
     totalCandidates: number;
@@ -736,6 +779,9 @@ export function recommendCandidates(opts?: {
     temperature: number;
     diversityMode: string;
     weights: RecommendWeights;
+    predictedSubWeights: PredictedSubWeights;
+    predictedTmTarget: number;
+    predictedMetricsAvailable: boolean;
     candidates: RecommendCandidate[];
   }>('/api/network/recommend-candidates', {
     method: 'POST',
@@ -748,6 +794,8 @@ export function recommendCandidates(opts?: {
       temperature: opts?.temperature,
       networkConnectivityThreshold: opts?.networkConnectivityThreshold,
       diversityMode: opts?.diversityMode,
+      predictedSubWeights: opts?.predictedSubWeights,
+      predictedTmTarget: opts?.predictedTmTarget,
     }),
   });
 }
