@@ -57,7 +57,7 @@ const defaultWorkDir = process.env.PIPELINE_WORK_DIR
 
 const RESERVED_TASK_IDS = new Set(['default', 'hmmer-default', 'blast-default']);
 
-const pythonBin = process.env.PIPELINE_PYTHON || '/home/threo/miniconda3/envs/mining/bin/python3';
+const pythonBin = process.env.PIPELINE_PYTHON || process.env.PYTHON_BIN || 'python3';
 const mmseqsBin = process.env.MMSEQS_BIN || 'mmseqs';
 const mmseqsThreadsRaw = Number(process.env.MMSEQS_THREADS || 8);
 const mmseqsThreads = Number.isFinite(mmseqsThreadsRaw)

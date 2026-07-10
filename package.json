@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "dev:api": "PATH=/home/threo/miniconda3/envs/mining/bin:$PATH PIPELINE_PYTHON=/home/threo/miniconda3/envs/mining/bin/python node backend/server.mjs",
+    "dev:api": "node backend/server.mjs",
     "build": "vite build",
     "preview": "vite preview --port=3000 --host=0.0.0.0",
     "clean": "rm -rf dist",

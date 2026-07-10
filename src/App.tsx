@@ -249,8 +249,9 @@ function validateReferenceFastaText(text: string) {
   return trimmed;
 }
 
-function defaultTaskReferenceFasta(taskId: string) {
-  return `/home/threo/aox_project/aox_tasks/${taskId}/ref.fasta`;
+function defaultTaskReferenceFasta(_taskId: string) {
+  // Use relative path — backend resolves against the task workDir
+  return 'ref.fasta';
 }
 
 const peAaoScoringRules: ScoringRule[] = [
@@ -1019,7 +1020,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   useEffect(() => {
     setNetworkReferenceFasta((prev) => {
       const text = String(prev || '').trim();
-      const isTaskDefault = /^\/home\/threo\/aox_project\/aox_tasks\/[^/]+\/ref\.fasta$/.test(text);
+      const isTaskDefault = /^(ref\.fasta|.*\/aox_tasks\/[^/]+\/ref\.fasta)$/.test(text);
       if (!text || isTaskDefault) {
         return defaultTaskReferenceFasta(selectedTaskId);
       }
@@ -4602,7 +4603,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   useEffect(() => {
     setNetworkReferenceFasta((prev) => {
       const text = String(prev || '').trim();
-      if (!text || /^\/home\/threo\/aox_project\/aox_tasks\/[^/]+\/ref\.fasta$/.test(text)) return defaultTaskReferenceFasta(selectedTaskId);
+      if (!text || /^(ref\.fasta|.*\/aox_tasks\/[^/]+\/ref\.fasta)$/.test(text)) return defaultTaskReferenceFasta(selectedTaskId);
       return prev;
     });
   }, [selectedTaskId]);

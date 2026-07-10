@@ -75,12 +75,12 @@ cd enzymeminer-pro
 npm run dev:api
 ```
 
-`dev:api` 脚本会自动配置 conda 环境 PATH：
+如果需要指定 conda 环境中的 Python，设置 `PIPELINE_PYTHON` 环境变量：
 
 ```bash
-PATH=/home/threo/miniconda3/envs/mining/bin:$PATH \
-PIPELINE_PYTHON=/home/threo/miniconda3/envs/mining/bin/python \
-node backend/server.mjs
+# 示例：使用 conda 环境中的 Python
+export PIPELINE_PYTHON=~/miniconda3/envs/mining/bin/python
+npm run dev:api
 ```
 
 **可选环境变量：**
@@ -89,6 +89,7 @@ node backend/server.mjs
 |------|--------|------|
 | `API_PORT` | `8787` | 后端端口 |
 | `PIPELINE_ROOT` | 工作区根目录 | Pipeline 根目录 |
+| `PIPELINE_TASKS_ROOT` | `{PIPELINE_ROOT}/aox_tasks` | 任务数据目录 |
 | `PIPELINE_PYTHON` | `python3` | Python 解释器路径 |
 | `API_KEY` | _(空)_ | API 认证密钥（生产环境建议设置） |
 
