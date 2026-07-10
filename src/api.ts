@@ -536,7 +536,7 @@ export function runClustering(inputFasta: string, identity: number, wordSize: nu
 export function loadNetworkData(opts?: {
   forceRebuild?: boolean;
   includeReferenceLinks?: boolean;
-  similarityMethod?: 'needleman-wunsch' | 'smith-waterman';
+  similarityMethod?: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
 }) {
   const qp = new URLSearchParams();
   if (opts?.forceRebuild) {
@@ -559,7 +559,7 @@ export function loadNetworkData(opts?: {
 
 export function computeNetworkSimilarity(opts?: {
   includeReferenceLinks?: boolean;
-  similarityMethod?: 'needleman-wunsch' | 'smith-waterman';
+  similarityMethod?: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
   sourceFasta?: string;
   referenceFasta?: string;
 }) {
@@ -568,7 +568,7 @@ export function computeNetworkSimilarity(opts?: {
     edgesCsv: string;
     nodes: number;
     edges: number;
-    similarityMethod: 'needleman-wunsch' | 'smith-waterman';
+    similarityMethod: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
     includeReferenceLinks: boolean;
   }>('/api/network/compute-similarity', {
     method: 'POST',
@@ -644,7 +644,7 @@ export function pushNetworkToCytoscape(opts?: {
   pairwiseThresholdPct?: number;
   forceRebuild?: boolean;
   includeReferenceLinks?: boolean;
-  similarityMethod?: 'needleman-wunsch' | 'smith-waterman';
+  similarityMethod?: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
   sourceFasta?: string;
   referenceFasta?: string;
 }) {

@@ -588,7 +588,7 @@ function normalizeScoringPositionMode(rawMode) {
   throw new Error('positionMode must be one of: pre, aligned');
 }
 
-async function writeFastaFromCsv(csvPath, fastaPath) {
+async function writeFastaFromCsv(csvPath, fastaPath, fetchMissing = false) {
   const text = await fs.readFile(csvPath, 'utf-8');
   const lines = text.trim().split(/\r?\n/);
   if (!lines.length) {
@@ -613,7 +613,7 @@ async function writeFastaFromCsv(csvPath, fastaPath) {
     const rawTarget = String(cols[targetCol] || '').trim();
     const id = sanitizeFastaId(rawTarget);
     let seq = String(cols[seqCol] || '').replace(/\s+/g, '').toUpperCase();
-    if (!seq) {
+    if (!seq && fetchMissing) {
       seq = await fetchUniprotSequence(rawTarget);
     }
     if (!id || !seq) {
