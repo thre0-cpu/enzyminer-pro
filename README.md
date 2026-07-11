@@ -78,13 +78,18 @@ npm install
 **方式一：apt（Ubuntu / Debian）**
 
 ```bash
-sudo apt update && sudo apt install -y hmmer cd-hit mafft ncbi-blast+ mmseqs
+sudo apt update && sudo apt install -y hmmer cd-hit mafft ncbi-blast+
 ```
 
-> 如果 apt 源中没有 `mmseqs`，单独安装：
+> `mmseqs2` 不在 apt 源中，需要单独安装：
 > ```bash
+> # 推荐：用 conda 安装
 > conda install -y -c bioconda mmseqs2
-> # 或从源码编译：https://github.com/soedinglab/MMseqs2
+>
+> # 或者：下载预编译二进制
+> wget https://github.com/soedinglab/MMseqs2/releases/download/18-85ce/mmseqs-linux-sse41.tar.gz
+> tar xzf mmseqs-linux-sse41.tar.gz
+> sudo cp mmseqs/bin/mmseqs /usr/local/bin/
 > ```
 
 **方式二：conda（推荐，一次性全部搞定）**
