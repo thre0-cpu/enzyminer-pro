@@ -54,18 +54,75 @@
 
 - **Node.js** 18+
 - **Python** 3.10+（推荐使用 conda 环境）
-- **Python 依赖**: `pandas`, `biopython`, `requests`, `tqdm`
-- **外部工具**（需在 PATH 中）:
+- **外部生物信息学工具**（必须在 PATH 中，否则 `/api/health` 检测会显示 `false`）:
   - `cd-hit`
   - `mafft`
   - `hmmbuild`, `hmmsearch`（HMMER3）
   - `blastp`, `makeblastdb`（BLAST+）
+  - `mmseqs`（MMseqs2，默认 pairwise 相似性计算引擎，通过 `MMSEQS_BIN` 可指定路径）
+- **Cytoscape 桌面端**（可选，用于网络可视化推送）:
+  - 需要安装 [Cytoscape](https://cytoscape.org/) 并启用 CyREST API（默认端口 `1234`）
+  - 网络推送和高亮功能依赖 Cytoscape 运行
 
 ## 2. 安装依赖
+
+### 2.1 安装 Node.js 依赖
 
 ```bash
 cd enzyminer-pro
 npm install
+```
+
+### 2.2 安装生物信息学工具
+
+**方式一：apt（Ubuntu / Debian）**
+
+```bash
+sudo apt update && sudo apt install -y hmmer cd-hit mafft ncbi-blast+ mmseqs
+```
+
+> 如果 apt 源中没有 `mmseqs`，单独安装：
+> ```bash
+> conda install -y -c bioconda mmseqs2
+> # 或从源码编译：https://github.com/soedinglab/MMseqs2
+> ```
+
+**方式二：conda（推荐，一次性全部搞定）**
+
+```bash
+conda create -n mining -y python=3.11
+conda activate mining
+conda install -y -c bioconda -c conda-forge hmmer cd-hit mafft blast mmseqs2 pandas biopython requests tqdm
+```
+
+> ⚠️ 环境名**必须叫 `mining`**（`start.sh` / `scripts/start_services.sh` 中硬编码了自动检测路径 `~/miniconda3/envs/mining/bin/python` 等），否则启动脚本不会自动使用该环境，需要手动设置 `PIPELINE_PYTHON`。
+
+**方式三：macOS (Homebrew)**
+
+```bash
+brew install hmmer cd-hit mafft blast mmseqs
+```
+
+安装后验证：
+
+```bash
+hmmbuild -h && hmmsearch -h && cd-hit -h && mafft -h && blastp -h && makeblastdb -h && mmseqs -h
+```
+
+全部有输出说明安装成功。
+
+### 2.3 安装 Python 依赖
+
+如果没用 conda 统一安装，手动安装 Python 包：
+
+```bash
+pip install -r requirements.txt
+```
+
+如果 Python 或 bioinfo 工具装在 conda `mining` 环境中，`start.sh` 会自动检测并使用，无需手动设置 `PIPELINE_PYTHON`。如需手动指定：
+
+```bash
+export PIPELINE_PYTHON=~/miniconda3/envs/mining/bin/python
 ```
 
 ## 3. 一键启动（推荐）
