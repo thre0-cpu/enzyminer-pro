@@ -50,7 +50,7 @@ const pipelineRoot = process.env.PIPELINE_ROOT
   : workspaceRoot;
 const tasksRoot = process.env.PIPELINE_TASKS_ROOT
   ? path.resolve(process.env.PIPELINE_TASKS_ROOT)
-  : path.join(workspaceRoot, 'aox_tasks');
+  : path.join(workspaceRoot, 'tasks');
 const defaultWorkDir = process.env.PIPELINE_WORK_DIR
   ? path.resolve(process.env.PIPELINE_WORK_DIR)
   : path.join(tasksRoot, 'default');

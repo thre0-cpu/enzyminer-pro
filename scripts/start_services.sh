@@ -62,15 +62,26 @@ cleanup_untracked_processes() {
 }
 
 start_frontend() {
-  local watch_path="$PROJECT_DIR/dist/index.html"
   local port="3000"
   local old_pid=""
+
+  # Determine how to serve the frontend.
+  # Use `npm run dev` (vite dev server) which does NOT require a prior build step.
+  # This avoids the "blank page on new machine" issue caused by missing dist/.
+  local use_dev_server=true
+  local vite_bin="$PROJECT_DIR/node_modules/vite/bin/vite.js"
+
+  # If dist/index.html already exists, prefer preview mode (faster, production-like)
+  if [[ -f "$PROJECT_DIR/dist/index.html" ]]; then
+    use_dev_server=false
+  fi
+
   if [[ -f "$FRONTEND_PID_FILE" ]]; then
     old_pid="$(cat "$FRONTEND_PID_FILE" 2>/dev/null || true)"
     if is_running "$old_pid"; then
       if ! pid_owns_port "$old_pid" "$port"; then
         stop_process "frontend" "$FRONTEND_PID_FILE" "$old_pid"
-      elif needs_restart "$FRONTEND_PID_FILE" "$watch_path"; then
+      elif needs_restart "$FRONTEND_PID_FILE" "$vite_bin"; then
         stop_process "frontend" "$FRONTEND_PID_FILE" "$old_pid"
       else
         echo "[frontend] already running (pid=$old_pid)"
@@ -80,14 +91,14 @@ start_frontend() {
   fi
 
   if [[ -z "$old_pid" ]] || ! is_running "$old_pid"; then
-    cleanup_untracked_processes "frontend" "vite preview --port=3000 --host=0.0.0.0"
+    cleanup_untracked_processes "frontend" "node.*vite.*--port=3000"
   fi
 
   if [[ -f "$FRONTEND_PID_FILE" ]]; then
-    local old_pid
-    old_pid="$(cat "$FRONTEND_PID_FILE" 2>/dev/null || true)"
-    if is_running "$old_pid"; then
-      echo "[frontend] already running (pid=$old_pid)"
+    local check_pid
+    check_pid="$(cat "$FRONTEND_PID_FILE" 2>/dev/null || true)"
+    if is_running "$check_pid"; then
+      echo "[frontend] already running (pid=$check_pid)"
       return
     fi
   fi
@@ -95,7 +106,13 @@ start_frontend() {
   echo "[frontend] starting..."
   (
     cd "$PROJECT_DIR"
-    nohup node ./node_modules/vite/bin/vite.js preview --port=3000 --host=0.0.0.0 >"$FRONTEND_LOG" 2>&1 &
+    if $use_dev_server; then
+      echo "[frontend] dist/ not found, using vite dev server (port=$port)"
+      nohup node "$vite_bin" --port="$port" --host=0.0.0.0 >"$FRONTEND_LOG" 2>&1 &
+    else
+      echo "[frontend] using vite preview (port=$port)"
+      nohup node "$vite_bin" preview --port="$port" --host=0.0.0.0 >"$FRONTEND_LOG" 2>&1 &
+    fi
     echo $! >"$FRONTEND_PID_FILE"
   )
   echo "[frontend] started (pid=$(cat "$FRONTEND_PID_FILE"), log=$FRONTEND_LOG)"
@@ -105,6 +122,7 @@ start_backend() {
   local watch_path="$PROJECT_DIR/backend/server.mjs"
   local port="8787"
   local old_pid=""
+
   if [[ -f "$BACKEND_PID_FILE" ]]; then
     old_pid="$(cat "$BACKEND_PID_FILE" 2>/dev/null || true)"
     if is_running "$old_pid"; then
@@ -124,10 +142,10 @@ start_backend() {
   fi
 
   if [[ -f "$BACKEND_PID_FILE" ]]; then
-    local old_pid
-    old_pid="$(cat "$BACKEND_PID_FILE" 2>/dev/null || true)"
-    if is_running "$old_pid"; then
-      echo "[backend] already running (pid=$old_pid)"
+    local check_pid
+    check_pid="$(cat "$BACKEND_PID_FILE" 2>/dev/null || true)"
+    if is_running "$check_pid"; then
+      echo "[backend] already running (pid=$check_pid)"
       return
     fi
   fi
@@ -135,7 +153,28 @@ start_backend() {
   echo "[backend] starting..."
   (
     cd "$PROJECT_DIR"
-    nohup env "PATH=/home/threo/miniconda3/envs/mining/bin:$PATH" "PIPELINE_PYTHON=/home/threo/miniconda3/envs/mining/bin/python" node --max-old-space-size=4096 backend/server.mjs >"$BACKEND_LOG" 2>&1 &
+
+    # Build the environment for the backend process.
+    # If PIPELINE_PYTHON is set, use it; otherwise fall back to python3 on PATH.
+    # If a conda mining environment is detected on this machine, auto-activate it.
+    local extra_env=()
+    if [[ -z "${PIPELINE_PYTHON:-}" ]]; then
+      # Auto-detect common conda env locations
+      for candidate in \
+        "$HOME/miniconda3/envs/mining/bin/python" \
+        "$HOME/miniforge3/envs/mining/bin/python" \
+        "$HOME/anaconda3/envs/mining/bin/python"; do
+        if [[ -x "$candidate" ]]; then
+          local candidate_dir
+          candidate_dir="$(dirname "$candidate")"
+          extra_env+=("PATH=${candidate_dir}:${PATH}" "PIPELINE_PYTHON=$candidate")
+          echo "[backend] auto-detected conda python: $candidate"
+          break
+        fi
+      done
+    fi
+
+    nohup env "${extra_env[@]+"${extra_env[@]}"}" node --max-old-space-size=4096 backend/server.mjs >"$BACKEND_LOG" 2>&1 &
     echo $! >"$BACKEND_PID_FILE"
   )
   echo "[backend] started (pid=$(cat "$BACKEND_PID_FILE"), log=$BACKEND_LOG)"

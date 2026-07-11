@@ -43,7 +43,9 @@ stop_by_pid_file "frontend" "$FRONTEND_PID_FILE"
 stop_by_pid_file "backend" "$BACKEND_PID_FILE"
 
 # fallback: kill by command signature in case pid files are stale
-pkill -f "vite --port=3000 --host=0.0.0.0" 2>/dev/null || true
-pkill -f "node backend/server.mjs" 2>/dev/null || true
+# Match both dev server and preview server patterns
+pkill -f "vite.*--port=3000" 2>/dev/null || true
+pkill -f "vite.*preview.*--port=3000" 2>/dev/null || true
+pkill -f "node.*backend/server.mjs" 2>/dev/null || true
 
 echo "All stop commands issued."

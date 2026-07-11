@@ -1,4 +1,4 @@
-# EnzymeMiner Pro
+# EnzyMiner Pro
 
 高通量酶挖掘全栈工具平台，支持 **HMMER**、**BLAST** 和 **Compare** 三种模块，涵盖从参考序列管理到 Cytoscape 网络可视化和候选序列智能推荐的完整流水线。
 
@@ -64,14 +64,31 @@
 ## 2. 安装依赖
 
 ```bash
-cd enzymeminer-pro
+cd enzyminer-pro
 npm install
 ```
 
-## 3. 启动后端 API
+## 3. 一键启动（推荐）
 
 ```bash
-cd enzymeminer-pro
+bash start.sh
+```
+
+该脚本会自动启动后端 API 和前端预览服务，启动后访问：
+- **前端**: http://localhost:3000
+- **后端**: http://localhost:8787/api/health
+
+停止服务：
+
+```bash
+bash stop.sh
+```
+
+## 4. 开发模式启动（分别启动前后端）
+
+**后端 API：**
+
+```bash
 npm run dev:api
 ```
 
@@ -83,24 +100,23 @@ export PIPELINE_PYTHON=~/miniconda3/envs/mining/bin/python
 npm run dev:api
 ```
 
+**前端（另开一个终端）：**
+
+```bash
+npm run dev
+```
+
+Vite 开发服务器运行在 `http://0.0.0.0:3000`，自动代理 `/api` 到 `http://127.0.0.1:8787`。
+
 **可选环境变量：**
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `API_PORT` | `8787` | 后端端口 |
 | `PIPELINE_ROOT` | 工作区根目录 | Pipeline 根目录 |
-| `PIPELINE_TASKS_ROOT` | `{PIPELINE_ROOT}/aox_tasks` | 任务数据目录 |
+| `PIPELINE_TASKS_ROOT` | `{PIPELINE_ROOT}/tasks` | 任务数据目录 |
 | `PIPELINE_PYTHON` | `python3` | Python 解释器路径 |
 | `API_KEY` | _(空)_ | API 认证密钥（生产环境建议设置） |
-
-## 4. 启动前端
-
-```bash
-cd enzymeminer-pro
-npm run dev
-```
-
-Vite 开发服务器运行在 `http://0.0.0.0:3000`，自动代理 `/api` 到 `http://127.0.0.1:8787`。
 
 ## 5. WSL 外部访问（Windows 浏览器）
 
@@ -118,7 +134,7 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 ## 6. 任务管理
 
 - 每个模块（HMMER/BLAST/Compare）有独立的任务空间和默认任务（`hmmer-default` / `blast-default`）
-- 任务数据存储在 `aox_tasks/{taskId}/` 目录
+- 任务数据存储在 `tasks/{taskId}/` 目录
 - Pipeline 状态文件：`hmmer_state.json` / `blast_state.json`
 
 ## 7. 主要 API 端点
@@ -242,7 +258,7 @@ $$
 ## 9. 项目结构
 
 ```
-enzymeminer-pro/
+enzyminer-pro/
 ├── backend/
 │   └── server.mjs          # Express 后端（所有 API）
 ├── scripts/
@@ -253,6 +269,8 @@ enzymeminer-pro/
 │   └── api.ts               # 前端 API 客户端
 ├── index.html
 ├── package.json
+├── start.sh                 # 一键启动脚本
+├── stop.sh                  # 停止脚本
 ├── vite.config.ts
 └── tailwind.config.js
 ```
