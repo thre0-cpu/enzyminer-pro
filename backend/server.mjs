@@ -584,9 +584,11 @@ async function predictCataPro(seq, smiles) {
     if (!resp.ok) return null;
     const data = await resp.json();
     if (Array.isArray(data) && data.length > 0) {
+      const kcatRaw = Number(data[0].kcat_value);
+      const kmRaw = Number(data[0].km_value);
       return {
-        kcat: Number(data[0].kcat_value) || 0,
-        km: Number(data[0].km_value) || 0,
+        kcat: Number.isFinite(kcatRaw) && kcatRaw > 0 ? kcatRaw : 0,
+        km: Number.isFinite(kmRaw) && kmRaw > 0 ? kmRaw : 0,
       };
     }
     return null;
@@ -617,9 +619,12 @@ async function predictSolubilityReal(seq) {
     });
     if (!resp.ok) return null;
     const data = await resp.json();
+    // PLM_Sol returns score as 0-100 percentage; normalize to 0-1 for consistent display
+    const raw = Number(data.score);
+    const score = Number.isFinite(raw) ? (raw > 1 ? raw / 100 : raw) : 0;
     return {
       soluble: data.prediction === 'Soluble',
-      score: Number(data.score) || 0,
+      score,
     };
   } catch {
     return null;
@@ -637,7 +642,8 @@ async function predictTmMock(seq) {
 }
 
 // ── EC number prediction (CLEAN) ─────────────────────────────────────────
-// Returns { results: [{ec: string, score: number}], status: string } | null
+// Returns [{ec: string, score: number}] | null
+// Normalizes field names from the CLEAN API which may use different casing.
 async function predictECReal(seq) {
   try {
     const resp = await fetch(`${EC_URL}/predict`, {
@@ -648,10 +654,33 @@ async function predictECReal(seq) {
     });
     if (!resp.ok) return null;
     const data = await resp.json();
-    if (data.status === 'success' && Array.isArray(data.results)) {
-      return data.results.sort((a, b) => b.score - a.score).slice(0, 3);
+
+    // Support multiple response shapes:
+    //   { status: 'success', results: [{ec, score}] }
+    //   { results: [{EC, probability}] }
+    //   { ec_numbers: [{ec_number, probability}] }
+    //   [{ec, score}]
+    let raw = [];
+    if (Array.isArray(data)) {
+      raw = data;
+    } else if (data.status === 'success' && Array.isArray(data.results)) {
+      raw = data.results;
+    } else if (Array.isArray(data.results)) {
+      raw = data.results;
+    } else if (Array.isArray(data.ec_numbers)) {
+      raw = data.ec_numbers;
     }
-    return null;
+
+    if (!raw.length) return null;
+
+    const normalised = raw.map((r) => ({
+      ec: String(r.ec || r.EC || r.ec_number || r.label || '').trim(),
+      score: Number(r.score ?? r.probability ?? r.confidence ?? 0),
+    })).filter((r) => r.ec);
+
+    if (!normalised.length) return null;
+
+    return normalised.sort((a, b) => b.score - a.score).slice(0, 3);
   } catch {
     return null;
   }
@@ -4843,8 +4872,8 @@ app.post('/api/network/predict-metrics', async (req, res) => {
             useEC ? predictECReal(seq) : Promise.resolve(null),
           ]);
 
-          const kcat = cataProResult ? cataProResult.kcat : await predictKcatMock(seq);
-          const km = cataProResult ? cataProResult.km : await predictKmMock(seq);
+          const kcat = (cataProResult && cataProResult.kcat > 0) ? cataProResult.kcat : await predictKcatMock(seq);
+          const km = (cataProResult && cataProResult.km > 0) ? cataProResult.km : await predictKmMock(seq);
           const solubility = solResult ? solResult.score : await predictSolubilityMock(seq);
           const tm = tmVal;
           const ecEntries = ecResult || await predictECMock(seq);

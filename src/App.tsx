@@ -691,8 +691,15 @@ function PredictedMetricsPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastRunInfo, setLastRunInfo] = useState<{ count: number; recomputedCount: number } | null>(null);
-  const [smiles, setSmiles] = useState('');
+  const [smiles, setSmiles] = useState(() => {
+    try { return localStorage.getItem('enzymeminer.smiles') || ''; } catch { return ''; }
+  });
   const [services, setServices] = useState<{ cataPro: boolean; solubility: boolean; ec: boolean } | null>(null);
+
+  // Persist SMILES to localStorage whenever it changes
+  useEffect(() => {
+    try { localStorage.setItem('enzymeminer.smiles', smiles); } catch { /* ignore */ }
+  }, [smiles]);
 
   const runPredict = async (forceRecompute: boolean) => {
     setLoading(true);
