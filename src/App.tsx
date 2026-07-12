@@ -23,6 +23,7 @@ import {
   buildHmm,
   clearRuntimeLogs,
   computeRefPairwiseIdentity,
+  loadRuntimeLogs as fetchRuntimeLogs,
   createTask,
   duplicateTask,
   deleteTask,
@@ -695,15 +696,35 @@ function PredictedMetricsPanel({
     try { return localStorage.getItem('enzymeminer.smiles') || ''; } catch { return ''; }
   });
   const [services, setServices] = useState<{ cataPro: boolean; solubility: boolean; ec: boolean } | null>(null);
+  const [predictProgress, setPredictProgress] = useState<{ current: number; total: number; done: boolean } | null>(null);
 
   // Persist SMILES to localStorage whenever it changes
   useEffect(() => {
     try { localStorage.setItem('enzymeminer.smiles', smiles); } catch { /* ignore */ }
   }, [smiles]);
 
+  // Poll runtime logs for real progress while loading
+  useEffect(() => {
+    if (!loading) { setPredictProgress(null); return; }
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const data = await fetchRuntimeLogs(50);
+        if (!cancelled && data.meta?.predictProgress) {
+          const pp = data.meta.predictProgress as { current: number; total: number; done?: boolean };
+          setPredictProgress({ current: pp.current, total: pp.total, done: !!pp.done });
+        }
+      } catch { /* ignore */ }
+    };
+    void poll();
+    const timer = setInterval(poll, 500);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [loading]);
+
   const runPredict = async (forceRecompute: boolean) => {
     setLoading(true);
     setError('');
+    setPredictProgress(null);
     try {
       const data = await predictNetworkMetrics({
         forceRecompute,
@@ -785,10 +806,19 @@ function PredictedMetricsPanel({
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-slate-500">
             <span>⏳ Running property predictions (kcat/Km, solubility, EC, Tm)...</span>
-            <span className="animate-pulse">Processing</span>
+            {predictProgress && predictProgress.total > 0 && (
+              <span>{predictProgress.current}/{predictProgress.total}</span>
+            )}
           </div>
           <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-            <div className="h-full rounded-full bg-sky-500 progress-shimmer transition-all duration-300" style={{ width: '100%' }} />
+            <div 
+              className="h-full rounded-full bg-sky-500 progress-shimmer transition-all duration-300" 
+              style={{ 
+                width: predictProgress && predictProgress.total > 0 
+                  ? `${Math.min(100, Math.round((predictProgress.current / predictProgress.total) * 100))}%` 
+                  : '100%' 
+              }} 
+            />
           </div>
           <p className="text-[10px] text-slate-400">This may take a while for large datasets. Results are cached per task.</p>
         </div>
@@ -865,6 +895,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       'reference-links'?: { current: number; total: number };
       'candidate-pairwise'?: { current: number; total: number };
     };
+    predictProgress?: { current: number; total: number; done?: boolean };
   }>({});
   const [runtimeLogs, setRuntimeLogs] = useState<string[]>([]);
   const [autoScrollLog, setAutoScrollLog] = useState(true);
