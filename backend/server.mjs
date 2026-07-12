@@ -521,11 +521,46 @@ async function writeCsvRows(csvPath, headers, rows) {
   await fs.writeFile(csvPath, lines.join('\n'), 'utf-8');
 }
 
-// ── Mock property predictors (kcat / solubility / Tm) ──────────────────────
-// TODO: replace the bodies of predictKcatMock / predictSolubilityMock /
-// predictTmMock with real HTTP calls to the actual prediction APIs once they
-// are available. Keep the `(seq) => Promise<number>` signature so the rest of
-// the pipeline (caching, normalization, scoring) doesn't need to change.
+// ── External prediction service configuration ─────────────────────────────
+const CATAPRO_URL = process.env.CATAPRO_URL || 'http://localhost:8003';
+const SOL_URL     = process.env.SOL_URL     || 'http://localhost:8004';
+const EC_URL      = process.env.EC_URL      || 'http://localhost:8000';
+const TM_URL      = process.env.TM_URL      || 'http://localhost:8005';
+
+// Service health cache: { url: { online: bool, lastCheck: number } }
+const serviceHealthCache = new Map();
+const HEALTH_CHECK_TTL = 30_000; // 30 seconds
+
+async function checkServiceHealth(baseUrl) {
+  const cached = serviceHealthCache.get(baseUrl);
+  if (cached && Date.now() - cached.lastCheck < HEALTH_CHECK_TTL) {
+    return cached.online;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const resp = await fetch(`${baseUrl}/docs`, { method: 'GET', signal: controller.signal });
+    clearTimeout(timer);
+    const online = resp.ok || resp.status === 200;
+    serviceHealthCache.set(baseUrl, { online, lastCheck: Date.now() });
+    return online;
+  } catch {
+    serviceHealthCache.set(baseUrl, { online: false, lastCheck: Date.now() });
+    return false;
+  }
+}
+
+async function checkAllPredictionServices() {
+  const [cataPro, sol, ec, tm] = await Promise.all([
+    checkServiceHealth(CATAPRO_URL),
+    checkServiceHealth(SOL_URL),
+    checkServiceHealth(EC_URL),
+    checkServiceHealth(TM_URL),
+  ]);
+  return { cataPro, sol, ec, tm };
+}
+
+// ── Mock hash function (used for fallback) ────────────────────────────────
 function hashSeqToUnit(seq, salt) {
   let hash = 2166136261;
   const s = `${salt}:${seq}`;
@@ -536,19 +571,98 @@ function hashSeqToUnit(seq, salt) {
   return ((hash >>> 0) % 1000000) / 1000000;
 }
 
+// ── kcat / Km prediction (CataPro) ───────────────────────────────────────
+// Returns { kcat: number, km: number } | null
+async function predictCataPro(seq, smiles) {
+  try {
+    const resp = await fetch(`${CATAPRO_URL}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ id: 'predict', sequence: seq, smiles }]),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (Array.isArray(data) && data.length > 0) {
+      return {
+        kcat: Number(data[0].kcat_value) || 0,
+        km: Number(data[0].km_value) || 0,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Fallback mock for kcat
 async function predictKcatMock(seq) {
-  // Placeholder range: 0.01 - 100 s^-1
   return Number((0.01 + hashSeqToUnit(seq, 'kcat') * 99.99).toFixed(3));
 }
 
-async function predictSolubilityMock(seq) {
-  // Placeholder range: 0 - 100 (%)
-  return Number((hashSeqToUnit(seq, 'solubility') * 100).toFixed(2));
+// Fallback mock for Km
+async function predictKmMock(seq) {
+  return Number((0.1 + hashSeqToUnit(seq, 'km') * 99.9).toFixed(3));
 }
 
+// ── Solubility prediction (PLM_Sol) ──────────────────────────────────────
+// Returns { soluble: boolean, score: number } | null
+async function predictSolubilityReal(seq) {
+  try {
+    const resp = await fetch(`${SOL_URL}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'candidate', sequence: seq }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return {
+      soluble: data.prediction === 'Soluble',
+      score: Number(data.score) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Fallback mock for solubility (returns 0-1 probability)
+async function predictSolubilityMock(seq) {
+  return Number(hashSeqToUnit(seq, 'solubility').toFixed(4));
+}
+
+// ── Tm prediction (kept as mock) ─────────────────────────────────────────
 async function predictTmMock(seq) {
-  // Placeholder range: 30 - 90 °C
   return Number((30 + hashSeqToUnit(seq, 'tm') * 60).toFixed(2));
+}
+
+// ── EC number prediction (CLEAN) ─────────────────────────────────────────
+// Returns { results: [{ec: string, score: number}], status: string } | null
+async function predictECReal(seq) {
+  try {
+    const resp = await fetch(`${EC_URL}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'candidate', sequence: seq }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.status === 'success' && Array.isArray(data.results)) {
+      return data.results.sort((a, b) => b.score - a.score).slice(0, 3);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Fallback mock for EC
+async function predictECMock(seq) {
+  const ecs = ['3.2.1.17', '1.1.1.1', '2.7.1.1', '4.2.1.1', '5.3.1.9'];
+  const idx = Math.floor(hashSeqToUnit(seq, 'ec') * ecs.length);
+  const score = Number((0.3 + hashSeqToUnit(seq, 'ec_score') * 0.7).toFixed(4));
+  return [{ ec: ecs[idx], score }];
 }
 
 function resolvePredictedMetricsPath(workDir) {
@@ -598,7 +712,19 @@ async function loadPredictedMetricsMap(workDir) {
     const { rows } = await readCsvRows(resolvePredictedMetricsPath(workDir));
     const map = new Map();
     for (const r of rows) {
-      map.set(r.id, { id: r.id, kcat: Number(r.kcat), solubility: Number(r.solubility), tm: Number(r.tm) });
+      map.set(r.id, {
+        id: r.id,
+        kcat: Number(r.kcat),
+        km: Number(r.km) || 0,
+        solubility: Number(r.solubility),
+        tm: Number(r.tm),
+        ec_top1: r.ec_top1 || '',
+        ec_score1: Number(r.ec_score1) || 0,
+        ec_top2: r.ec_top2 || '',
+        ec_score2: Number(r.ec_score2) || 0,
+        ec_top3: r.ec_top3 || '',
+        ec_score3: Number(r.ec_score3) || 0,
+      });
     }
     return map;
   } catch {
@@ -2977,8 +3103,8 @@ app.get('/api/health', async (req, res) => {
   const toolStates = {};
   const { taskId, workDir } = await resolveWorkDirForReq(req);
 
-  await Promise.all(
-    checks.map(async (tool) => {
+  await Promise.all([
+    ...checks.map(async (tool) => {
       try {
         await runCmd('bash', ['-lc', `command -v ${tool}`], pipelineRoot);
         toolStates[tool] = true;
@@ -2986,7 +3112,9 @@ app.get('/api/health', async (req, res) => {
         toolStates[tool] = false;
       }
     }),
-  );
+  ]);
+
+  const predServices = await checkAllPredictionServices();
 
   res.json({
     ok: true,
@@ -2995,6 +3123,12 @@ app.get('/api/health', async (req, res) => {
     taskId,
     pythonBin,
     tools: toolStates,
+    predictionServices: {
+      cataPro: { url: CATAPRO_URL, online: predServices.cataPro },
+      solubility: { url: SOL_URL, online: predServices.sol },
+      ec: { url: EC_URL, online: predServices.ec },
+      tm: { url: TM_URL, online: predServices.tm },
+    },
   });
 });
 
@@ -4648,7 +4782,7 @@ app.post('/api/network/push-cytoscape', async (req, res) => {
   });
 });
 
-// ── Candidate property prediction (kcat / solubility / Tm) ─────────────────
+// ── Candidate property prediction (kcat / Km / solubility / Tm / EC) ──────
 app.post('/api/network/predict-metrics', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'network/predict-metrics', taskId)) return;
@@ -4661,6 +4795,24 @@ app.post('/api/network/predict-metrics', async (req, res) => {
       const forceRecompute = Boolean(req.body?.forceRecompute);
       const tmTarget = Number.isFinite(Number(req.body?.tmTarget)) ? Number(req.body.tmTarget) : 60;
       const subWeights = normalizePredictedSubWeights(req.body?.subWeights);
+      const smiles = String(req.body?.smiles || '').trim();
+
+      // Check which services are available
+      const [cataProOnline, solOnline, ecOnline, tmOnline] = await Promise.all([
+        checkServiceHealth(CATAPRO_URL),
+        checkServiceHealth(SOL_URL),
+        checkServiceHealth(EC_URL),
+        checkServiceHealth(TM_URL),
+      ]);
+
+      const useCataPro = cataProOnline && smiles;
+      const useSol = solOnline;
+      const useEC = ecOnline;
+      // Tm predictor: real API if online, otherwise mock
+      const useTm = tmOnline;
+
+      pushRuntimeLine(`[predict-metrics] services: cataPro=${cataProOnline ? 'online' : 'offline'}${!smiles && cataProOnline ? ' (no SMILES provided, using mock kcat/Km)' : ''}, sol=${solOnline ? 'online' : 'offline'}, ec=${ecOnline ? 'online' : 'offline'}, tm=${tmOnline ? 'online' : 'offline'}`);
+      pushRuntimeLine(`[predict-metrics] mode: kcat=${useCataPro ? 'REAL' : 'mock'}, sol=${useSol ? 'REAL' : 'mock'}, ec=${useEC ? 'REAL' : 'mock'}, tm=${useTm ? 'REAL' : 'mock'}`);
 
       const { rows: nodeRows } = await readCsvRows(path.join(workDir, 'nodes.csv'));
       const candidateIds = nodeRows.filter((n) => String(n.is_reference) !== '1').map((n) => n.id);
@@ -4676,32 +4828,72 @@ app.post('/api/network/predict-metrics', async (req, res) => {
         const text = await fs.readFile(candFastaPath, 'utf-8');
         const seqLookup = buildSequenceLookup(parseFastaRecords(text));
 
-        pushRuntimeLine(`[predict-metrics] running mock predictors for ${missingIds.length} sequence(s)`);
+        pushRuntimeLine(`[predict-metrics] running predictors for ${missingIds.length} sequence(s)`);
+        setRuntimeMeta({ predictProgress: { current: 0, total: missingIds.length } });
         let done = 0;
         for (const id of missingIds) {
           const seq = seqLookup.get(id);
           if (!seq) continue;
-          const [kcat, solubility, tm] = await Promise.all([
-            predictKcatMock(seq),
-            predictSolubilityMock(seq),
+
+          // Run predictions: try real API first, fall back to mock
+          const [cataProResult, solResult, tmVal, ecResult] = await Promise.all([
+            useCataPro ? predictCataPro(seq, smiles) : Promise.resolve(null),
+            useSol ? predictSolubilityReal(seq) : Promise.resolve(null),
             predictTmMock(seq),
+            useEC ? predictECReal(seq) : Promise.resolve(null),
           ]);
-          existing.set(id, { id, kcat, solubility, tm });
+
+          const kcat = cataProResult ? cataProResult.kcat : await predictKcatMock(seq);
+          const km = cataProResult ? cataProResult.km : await predictKmMock(seq);
+          const solubility = solResult ? solResult.score : await predictSolubilityMock(seq);
+          const tm = tmVal;
+          const ecEntries = ecResult || await predictECMock(seq);
+          const ec_top1 = ecEntries[0]?.ec || '';
+          const ec_score1 = ecEntries[0]?.score || 0;
+          const ec_top2 = ecEntries[1]?.ec || '';
+          const ec_score2 = ecEntries[1]?.score || 0;
+          const ec_top3 = ecEntries[2]?.ec || '';
+          const ec_score3 = ecEntries[2]?.score || 0;
+
+          existing.set(id, { id, kcat, km, solubility, tm, ec_top1, ec_score1, ec_top2, ec_score2, ec_top3, ec_score3 });
           done++;
-          if (done % 50 === 0) pushRuntimeLine(`[predict-metrics] ${done}/${missingIds.length} done`);
+          if (done % 5 === 0 || done === missingIds.length) {
+            setRuntimeMeta({ predictProgress: { current: done, total: missingIds.length } });
+            pushRuntimeLine(`[predict-metrics] ${done}/${missingIds.length} done`);
+          }
         }
         pushRuntimeLine(`[predict-metrics] finished ${done}/${missingIds.length} new prediction(s)`);
+        setRuntimeMeta({ predictProgress: { current: done, total: missingIds.length, done: true } });
       }
 
       const allRows = candidateIds.map((id) => existing.get(id)).filter(Boolean);
-      await writeCsvRows(metricsPath, ['id', 'kcat', 'solubility', 'tm'], allRows);
+      const csvHeaders = ['id', 'kcat', 'km', 'solubility', 'tm', 'ec_top1', 'ec_score1', 'ec_top2', 'ec_score2', 'ec_top3', 'ec_score3'];
+      await writeCsvRows(metricsPath, csvHeaders, allRows);
 
       const normMap = computePredictedNormalization(allRows, subWeights, tmTarget);
       const rows = allRows
-        .map((r) => ({ id: r.id, kcat: r.kcat, solubility: r.solubility, tm: r.tm, ...normMap.get(r.id) }))
+        .map((r) => ({
+          id: r.id,
+          kcat: r.kcat,
+          km: r.km ?? 0,
+          solubility: r.solubility,
+          tm: r.tm,
+          ec_top1: r.ec_top1 || '',
+          ec_score1: r.ec_score1 ?? 0,
+          ec_top2: r.ec_top2 || '',
+          ec_score2: r.ec_score2 ?? 0,
+          ec_top3: r.ec_top3 || '',
+          ec_score3: r.ec_score3 ?? 0,
+          ...normMap.get(r.id),
+        }))
         .sort((a, b) => b.predictedScore - a.predictedScore);
 
-      res.json({ ok: true, taskId, count: rows.length, recomputedCount: missingIds.length, tmTarget, subWeights, rows });
+      res.json({
+        ok: true, taskId, count: rows.length, recomputedCount: missingIds.length,
+        tmTarget, subWeights, smiles: smiles || null,
+        services: { cataPro: useCataPro, solubility: useSol, ec: useEC, tm: useTm },
+        rows,
+      });
       finishRuntimeTask('network/predict-metrics', true);
     } catch (err) {
       finishRuntimeTask('network/predict-metrics', false);

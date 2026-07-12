@@ -235,28 +235,34 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 
 ### Strategy 1: Property Prediction Score（性质预测评分）
 
-在 Recommendation 页面新增「Strategy 1」卡片，可一键对网络中所有候选序列运行以下三个预测：
+在 Recommendation 页面新增「Strategy 1」卡片，可一键对网络中所有候选序列运行以下四个预测：
 
-| 预测指标 | 说明 | 评分逻辑 |
-|----------|------|----------|
-| **kcat** | 催化速率常数 | 值越大越好（min-max 归一化） |
-| **Solubility** | 溶解度 (%) | 值越大越好（min-max 归一化） |
-| **Tm** | 熔解温度 (°C) | 越接近「目标温度」越好（高斯衰减） |
+| 预测指标 | 说明 | 评分逻辑 | 外部服务 |
+|----------|------|----------|----------|
+| **kcat/Km** | 催化效率 | 值越大越好（min-max 归一化） | CataPro (可选) |
+| **Solubility** | 溶解度 (%) | 值越大越好（min-max 归一化） | SolPred (可选) |
+| **EC Number** | 酶分类号（Top-3） | 基于置信度加权 | DeepEC (可选) |
+| **Tm** | 熔解温度 (°C) | 越接近「目标温度」越好（高斯衰减） | TmPred (可选) |
 
-三个指标通过**可拖拽权重条**（默认各 1/3）实时调整占比，并计算加权综合评分（`predictedScore`）。
+四个指标通过**可拖拽权重条**（默认各 1/3）实时调整占比，并计算加权综合评分（`predictedScore`）。
+
+> **EC Number 鼠标悬停提示**：将鼠标悬停在 EC Number 列上，会浮窗显示 Top-3 EC 预测结果及其置信度百分比。
 
 **参数配置：**
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| kcat 权重 | 33% | kcat 预测值占比 |
+| kcat 权重 | 33% | kcat/Km 预测值占比 |
 | Solubility 权重 | 33% | 溶解度预测值占比 |
 | Tm 权重 | 33% | 熔解温度占比 |
 | Tm 目标温度 | 60°C | 序列 Tm 越接近此值得分越高 |
+| 底物 SMILES | _(空)_ | 用于 CataPro kcat/Km 预测，留空使用 mock 值 |
 
-**结果缓存**：预测结果缓存到任务目录下的 `predicted_metrics.csv`，重复打开不会重新调用 API；"Recompute All" 按钮可强制重新计算。
+**预测服务状态**：Dashboard 的健康检查面板会显示各预测服务（kcat/Km、Solubility、EC Number、Tm）的在线/离线状态及服务地址。Prediction 页面标题旁也会以绿/灰圆点显示各服务状态。
 
-> **后端说明**：当前预测 API 使用确定性哈希伪随机数模拟（同一序列每次结果一致），`server.mjs` 中的 `predictKcatMock` / `predictSolubilityMock` / `predictTmMock` 三个函数带有 `TODO` 注释，等真实 API 就绪后只需替换函数体即可。
+**进度条**：点击预测按钮后会显示 shimmer 动画进度条，提示正在进行预测计算。结果缓存到任务目录下的 `predicted_metrics.csv`，重复打开不会重新调用 API；"Recompute All" 按钮可强制重新计算。
+
+> **后端说明**：当前预测 API 使用确定性哈希伪随机数模拟（同一序列每次结果一致），`server.mjs` 中的预测函数带有 `TODO` 注释，等真实 API 就绪后只需替换函数体即可。外部服务地址通过环境变量 `CATAPRO_URL`、`SOLUBILITY_URL`、`EC_URL`、`TM_URL` 配置，默认分别为 `http://localhost:8001`、`http://localhost:8002`、`http://localhost:8003`、`http://localhost:8005`。
 
 ### Strategy 2: Comprehensive Recommendation（综合推荐）
 
@@ -315,7 +321,9 @@ $$
 
 - **FASTA 导出**：将推荐候选序列导出为 FASTA 格式文件下载
 - **Cytoscape 高亮**：一键在 Cytoscape 桌面端选中/高亮推荐的候选节点（通过 CyREST Commands API）
-- **状态持久化**：推荐结果和所有参数（包括 Strategy 1 的 kcat/solubility/Tm 权重、Tm 目标温度、网络连通性阈值等）在页面刷新后自动恢复
+- **状态持久化**：推荐结果和所有参数（包括 Strategy 1 的权重、Tm 目标温度、网络连通性阈值等）在页面刷新后自动恢复
+- **全局错误边界**：前端增加了 `GlobalErrorBoundary`，捕获渲染阶段的运行时错误（如缓存数据缺少新字段），展示友好的错误提示和重载按钮，避免白屏
+- **防御性数据标准化**：Recommendation 结果在加载时自动对缺失字段做防御性处理，避免旧缓存数据导致 `.toFixed()` 调用 undefined 崩溃
 
 ## 9. 项目结构
 

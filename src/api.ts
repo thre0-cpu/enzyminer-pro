@@ -69,6 +69,12 @@ export function healthCheck() {
     taskId: string;
     pythonBin: string;
     tools: Record<string, boolean>;
+    predictionServices?: {
+      cataPro: { url: string; online: boolean };
+      solubility: { url: string; online: boolean };
+      ec: { url: string; online: boolean };
+      tm: { url: string; online: boolean };
+    };
   }>('/api/health');
 }
 
@@ -728,24 +734,41 @@ export type PredictedSubWeights = {
 export type PredictedMetricsRow = {
   id: string;
   kcat: number;
+  km: number;
   solubility: number;
   tm: number;
+  ec_top1: string;
+  ec_score1: number;
+  ec_top2: string;
+  ec_score2: number;
+  ec_top3: string;
+  ec_score3: number;
   kcatNorm: number;
   solubilityNorm: number;
   tmNorm: number;
   predictedScore: number;
 };
 
+export type PredictionServices = {
+  cataPro: { url: string; online: boolean };
+  solubility: { url: string; online: boolean };
+  ec: { url: string; online: boolean };
+  tm: { url: string; online: boolean };
+};
+
 export function predictNetworkMetrics(opts?: {
   forceRecompute?: boolean;
   subWeights?: Partial<PredictedSubWeights>;
   tmTarget?: number;
+  smiles?: string;
 }) {
   return request<{
     count: number;
     recomputedCount: number;
     tmTarget: number;
     subWeights: PredictedSubWeights;
+    smiles: string | null;
+    services: { cataPro: boolean; solubility: boolean; ec: boolean; tm: boolean };
     rows: PredictedMetricsRow[];
   }>('/api/network/predict-metrics', {
     method: 'POST',
@@ -754,6 +777,7 @@ export function predictNetworkMetrics(opts?: {
       forceRecompute: opts?.forceRecompute,
       subWeights: opts?.subWeights,
       tmTarget: opts?.tmTarget,
+      smiles: opts?.smiles,
     }),
   });
 }

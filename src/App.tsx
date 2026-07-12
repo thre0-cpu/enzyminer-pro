@@ -443,7 +443,36 @@ function normalizeSavedRecommendResults(results: unknown, topN: unknown): { resu
   if (Number.isFinite(normalizedTopN) && normalizedTopN > 0 && results.length > normalizedTopN) {
     return { results: [], stale: true };
   }
-  return { results: results as RecommendCandidate[], stale: false };
+  // Defensive normalization: older saved results may be missing fields that
+  // newer code added (predictedScore, networkComponent, etc.). Coerce all
+  // numeric fields to finite numbers and strings to strings so rendering code
+  // that calls .toFixed() / .map() never throws on undefined.
+  const safe = results.map((raw: any) => {
+    const r = (raw && typeof raw === 'object') ? raw : {};
+    const num = (v: any, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+    const str = (v: any, d = '') => (v == null ? d : String(v));
+    return {
+      id: str(r.id),
+      cluster: str(r.cluster),
+      cluster_size: num(r.cluster_size),
+      networkComponent: str(r.networkComponent),
+      networkComponentSize: num(r.networkComponentSize),
+      representative: !!r.representative,
+      kingdom: str(r.kingdom),
+      phylum: str(r.phylum),
+      class: str(r.class),
+      species: str(r.species),
+      avgRefSimilarity: num(r.avgRefSimilarity),
+      maxRefSimilarity: num(r.maxRefSimilarity),
+      clusterSizeNorm: num(r.clusterSizeNorm),
+      networkComponentSizeNorm: num(r.networkComponentSizeNorm),
+      taxonomyDiversity: num(r.taxonomyDiversity),
+      predictedScore: num(r.predictedScore),
+      score: num(r.score),
+      refEdgeCount: num(r.refEdgeCount),
+    } as RecommendCandidate;
+  });
+  return { results: safe, stale: false };
 }
 
 // Generic normalizer: given a partial weights record, a set of keys, and defaults,
@@ -611,6 +640,43 @@ function WeightBar<K extends string>({
 // per candidate. The sub-weights and Tm target are lifted to the parent view
 // so the same values can be reused as the 6th weight in the comprehensive
 // recommendation strategy below.
+function EcTooltip({ r }: { r: PredictedMetricsRow }) {
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const cellRef = useRef<HTMLSpanElement | null>(null);
+
+  const handleMouseEnter = () => {
+    if (cellRef.current) {
+      const rect = cellRef.current.getBoundingClientRect();
+      setPos({ x: rect.left + rect.width / 2, y: rect.top });
+    }
+    setHover(true);
+  };
+
+  return (
+    <span
+      ref={cellRef}
+      className="cursor-help"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setHover(false)}
+    >
+      {r.ec_top1 || '—'}
+      {r.ec_score1 > 0 && <span className="text-slate-400 ml-0.5">({(r.ec_score1 * 100).toFixed(0)}%)</span>}
+      {hover && r.ec_top1 && (
+        <div
+          className="fixed z-[9999] bg-slate-800 text-white text-[10px] rounded px-2 py-1.5 whitespace-nowrap shadow-lg border border-slate-600 pointer-events-none"
+          style={{ left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)' }}
+        >
+          <div className="font-semibold text-slate-300 mb-0.5">Top-3 EC Predictions</div>
+          <div>1. {r.ec_top1} — {(r.ec_score1 * 100).toFixed(1)}%</div>
+          {r.ec_top2 && <div>2. {r.ec_top2} — {(r.ec_score2 * 100).toFixed(1)}%</div>}
+          {r.ec_top3 && <div>3. {r.ec_top3} — {(r.ec_score3 * 100).toFixed(1)}%</div>}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function PredictedMetricsPanel({
   subWeights,
   onSubWeightsChange,
@@ -626,6 +692,8 @@ function PredictedMetricsPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastRunInfo, setLastRunInfo] = useState<{ count: number; recomputedCount: number } | null>(null);
+  const [smiles, setSmiles] = useState('');
+  const [services, setServices] = useState<{ cataPro: boolean; solubility: boolean; ec: boolean } | null>(null);
 
   const runPredict = async (forceRecompute: boolean) => {
     setLoading(true);
@@ -635,9 +703,11 @@ function PredictedMetricsPanel({
         forceRecompute,
         subWeights: normalizePredictedSubWeights(subWeights),
         tmTarget,
+        smiles: smiles.trim() || undefined,
       });
       setRows(data.rows);
       setLastRunInfo({ count: data.count, recomputedCount: data.recomputedCount });
+      if (data.services) setServices(data.services);
     } catch (err: any) {
       setError(String(err?.message || err));
     } finally {
@@ -649,13 +719,30 @@ function PredictedMetricsPanel({
     <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold text-slate-900">Strategy 1: Property Prediction Score</h2>
+        {services && (
+          <div className="flex items-center gap-2 text-[10px]">
+            <span className={`inline-block w-2 h-2 rounded-full ${services.cataPro ? 'bg-green-500' : 'bg-slate-300'}`} />
+            <span className={services.cataPro ? 'text-green-700' : 'text-slate-400'}>kcat/Km</span>
+            <span className={`inline-block w-2 h-2 rounded-full ${services.solubility ? 'bg-green-500' : 'bg-slate-300'}`} />
+            <span className={services.solubility ? 'text-green-700' : 'text-slate-400'}>Sol</span>
+            <span className={`inline-block w-2 h-2 rounded-full ${services.ec ? 'bg-green-500' : 'bg-slate-300'}`} />
+            <span className={services.ec ? 'text-green-700' : 'text-slate-400'}>EC</span>
+          </div>
+        )}
       </div>
       <p className="text-sm text-slate-600">
-        Runs kcat, solubility, and Tm (melting temperature) predictors on every candidate sequence in the network, then combines
-        the three (min-max normalized) values into a single weighted score. Results are cached per task; use "Recompute All" to
-        force fresh predictions.
+        Runs kcat/Km, solubility, EC number, and Tm predictors on every candidate sequence. Real APIs are used when available;
+        otherwise falls back to mock predictions. Results are cached per task.
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+        <div>
+          <label className="block text-xs text-slate-500 mb-1">Substrate SMILES (for kcat/Km prediction)</label>
+          <input type="text" className="w-full p-2 border rounded text-sm font-mono"
+            placeholder="e.g. C(CC(C(=O)O)N)CN=C(N)N"
+            value={smiles}
+            onChange={(e) => setSmiles(e.target.value)} />
+          <p className="text-[10px] text-slate-400 mt-1">Required for CataPro kcat/Km. Leave empty to use mock values.</p>
+        </div>
         <div>
           <label className="block text-xs text-slate-500 mb-1">Tm Target (°C)</label>
           <input type="number" step={0.5} className="w-full p-2 border rounded text-sm"
@@ -688,6 +775,18 @@ function PredictedMetricsPanel({
           </span>
         )}
       </div>
+      {loading && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-slate-500">
+            <span>⏳ Running property predictions (kcat/Km, solubility, EC, Tm)...</span>
+            <span className="animate-pulse">Processing</span>
+          </div>
+          <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+            <div className="h-full rounded-full bg-sky-500 progress-shimmer transition-all duration-300" style={{ width: '100%' }} />
+          </div>
+          <p className="text-[10px] text-slate-400">This may take a while for large datasets. Results are cached per task.</p>
+        </div>
+      )}
       {error && <div className="text-sm text-red-600">{error}</div>}
       {rows.length > 0 && (
         <div className="border border-slate-200 rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
@@ -696,9 +795,11 @@ function PredictedMetricsPanel({
               <tr>
                 <th className="px-2 py-2 text-left">#</th>
                 <th className="px-2 py-2 text-left">ID</th>
-                <th className="px-2 py-2 text-right">kcat</th>
+                <th className="px-2 py-2 text-right">kcat (s⁻¹)</th>
+                <th className="px-2 py-2 text-right">Km (mM)</th>
                 <th className="px-2 py-2 text-right">Solubility</th>
-                <th className="px-2 py-2 text-right">Tm</th>
+                <th className="px-2 py-2 text-right">EC Number</th>
+                <th className="px-2 py-2 text-right">Tm (°C)</th>
                 <th className="px-2 py-2 text-right">Predicted Score</th>
               </tr>
             </thead>
@@ -707,9 +808,13 @@ function PredictedMetricsPanel({
                 <tr key={r.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                   <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
                   <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{r.id}</td>
-                  <td className="px-2 py-1.5 text-right">{r.kcat.toFixed(2)}</td>
-                  <td className="px-2 py-1.5 text-right">{r.solubility.toFixed(1)}%</td>
-                  <td className="px-2 py-1.5 text-right">{r.tm.toFixed(1)}°C</td>
+                  <td className="px-2 py-1.5 text-right">{r.kcat.toFixed(3)}</td>
+                  <td className="px-2 py-1.5 text-right">{r.km.toFixed(3)}</td>
+                  <td className="px-2 py-1.5 text-right">{(r.solubility * 100).toFixed(1)}%</td>
+                  <td className="px-2 py-1.5 text-right">
+                    <EcTooltip r={r} />
+                  </td>
+                  <td className="px-2 py-1.5 text-right">{r.tm.toFixed(1)}</td>
                   <td className="px-2 py-1.5 text-right font-semibold">{r.predictedScore.toFixed(4)}</td>
                 </tr>
               ))}
@@ -2552,9 +2657,29 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         </span>
                       ))}
                     </div>
+                    {health.predictionServices && (() => {
+                      const ps = health.predictionServices as { cataPro: { url: string; online: boolean }; solubility: { url: string; online: boolean }; ec: { url: string; online: boolean }; tm: { url: string; online: boolean } };
+                      return (
+                        <div className="mt-2">
+                          <div className="text-xs font-medium text-slate-500 mb-1.5">Prediction Services</div>
+                          <div className="flex gap-3 flex-wrap">
+                            {(['cataPro', 'solubility', 'ec', 'tm'] as const).map((key) => {
+                              const svc = ps[key];
+                              const label = key === 'cataPro' ? 'kcat/Km' : key === 'solubility' ? 'Solubility' : key === 'ec' ? 'EC Number' : 'Tm';
+                              return (
+                                <span key={key} className={`px-2 py-1 rounded flex items-center gap-1.5 ${svc.online ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                  <span className={`inline-block w-2 h-2 rounded-full ${svc.online ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                                  {label}: {svc.online ? 'Online' : 'Offline'}
+                                  <span className="text-[10px] opacity-60">({svc.url})</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
-                <ObservabilityPanel metrics={metrics} />
                 {renderTailPanels('h-44', true)}
               </div>
             )}
@@ -4262,43 +4387,43 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                             <td className="px-2 py-1.5 text-right">{(c.maxRefSimilarity * 100).toFixed(1)}%</td>
                             <td className="px-2 py-1.5 text-right">{c.refEdgeCount}</td>
                             <td className="px-2 py-1.5">{c.cluster}</td>
-                            <td className="px-2 py-1.5 text-right">{c.cluster_size}</td>
-                            <td className="px-2 py-1.5">{c.networkComponent}</td>
-                            <td className="px-2 py-1.5 text-right">{c.networkComponentSize}</td>
-                            <td className="px-2 py-1.5">{c.networkComponent}</td>
-                            <td className="px-2 py-1.5 text-right">{c.networkComponentSize}</td>
-                            <td className="px-2 py-1.5">{c.phylum}</td>
-                            <td className="px-2 py-1.5">{c.species}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {recommendResults.length > 0 && (
-                  <div className="flex gap-2 flex-wrap">
-                    <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm"
-                      onClick={async () => {
-                        try {
-                          const data = await exportRecommendedFasta(recommendResults.map(c => c.id));
-                          const blob = new Blob([data.fasta], { type: 'text/plain' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url; a.download = `recommended_candidates_${recommendResults.length}.fasta`;
-                          a.click(); URL.revokeObjectURL(url);
-                        } catch (err: any) { alert('Export failed: ' + (err?.message || err)); }
-                      }}>
-                      Export FASTA ({recommendResults.length})
-                    </button>
-                    <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
-                      onClick={highlightRecommendationsInNetwork}>
-                      Highlight in Network
-                    </button>
-                  </div>
-                )}
-                {renderTailPanels('h-24')}
-              </div>
-            )}
+                          <td className="px-2 py-1.5 text-right">{c.cluster_size}</td>
+                          <td className="px-2 py-1.5">{c.networkComponent || '—'}</td>
+                          <td className="px-2 py-1.5 text-right">{Number(c.networkComponentSize || 0).toFixed(0)}</td>
+                          <td className="px-2 py-1.5">{c.networkComponent || '—'}</td>
+                          <td className="px-2 py-1.5 text-right">{Number(c.networkComponentSize || 0).toFixed(0)}</td>
+                          <td className="px-2 py-1.5">{c.phylum}</td>
+                          <td className="px-2 py-1.5">{c.species}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {recommendResults.length > 0 && (
+                <div className="flex gap-2 flex-wrap">
+                  <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm"
+                    onClick={async () => {
+                      try {
+                        const data = await exportRecommendedFasta(recommendResults.map(c => c.id));
+                        const blob = new Blob([data.fasta], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url; a.download = `recommended_candidates_${recommendResults.length}.fasta`;
+                        a.click(); URL.revokeObjectURL(url);
+                      } catch (err: any) { alert('Export failed: ' + (err?.message || err)); }
+                    }}>
+                    Export FASTA ({recommendResults.length})
+                  </button>
+                  <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
+                    onClick={highlightRecommendationsInNetwork}>
+                    Highlight in Network
+                  </button>
+                </div>
+              )}
+              {renderTailPanels('h-24')}
+            </div>
+          )}
             </div>
           </div>
         </div>
@@ -5331,6 +5456,27 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       </span>
                     ))}
                   </div>
+                  {health.predictionServices && (() => {
+                    const ps = health.predictionServices as { cataPro: { url: string; online: boolean }; solubility: { url: string; online: boolean }; ec: { url: string; online: boolean }; tm: { url: string; online: boolean } };
+                    return (
+                      <div className="mt-2">
+                        <div className="text-xs font-medium text-slate-500 mb-1.5">Prediction Services</div>
+                        <div className="flex gap-3 flex-wrap">
+                          {(['cataPro', 'solubility', 'ec', 'tm'] as const).map((key) => {
+                            const svc = ps[key];
+                            const label = key === 'cataPro' ? 'kcat/Km' : key === 'solubility' ? 'Solubility' : key === 'ec' ? 'EC Number' : 'Tm';
+                            return (
+                              <span key={key} className={`px-2 py-1 rounded flex items-center gap-1.5 ${svc.online ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                <span className={`inline-block w-2 h-2 rounded-full ${svc.online ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                                {label}: {svc.online ? 'Online' : 'Offline'}
+                                <span className="text-[10px] opacity-60">({svc.url})</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
               {renderTailPanels('h-44', true)}
@@ -7998,30 +8144,6 @@ function PipelineProgressPanel({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function ObservabilityPanel({ metrics }: { metrics: Record<PipelineStepKey, StepMetrics> }) {
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
-      <div className="text-sm font-medium text-slate-700">API Observability Panel</div>
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-        {pipelineSteps.map((s) => {
-          const m = metrics[s.key];
-          const avg = m.runs > 0 ? Math.round(m.totalMs / m.runs) : 0;
-          return (
-            <div key={s.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs space-y-1">
-              <div className="font-medium text-slate-700">{s.title}</div>
-              <div className="text-slate-600">Success/Fail: {m.success}/{m.fail}</div>
-              <div className="text-slate-600">Avg time: {avg} ms</div>
-              <div className="text-slate-600">Total retries: {m.retries}</div>
-              <div className="text-slate-600">Last time: {m.lastMs} ms</div>
-              <div className="text-slate-600">Last attempts: {m.lastAttempts || 0}</div>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
