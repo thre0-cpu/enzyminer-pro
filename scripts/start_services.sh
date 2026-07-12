@@ -7,6 +7,29 @@ PID_DIR="$PROJECT_DIR/.pids"
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
+# ── Ensure Node dependencies are installed ────────────────────────
+# After a fresh clone, node_modules/ will be missing (gitignored).
+if [[ ! -d "$PROJECT_DIR/node_modules" ]]; then
+    echo "[setup] node_modules not found – running npm install (this may take a minute) …"
+    (cd "$PROJECT_DIR" && npm install --no-fund --no-audit --ignore-optional 2>&1) || {
+    echo "[setup] npm install failed. Please run 'npm install' manually in $PROJECT_DIR" >&2
+    exit 1
+  }
+  echo "[setup] npm install complete."
+fi
+
+# ── Ensure Python dependencies are installed (for the pipeline) ───
+if [[ -f "$PROJECT_DIR/requirements.txt" ]]; then
+  local_python="${PIPELINE_PYTHON:-python3}"
+  if ! "$local_python" -c "import Bio" >/dev/null 2>&1; then
+    echo "[setup] Python Bio package not found – installing from requirements.txt …"
+    "$local_python" -m pip install -r "$PROJECT_DIR/requirements.txt" --quiet 2>&1 || {
+      echo "[setup] pip install failed. Please run 'pip install -r requirements.txt' manually." >&2
+    }
+    echo "[setup] pip install complete."
+  fi
+fi
+
 FRONTEND_PID_FILE="$PID_DIR/frontend.pid"
 BACKEND_PID_FILE="$PID_DIR/backend.pid"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
