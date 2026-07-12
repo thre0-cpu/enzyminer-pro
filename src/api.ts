@@ -720,7 +720,6 @@ export type RecommendWeights = {
   avgRefSimilarity: number;
   maxRefSimilarity: number;
   clusterSize: number;
-  networkComponentSize: number;
   taxonomyDiversity: number;
   predictedScore: number;
 };

@@ -418,12 +418,11 @@ function isLikelyErrorLogLine(line: string): boolean {
 
 // ── Multi-segment weight bar component ──
 const WEIGHT_COLORS = ['#6366f1', '#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b', '#ec4899']; // indigo, sky, emerald, violet, amber, pink
-const DEFAULT_WEIGHTS: RecommendWeights = { avgRefSimilarity: 0.28, maxRefSimilarity: 0.2, clusterSize: 0.12, networkComponentSize: 0.12, taxonomyDiversity: 0.08, predictedScore: 0.2 };
+const DEFAULT_WEIGHTS: RecommendWeights = { avgRefSimilarity: 0.28, maxRefSimilarity: 0.2, clusterSize: 0.24, taxonomyDiversity: 0.08, predictedScore: 0.2 };
 const WEIGHT_LABELS: { key: keyof RecommendWeights; label: string }[] = [
   { key: 'avgRefSimilarity', label: 'Avg Ref Sim' },
   { key: 'maxRefSimilarity', label: 'Max Ref Sim' },
   { key: 'clusterSize', label: 'Cluster Size' },
-  { key: 'networkComponentSize', label: 'Net Comp Size' },
   { key: 'taxonomyDiversity', label: 'Tax Diversity' },
   { key: 'predictedScore', label: 'Predicted Score' },
 ];
@@ -4368,10 +4367,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           <th className="px-2 py-2 text-right">Ref Edges</th>
                           <th className="px-2 py-2 text-left">Cluster</th>
                           <th className="px-2 py-2 text-right">Cluster Size</th>
-                          <th className="px-2 py-2 text-left">Net Comp</th>
-                          <th className="px-2 py-2 text-right">Comp Size</th>
-                          <th className="px-2 py-2 text-left">Net Comp</th>
-                          <th className="px-2 py-2 text-right">Comp Size</th>
                           <th className="px-2 py-2 text-left">Phylum</th>
                           <th className="px-2 py-2 text-left">Species</th>
                         </tr>
@@ -4388,10 +4383,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                             <td className="px-2 py-1.5 text-right">{c.refEdgeCount}</td>
                             <td className="px-2 py-1.5">{c.cluster}</td>
                           <td className="px-2 py-1.5 text-right">{c.cluster_size}</td>
-                          <td className="px-2 py-1.5">{c.networkComponent || '—'}</td>
-                          <td className="px-2 py-1.5 text-right">{Number(c.networkComponentSize || 0).toFixed(0)}</td>
-                          <td className="px-2 py-1.5">{c.networkComponent || '—'}</td>
-                          <td className="px-2 py-1.5 text-right">{Number(c.networkComponentSize || 0).toFixed(0)}</td>
                           <td className="px-2 py-1.5">{c.phylum}</td>
                           <td className="px-2 py-1.5">{c.species}</td>
                         </tr>

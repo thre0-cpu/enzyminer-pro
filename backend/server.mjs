@@ -4915,8 +4915,7 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
       const weights = {
         avgRefSimilarity: Number(req.body?.weights?.avgRefSimilarity ?? 0.28),
         maxRefSimilarity: Number(req.body?.weights?.maxRefSimilarity ?? 0.2),
-        clusterSize: Number(req.body?.weights?.clusterSize ?? 0.12),
-        networkComponentSize: Number(req.body?.weights?.networkComponentSize ?? 0.12),
+        clusterSize: Number(req.body?.weights?.clusterSize ?? 0.24),
         taxonomyDiversity: Number(req.body?.weights?.taxonomyDiversity ?? 0.08),
         predictedScore: Number(req.body?.weights?.predictedScore ?? 0.2),
       };
@@ -4999,15 +4998,14 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
       const maxComponentSize = Math.max(1, ...Array.from(componentSizes.values()));
 
 
-      // Normalisation helpers
-      const maxClusterSize = Math.max(1, ...nodeRows.map((n) => Number(n.cluster_size) || 1));
-      const clusterClasses = new Map();
+      // Normalisation helpers — now using network connected components as "clusters"
+      const componentClasses = new Map(); // rootId -> Set of class names
       for (const node of nodeRows) {
-        const cl = node.cluster || '';
-        if (!clusterClasses.has(cl)) clusterClasses.set(cl, new Set());
-        if (node['class']) clusterClasses.get(cl).add(node['class']);
+        const rootId = find(node.id);
+        if (!componentClasses.has(rootId)) componentClasses.set(rootId, new Set());
+        if (node['class']) componentClasses.get(rootId).add(node['class']);
       }
-      const maxClassCount = Math.max(1, ...Array.from(clusterClasses.values()).map((s) => s.size));
+      const maxClassCount = Math.max(1, ...Array.from(componentClasses.values()).map((s) => s.size));
 
       // Predicted property score (kcat / solubility / Tm), if predict-metrics has been run for this task.
       const predictedMetricsMap = await loadPredictedMetricsMap(workDir);
@@ -5022,34 +5020,30 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
       let filteredBySimilarity = 0;
       for (const node of nodeRows) {
         if (String(node.is_reference) === '1') continue;
-        const nodeClusterSize = Number(node.cluster_size) || 1;
-        if (nodeClusterSize < minClusterSize) { filteredByClusterSize++; continue; }
+        const rootId = find(node.id);
+        const compSize = componentSizes.get(rootId) || 1;
+        if (compSize < minClusterSize) { filteredByClusterSize++; continue; }
         const sims = candidateRefSims.get(node.id) || [];
         const avgRefSim = sims.length ? sims.reduce((a, b) => a + b, 0) / sims.length / 100 : 0;
         const maxRefSim = sims.length ? Math.max(...sims) / 100 : 0;
         if (minSimilarity > 0 && maxRefSim * 100 < minSimilarity) { filteredBySimilarity++; continue; }
-        const clusterSizeNorm = nodeClusterSize / maxClusterSize;
-        
-        const rootId = find(node.id);
-        const compSize = componentSizes.get(rootId) || 1;
         const compSizeNorm = compSize / maxComponentSize;
         
-        const classCount = clusterClasses.get(node.cluster || '')?.size || 1;
+        const classCount = componentClasses.get(rootId)?.size || 1;
         const taxonomyDiv = classCount / maxClassCount;
         const predictedScore = predictedNormMap.get(node.id)?.predictedScore ?? 0;
 
         const score =
           weights.avgRefSimilarity * avgRefSim +
           weights.maxRefSimilarity * maxRefSim +
-          weights.clusterSize * clusterSizeNorm +
-          weights.networkComponentSize * compSizeNorm +
+          weights.clusterSize * compSizeNorm +
           weights.taxonomyDiversity * taxonomyDiv +
           weights.predictedScore * predictedScore;
 
         candidates.push({
           id: node.id,
-          cluster: node.cluster,
-          cluster_size: Number(node.cluster_size) || 1,
+          cluster: rootId,
+          cluster_size: compSize,
           networkComponent: rootId,
           networkComponentSize: compSize,
 
@@ -5063,7 +5057,7 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
           species: node.species || '',
           avgRefSimilarity: Number(avgRefSim.toFixed(4)),
           maxRefSimilarity: Number(maxRefSim.toFixed(4)),
-          clusterSizeNorm: Number(clusterSizeNorm.toFixed(4)),
+          clusterSizeNorm: Number(compSizeNorm.toFixed(4)),
           networkComponentSizeNorm: Number(compSizeNorm.toFixed(4)),
           taxonomyDiversity: Number(taxonomyDiv.toFixed(4)),
           predictedScore: Number(predictedScore.toFixed(4)),
