@@ -762,6 +762,59 @@ export type PredictedMetricsRow = {
   };
 };
 
+export type ManualFilterField =
+  | 'id' | 'ec' | 'ec_top1' | 'ec_top2' | 'ec_top3'
+  | 'uniprot_accession' | 'uniprot_identifier' | 'description' | 'taxonomy_id'
+  | 'kingdom' | 'phylum' | 'class' | 'order' | 'family' | 'genus' | 'species'
+  | 'length' | 'hmm_score' | 'evalue' | 'bitscore' | 'pident' | 'qcovs'
+  | 'kcat' | 'km' | 'catalytic_efficiency' | 'solubility' | 'tm' | 'predicted_score';
+
+export type ManualFilterCondition = {
+  field: ManualFilterField;
+  operator: 'contains' | 'not_contains' | 'equals' | 'not_equals' | 'starts_with' | 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'between';
+  value: string | number;
+  value2?: string | number;
+  ecScope?: 'any' | 'top1' | 'top2' | 'top3';
+};
+
+export type ManualFilterRow = {
+  id: string;
+  sequence: string;
+  length: number | null;
+  hmm_score: number | null;
+  evalue: number | null;
+  bitscore: number | null;
+  pident: number | null;
+  qcovs: number | null;
+  uniprot_accession: string;
+  uniprot_identifier: string;
+  taxonomy_id: string;
+  kingdom: string;
+  phylum: string;
+  class: string;
+  order: string;
+  family: string;
+  genus: string;
+  species: string;
+  description: string;
+  kcat: number | null;
+  km: number | null;
+  catalytic_efficiency: number | null;
+  solubility: number | null;
+  tm: number | null;
+  ec_top1: string;
+  ec_score1: number | null;
+  ec_top2: string;
+  ec_score2: number | null;
+  ec_top3: string;
+  ec_score3: number | null;
+  predicted_score: number | null;
+  cataPro_source: string;
+  solubility_source: string;
+  tm_source: string;
+  ec_source: string;
+};
+
 export type PredictorProgress = {
   current: number;
   total: number;
@@ -858,6 +911,40 @@ export function recommendCandidates(opts?: {
   });
 }
 
+export function filterPredictedCandidates(opts?: {
+  conditions?: ManualFilterCondition[];
+  logic?: 'and' | 'or';
+  page?: number;
+  pageSize?: number;
+  sort?: { field: ManualFilterField; direction: 'asc' | 'desc' };
+  includeAllIds?: boolean;
+  subWeights?: Partial<PredictedSubWeights>;
+  tmTarget?: number;
+}) {
+  return request<{
+    totalPredicted: number;
+    filteredCount: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    rows: ManualFilterRow[];
+    matchingIds?: string[];
+  }>('/api/network/filter-predicted-candidates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      conditions: opts?.conditions,
+      logic: opts?.logic || 'and',
+      page: opts?.page,
+      pageSize: opts?.pageSize,
+      sort: opts?.sort,
+      includeAllIds: opts?.includeAllIds,
+      subWeights: opts?.subWeights,
+      tmTarget: opts?.tmTarget,
+    }),
+  });
+}
+
 export function exportRecommendedFasta(ids: string[]) {
   return request<{ fasta: string; foundCount: number; requestedCount: number }>('/api/network/export-recommended-fasta', {
     method: 'POST',
@@ -866,12 +953,25 @@ export function exportRecommendedFasta(ids: string[]) {
   });
 }
 
-export function exportRecommendedCsv(candidates: RecommendCandidate[]) {
+export function exportCandidateCsv(
+  ids: string[],
+  candidates?: RecommendCandidate[],
+  predictionOptions?: { subWeights?: Partial<PredictedSubWeights>; tmTarget?: number },
+) {
   return request<{ csv: string; foundCount: number; requestedCount: number }>('/api/network/export-recommended-csv', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids: candidates.map((candidate) => candidate.id), candidates }),
+    body: JSON.stringify({
+      ids,
+      ...(candidates?.length ? { candidates } : {}),
+      predictedSubWeights: predictionOptions?.subWeights,
+      predictedTmTarget: predictionOptions?.tmTarget,
+    }),
   });
+}
+
+export function exportRecommendedCsv(candidates: RecommendCandidate[]) {
+  return exportCandidateCsv(candidates.map((candidate) => candidate.id), candidates);
 }
 
 export function highlightCytoscapeNodes(ids: string[], baseUrl?: string, networkSuid?: number | null) {

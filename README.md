@@ -22,7 +22,7 @@
 | 6 | **Clustering** | CD-HIT 聚类（默认 85% identity），去冗余 |
 | 7 | **Similarity** | 全序列 pairwise 相似性计算（global/local alignment），进度条实时显示 |
 | 8 | **Network Push** | 按相似性阈值推送网络到 Cytoscape 桌面端（CyREST），或在浏览器中查看网络并下载 PNG/SVG 图像 |
-| 9 | **候选推荐** | 基于多维加权评分的候选序列自动推荐，支持 FASTA/完整 CSV 保存和 Cytoscape 高亮 |
+| 9 | **候选推荐** | 支持系统自动推荐与预测性质人工筛选，可勾选、全选并保存 FASTA/完整 CSV |
 
 ### HMMER 模块（基于隐马尔可夫模型搜索）
 
@@ -36,7 +36,7 @@
 | 6 | **Clustering** | CD-HIT 聚类去冗余 |
 | 7 | **Similarity** | Pairwise 相似性计算 |
 | 8 | **Network Push** | 推送到 Cytoscape，或在浏览器中查看并下载 PNG/SVG 网络图 |
-| 9 | **候选推荐** | 基于多维加权评分的候选序列自动推荐，支持 FASTA/CSV 保存 |
+| 9 | **候选推荐** | 支持系统自动推荐与预测性质人工筛选，可勾选、全选并保存 FASTA/完整 CSV |
 
 ### Compare 模块（网络对比）
 
@@ -243,6 +243,7 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 - `POST /api/network/push-cytoscape` — 推送到 Cytoscape
 - `POST /api/network/predict-metrics` — 性质预测（kcat/solubility/Tm），结果缓存到 `predicted_metrics.csv`
 - `POST /api/network/recommend-candidates` — 候选序列推荐（六维加权，含 Strategy 1 预测评分）
+- `POST /api/network/filter-predicted-candidates` — 对全部已完成性质预测的候选进行多条件人工筛选、排序和分页
 - `POST /api/network/export-recommended-fasta` — 导出推荐候选 FASTA
 - `POST /api/network/export-recommended-csv` — 导出推荐候选完整 CSV（序列、HMM/UniProt/taxonomy 元数据、网络评分及预测性质）
 - `POST /api/network/highlight-cytoscape` — 在 Cytoscape 中高亮选中节点
@@ -333,10 +334,23 @@ $$
 
 通过拖拽分隔线调整权重比例，「恢复默认」按钮一键重置。
 
+### Manual Filtering（人工筛选）
+
+Recommendation 页面在系统自动推荐之外提供独立的人工筛选区域，数据范围是当前任务中**所有已经完成 Strategy 1 性质预测的候选序列**，不受自动推荐 Top N 限制。
+
+- 可动态添加最多 20 条条件，当前版本按 **AND** 组合
+- EC 条件默认匹配 `ec_top1`、`ec_top2`、`ec_top3` 任意一个，也可限定只匹配 Top 1、Top 2 或 Top 3
+- 文本字段支持包含、不包含、等于、不等于、开头匹配；可筛选 ID、EC、UniProt、description 和各级分类学字段
+- 数值字段支持 `>`、`≥`、`<`、`≤`、`=` 和区间；可筛选 sequence length、HMM/BLAST 指标、kcat、Km、kcat/Km、Solubility、Tm 和 Predicted Score
+- 结果支持服务端排序和分页，并提供「选择当前页」「选择全部筛选结果」「清空选择」及逐条勾选
+- 选中结果可保存为 FASTA 或完整 CSV；筛选条件、排序、每页条数和选择状态按任务保存到浏览器本地存储
+
+系统自动推荐结果同样支持分页、逐条勾选、选择当前页、选择全部推荐结果、清空选择，并且只保存当前选中的序列。新计算出的推荐结果默认全部选中，以保持原有的一键保存体验。
+
 ### 附加功能
 
 - **浏览器网络图下载**：在线 D3/Cytoscape.js 网络图可直接保存为 PNG 或 SVG；仅导出图本身，不包含页面工具栏和提示框
-- **FASTA/CSV 保存**：推荐结果的 Save 下拉可选择 FASTA 或 CSV。CSV 包含完整序列、长度、HMM 分数、UniProt/分类学/描述字段、网络与推荐评分，以及 kcat、Km、kcat/Km、溶解度、Tm、EC 和预测来源
+- **FASTA/CSV 保存**：系统推荐和人工筛选结果均可先勾选，再通过 Save Selected 下拉保存 FASTA 或 CSV。CSV 包含完整序列、长度、HMM/BLAST 分数、UniProt/分类学/描述字段、网络与推荐评分（如适用），以及 kcat、Km、kcat/Km、溶解度、Tm、EC 和预测来源
 - **Cytoscape 高亮**：一键在 Cytoscape 桌面端选中/高亮推荐的候选节点（通过 CyREST Commands API）
 - **状态持久化**：推荐结果和所有参数（包括 Strategy 1 的权重、Tm 目标温度、网络连通性阈值等）在页面刷新后自动恢复
 - **全局错误边界**：前端增加了 `GlobalErrorBoundary`，捕获渲染阶段的运行时错误（如缓存数据缺少新字段），展示友好的错误提示和重载按钮，避免白屏
@@ -353,6 +367,7 @@ enzyminer-pro/
 │   └── uniprot_fill.py      # UniProt 注释（HMMER 用）
 ├── src/
 │   ├── App.tsx              # 主 React 组件（HMMER + BLAST + Compare 三模块）
+│   ├── RecommendationPanels.tsx # 系统推荐选择表格与人工筛选共享组件
 │   └── api.ts               # 前端 API 客户端
 ├── index.html
 ├── package.json

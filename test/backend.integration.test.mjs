@@ -415,3 +415,151 @@ test('recommended CSV export merges sequence, source metadata, recommendation sc
   assert.equal(row.ec_top1, '1.1.1.1');
   assert.equal(row.predicted_score, '0.81');
 });
+
+test('manual filtering supports five simulated candidate-screening scenarios', async (t) => {
+  const taskId = 'manual-filter-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  await fs.writeFile(
+    path.join(taskDir, 'candidates.fasta'),
+    [
+      '>candA', 'AAAAAAAAAA',
+      '>candB', 'BBBBBBBBBBBB',
+      '>candC', 'CCCCCCCC',
+      '>candD', 'DDDDDDDDDDDDDD',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'hits_filtered.csv'),
+    [
+      'target,hmm_score,evalue,uniprot_accession,uniprot_identifier,taxonomy_id,kingdom,phylum,class,species,description',
+      'candA,200,1e-30,A0,A_ZERO,1,Bacteria,Firmicutes,Bacilli,Species A,Alpha oxidase',
+      'candB,150,1e-20,B0,B_ZERO,2,Bacteria,Proteobacteria,Gammaproteobacteria,Species B,Beta oxidase',
+      'candC,100,1e-10,C0,C_ZERO,3,Eukaryota,Chordata,Mammalia,Species C,Gamma enzyme',
+      'candD,50,1e-5,D0,D_ZERO,4,Archaea,Euryarchaeota,Methanobacteria,Species D,Delta enzyme',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'predicted_metrics.csv'),
+    [
+      'id,kcat,km,solubility,tm,ec_top1,ec_score1,ec_top2,ec_score2,ec_top3,ec_score3,cataPro_source,solubility_source,tm_source,ec_source',
+      'candA,20,2,0.8,65,1.1.3.1,0.9,2.2.2.2,0.1,3.3.3.3,0.05,real,real,real,real',
+      'candB,30,10,0.7,70,4.4.4.4,0.8,1.1.3.2,0.7,5.5.5.5,0.1,real,real,real,real',
+      'candC,5,0.5,0.9,55,6.6.6.6,0.8,7.7.7.7,0.2,1.1.3.3,0.6,real,real,real,real',
+      'candD,1,1,0.2,40,8.8.8.8,0.9,9.9.9.9,0.1,0.0.0.0,0.05,mock,mock,mock,mock',
+    ].join('\n'),
+  );
+
+  const filter = (body) => api(`/api/network/filter-predicted-candidates?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ includeAllIds: true, page: 1, pageSize: 50, ...body }),
+  });
+
+  await t.test('scenario 1: EC substring matches any of the top three EC predictions', async () => {
+    const result = await filter({
+      conditions: [{ field: 'ec', operator: 'contains', value: '1.1.3', ecScope: 'any' }],
+      sort: { field: 'id', direction: 'asc' },
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.totalPredicted, 4);
+    assert.equal(result.body.filteredCount, 3);
+    assert.deepEqual(result.body.matchingIds, ['candA', 'candB', 'candC']);
+    assert.equal(result.body.rows[0].length, 10);
+    assert.equal(result.body.rows[0].hmm_score, 200);
+    assert.equal(result.body.rows[0].species, 'Species A');
+  });
+
+  await t.test('scenario 2: EC substring can be restricted to top-1 only', async () => {
+    const result = await filter({
+      conditions: [{ field: 'ec', operator: 'contains', value: '1.1.3', ecScope: 'top1' }],
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.filteredCount, 1);
+    assert.deepEqual(result.body.matchingIds, ['candA']);
+  });
+
+  await t.test('scenario 3: EC and kcat conditions are combined with AND', async () => {
+    const result = await filter({
+      conditions: [
+        { field: 'ec', operator: 'contains', value: '1.1.3', ecScope: 'any' },
+        { field: 'kcat', operator: 'gt', value: 15 },
+      ],
+      sort: { field: 'kcat', direction: 'desc' },
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.filteredCount, 2);
+    assert.deepEqual(result.body.matchingIds, ['candB', 'candA']);
+    assert.equal(result.body.rows[0].catalytic_efficiency, 3);
+  });
+
+  await t.test('scenario 4: derived kcat/Km and solubility range filters work together', async () => {
+    const result = await filter({
+      conditions: [
+        { field: 'catalytic_efficiency', operator: 'gt', value: 5 },
+        { field: 'solubility', operator: 'between', value: 0.75, value2: 0.95 },
+      ],
+      sort: { field: 'solubility', direction: 'asc' },
+    });
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(result.body.matchingIds, ['candA', 'candC']);
+  });
+
+  await t.test('scenario 5: server-side sorting, pagination, and select-all IDs stay consistent', async () => {
+    const request = {
+      conditions: [
+        { field: 'ec', operator: 'contains', value: '1.1.3', ecScope: 'any' },
+        { field: 'kcat', operator: 'gt', value: 15 },
+      ],
+      sort: { field: 'kcat', direction: 'desc' },
+      pageSize: 1,
+    };
+    const firstPage = await filter(request);
+    const secondPage = await filter({ ...request, page: 2 });
+    assert.equal(firstPage.response.status, 200);
+    assert.equal(firstPage.body.totalPages, 2);
+    assert.equal(firstPage.body.rows.length, 1);
+    assert.equal(firstPage.body.rows[0].id, 'candB');
+    assert.equal(secondPage.body.rows[0].id, 'candA');
+    assert.deepEqual(firstPage.body.matchingIds, ['candB', 'candA']);
+    assert.deepEqual(secondPage.body.matchingIds, ['candB', 'candA']);
+  });
+
+  // A blank numeric field is ignored rather than accidentally excluding every row.
+  const blankNumericCondition = await filter({
+    conditions: [{ field: 'kcat', operator: 'gte', value: '' }],
+    sort: { field: 'id', direction: 'asc' },
+  });
+  assert.equal(blankNumericCondition.body.filteredCount, 4);
+
+  // The selected filtered rows remain compatible with the complete CSV export path.
+  const csvExport = await api(`/api/network/export-recommended-csv?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ids: ['candA'],
+      predictedSubWeights: { kcat: 1, solubility: 0, tm: 0 },
+      predictedTmTarget: 60,
+    }),
+  });
+  assert.equal(csvExport.response.status, 200);
+  const csvLines = csvExport.body.csv.split('\n');
+  const csvHeaders = csvLines[0].split(',');
+  const csvValues = csvLines[1].split(',');
+  const csvRow = Object.fromEntries(csvHeaders.map((header, index) => [header, csvValues[index]]));
+  assert.equal(csvRow.id, 'candA');
+  assert.equal(csvRow.catalytic_efficiency, '10');
+  assert.notEqual(csvRow.predicted_score, '');
+
+  const emptyTaskId = 'manual-filter-empty-task';
+  await fs.mkdir(path.join(tasksRoot, emptyTaskId), { recursive: true });
+  const empty = await api(`/api/network/filter-predicted-candidates?taskId=${emptyTaskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ includeAllIds: true }),
+  });
+  assert.equal(empty.response.status, 200);
+  assert.equal(empty.body.totalPredicted, 0);
+  assert.deepEqual(empty.body.rows, []);
+  assert.deepEqual(empty.body.matchingIds, []);
+});

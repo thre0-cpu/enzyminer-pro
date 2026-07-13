@@ -44,8 +44,6 @@ import {
   pushNetworkToCytoscape,
   fetchBrowserGraphData,
   recommendCandidates,
-  exportRecommendedFasta,
-  exportRecommendedCsv,
   predictNetworkMetrics,
   loadPipelineState,
   loadTaskArtifacts,
@@ -72,6 +70,7 @@ import {
   compareMerge,
 } from './api';
 import type { BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, BrowserGraphNode, BrowserGraphEdge } from './api';
+import { ManualFilteringPanel, SystemRecommendationResults } from './RecommendationPanels';
 const NetworkGraph = React.lazy(() => import('./NetworkGraph'));
 
 type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'recommendation';
@@ -436,61 +435,6 @@ const PREDICTED_SUB_WEIGHT_LABELS: { key: keyof PredictedSubWeights; label: stri
   { key: 'tm', label: 'Tm' },
 ];
 
-function RecommendedSaveControls({ candidates }: { candidates: RecommendCandidate[] }) {
-  const [format, setFormat] = useState<'fasta' | 'csv'>('fasta');
-  const [saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    if (!candidates.length || saving) return;
-    setSaving(true);
-    try {
-      const ids = candidates.map((candidate) => candidate.id);
-      const content = format === 'fasta'
-        ? (await exportRecommendedFasta(ids)).fasta
-        : `\uFEFF${(await exportRecommendedCsv(candidates)).csv}`;
-      const blob = new Blob(
-        [content],
-        { type: format === 'fasta' ? 'text/plain;charset=utf-8' : 'text/csv;charset=utf-8' },
-      );
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `recommended_candidates_${candidates.length}.${format}`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 0);
-    } catch (error: any) {
-      alert(`Save failed: ${error?.message || error}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="inline-flex overflow-hidden rounded-lg border border-emerald-700 shadow-sm">
-      <button
-        type="button"
-        className="bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
-        onClick={handleSave}
-        disabled={saving}
-      >
-        {saving ? 'Saving…' : `Save (${candidates.length})`}
-      </button>
-      <select
-        aria-label="Recommended sequence save format"
-        value={format}
-        onChange={(event) => setFormat(event.target.value as 'fasta' | 'csv')}
-        disabled={saving}
-        className="border-l border-emerald-700 bg-emerald-50 px-2 py-2 text-sm font-medium text-emerald-900 outline-none disabled:opacity-60"
-      >
-        <option value="fasta">FASTA</option>
-        <option value="csv">CSV</option>
-      </select>
-    </div>
-  );
-}
-
 function normalizeSavedRecommendResults(results: unknown, topN: unknown): { results: RecommendCandidate[] | null; stale: boolean } {
   if (!Array.isArray(results)) {
     return { results: null, stale: false };
@@ -793,6 +737,9 @@ function PredictedMetricsPanel({
       setRows(data.rows);
       setLastRunInfo({ count: data.count, recomputedCount: data.recomputedCount });
       if (data.services) setServices(data.services);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('enzymeminer:predictions-updated'));
+      }
     } catch (err: any) {
       setError(String(err?.message || err));
     } finally {
@@ -4492,52 +4439,18 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   </div>
                 )}
                 {recommendResults.length > 0 && (
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-50 sticky top-0">
-                        <tr>
-                          <th className="px-2 py-2 text-left">#</th>
-                          <th className="px-2 py-2 text-left">ID</th>
-                          <th className="px-2 py-2 text-right">Score</th>
-                          <th className="px-2 py-2 text-right">Predicted Score</th>
-                          <th className="px-2 py-2 text-right">Avg Ref Sim</th>
-                          <th className="px-2 py-2 text-right">Max Ref Sim</th>
-                          <th className="px-2 py-2 text-right">Ref Edges</th>
-                          <th className="px-2 py-2 text-left">Cluster</th>
-                          <th className="px-2 py-2 text-right">Cluster Size</th>
-                          <th className="px-2 py-2 text-left">Phylum</th>
-                          <th className="px-2 py-2 text-left">Species</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {recommendResults.map((c, i) => (
-                          <tr key={c.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                            <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
-                            <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{c.id}</td>
-                            <td className="px-2 py-1.5 text-right font-semibold">{c.score.toFixed(4)}</td>
-                            <td className="px-2 py-1.5 text-right">{c.predictedScore.toFixed(4)}</td>
-                            <td className="px-2 py-1.5 text-right">{(c.avgRefSimilarity * 100).toFixed(1)}%</td>
-                            <td className="px-2 py-1.5 text-right">{(c.maxRefSimilarity * 100).toFixed(1)}%</td>
-                            <td className="px-2 py-1.5 text-right">{c.refEdgeCount}</td>
-                            <td className="px-2 py-1.5">{c.cluster}</td>
-                          <td className="px-2 py-1.5 text-right">{c.cluster_size}</td>
-                          <td className="px-2 py-1.5">{c.phylum}</td>
-                          <td className="px-2 py-1.5">{c.species}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {recommendResults.length > 0 && (
-                <div className="flex gap-2 flex-wrap">
-                  <RecommendedSaveControls candidates={recommendResults} />
-                  <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
-                    onClick={highlightRecommendationsInNetwork}>
-                    Highlight in Network
-                  </button>
-                </div>
-              )}
+                  <SystemRecommendationResults
+                    candidates={recommendResults}
+                    taskId={selectedTaskId}
+                    onHighlight={highlightRecommendationsInNetwork}
+                  />
+                )}
+                <ManualFilteringPanel
+                  key={`manual-filter-${selectedTaskId}`}
+                  taskId={selectedTaskId}
+                  subWeights={normalizePredictedSubWeights(predictedSubWeights)}
+                  tmTarget={predictedTmTarget}
+                />
               {renderTailPanels('h-24')}
             </div>
           )}
@@ -6889,56 +6802,18 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 </div>
               )}
               {recommendResults.length > 0 && (
-                <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50 sticky top-0">
-                      <tr>
-                        <th className="px-2 py-2 text-left">#</th>
-                        <th className="px-2 py-2 text-left">ID</th>
-                        <th className="px-2 py-2 text-right">Score</th>
-                        <th className="px-2 py-2 text-right">Predicted Score</th>
-                        <th className="px-2 py-2 text-right">Avg Ref Sim</th>
-                        <th className="px-2 py-2 text-right">Max Ref Sim</th>
-                        <th className="px-2 py-2 text-right">Ref Edges</th>
-                        <th className="px-2 py-2 text-left">Cluster</th>
-                        <th className="px-2 py-2 text-right">Cluster Size</th>
-                        <th className="px-2 py-2 text-left">Net Comp</th>
-                        <th className="px-2 py-2 text-right">Comp Size</th>
-                        <th className="px-2 py-2 text-left">Net Comp</th>
-                        <th className="px-2 py-2 text-right">Comp Size</th>
-                        <th className="px-2 py-2 text-left">Phylum</th>
-                        <th className="px-2 py-2 text-left">Species</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recommendResults.map((c, i) => (
-                        <tr key={c.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                          <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
-                          <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{c.id}</td>
-                          <td className="px-2 py-1.5 text-right font-semibold">{c.score.toFixed(4)}</td>
-                          <td className="px-2 py-1.5 text-right">{c.predictedScore.toFixed(4)}</td>
-                          <td className="px-2 py-1.5 text-right">{(c.avgRefSimilarity * 100).toFixed(1)}%</td>
-                          <td className="px-2 py-1.5 text-right">{(c.maxRefSimilarity * 100).toFixed(1)}%</td>
-                          <td className="px-2 py-1.5 text-right">{c.refEdgeCount}</td>
-                          <td className="px-2 py-1.5">{c.cluster}</td>
-                          <td className="px-2 py-1.5 text-right">{c.cluster_size}</td>
-                          <td className="px-2 py-1.5">{c.phylum}</td>
-                          <td className="px-2 py-1.5">{c.species}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <SystemRecommendationResults
+                  candidates={recommendResults}
+                  taskId={selectedTaskId}
+                  onHighlight={highlightRecommendationsInNetwork}
+                />
               )}
-              {recommendResults.length > 0 && (
-                <div className="flex gap-2 flex-wrap">
-                  <RecommendedSaveControls candidates={recommendResults} />
-                  <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
-                    onClick={highlightRecommendationsInNetwork}>
-                    Highlight in Network
-                  </button>
-                </div>
-              )}
+              <ManualFilteringPanel
+                key={`manual-filter-${selectedTaskId}`}
+                taskId={selectedTaskId}
+                subWeights={normalizePredictedSubWeights(predictedSubWeights)}
+                tmTarget={predictedTmTarget}
+              />
               {renderTailPanels('h-28')}
             </div>
           )}
@@ -7900,56 +7775,18 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
               </div>
             )}
             {recommendResults.length > 0 && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 sticky top-0">
-                    <tr>
-                      <th className="px-2 py-2 text-left">#</th>
-                      <th className="px-2 py-2 text-left">ID</th>
-                      <th className="px-2 py-2 text-right">Score</th>
-                      <th className="px-2 py-2 text-right">Predicted Score</th>
-                      <th className="px-2 py-2 text-right">Avg Ref Sim</th>
-                      <th className="px-2 py-2 text-right">Max Ref Sim</th>
-                      <th className="px-2 py-2 text-right">Ref Edges</th>
-                      <th className="px-2 py-2 text-left">Cluster</th>
-                      <th className="px-2 py-2 text-right">Cluster Size</th>
-                      <th className="px-2 py-2 text-left">Phylum</th>
-                      <th className="px-2 py-2 text-left">Species</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recommendResults.map((c, i) => (
-                      <tr key={c.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
-                        <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
-                        <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{c.id}</td>
-                        <td className="px-2 py-1.5 text-right font-semibold">{c.score.toFixed(4)}</td>
-                        <td className="px-2 py-1.5 text-right">{c.predictedScore.toFixed(4)}</td>
-                        <td className="px-2 py-1.5 text-right">{(c.avgRefSimilarity * 100).toFixed(1)}%</td>
-                        <td className="px-2 py-1.5 text-right">{(c.maxRefSimilarity * 100).toFixed(1)}%</td>
-                        <td className="px-2 py-1.5 text-right">{c.refEdgeCount}</td>
-                        <td className="px-2 py-1.5">{c.cluster}</td>
-                        <td className="px-2 py-1.5 text-right">{c.cluster_size}</td>
-                        <td className="px-2 py-1.5">{c.networkComponent}</td>
-                        <td className="px-2 py-1.5 text-right">{c.networkComponentSize}</td>
-                        <td className="px-2 py-1.5">{c.networkComponent}</td>
-                        <td className="px-2 py-1.5 text-right">{c.networkComponentSize}</td>
-                        <td className="px-2 py-1.5">{c.phylum}</td>
-                        <td className="px-2 py-1.5">{c.species}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <SystemRecommendationResults
+                candidates={recommendResults}
+                taskId={selectedTaskId}
+                onHighlight={highlightRecommendationsInNetwork}
+              />
             )}
-            {recommendResults.length > 0 && (
-              <div className="flex gap-2 flex-wrap">
-                <RecommendedSaveControls candidates={recommendResults} />
-                <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
-                  onClick={highlightRecommendationsInNetwork}>
-                  Highlight in Network
-                </button>
-              </div>
-            )}
+            <ManualFilteringPanel
+              key={`manual-filter-${selectedTaskId}`}
+              taskId={selectedTaskId}
+              subWeights={normalizePredictedSubWeights(predictedSubWeights)}
+              tmTarget={predictedTmTarget}
+            />
           </section>
         )}
 

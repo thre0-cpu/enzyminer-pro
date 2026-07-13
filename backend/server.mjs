@@ -5905,8 +5905,8 @@ function normalizeRecommendedExportIds(rawIds) {
   if (!Array.isArray(rawIds) || rawIds.length === 0) {
     throw new Error('ids array is required');
   }
-  if (rawIds.length > 5000) {
-    throw new Error('Too many ids to export (max 5000)');
+  if (rawIds.length > 50000) {
+    throw new Error('Too many ids to export (max 50000)');
   }
   const ids = rawIds.map((id) => String(id || '').trim()).filter(Boolean);
   if (!ids.length) {
@@ -6016,6 +6016,234 @@ function lookupMapByNormalizedId(sourceMap, ids) {
   return out;
 }
 
+const MANUAL_FILTER_TEXT_FIELDS = new Set([
+  'id', 'ec', 'ec_top1', 'ec_top2', 'ec_top3', 'uniprot_accession', 'uniprot_identifier',
+  'description', 'taxonomy_id', 'kingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species',
+]);
+const MANUAL_FILTER_NUMERIC_FIELDS = new Set([
+  'length', 'hmm_score', 'evalue', 'bitscore', 'pident', 'qcovs', 'kcat', 'km',
+  'catalytic_efficiency', 'solubility', 'tm', 'predicted_score',
+]);
+const MANUAL_FILTER_TEXT_OPERATORS = new Set(['contains', 'not_contains', 'equals', 'not_equals', 'starts_with']);
+const MANUAL_FILTER_NUMERIC_OPERATORS = new Set(['gt', 'gte', 'lt', 'lte', 'eq', 'between']);
+const MANUAL_FILTER_SORT_FIELDS = new Set([...MANUAL_FILTER_TEXT_FIELDS, ...MANUAL_FILTER_NUMERIC_FIELDS]);
+
+function manualFilterBadRequest(message) {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
+}
+
+function normalizeManualFilterConditions(rawConditions) {
+  if (!Array.isArray(rawConditions)) return [];
+  if (rawConditions.length > 20) throw manualFilterBadRequest('A maximum of 20 filter conditions is allowed');
+  return rawConditions.flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const field = String(raw.field || '').trim();
+    const operator = String(raw.operator || '').trim();
+    const isText = MANUAL_FILTER_TEXT_FIELDS.has(field);
+    const isNumeric = MANUAL_FILTER_NUMERIC_FIELDS.has(field);
+    if (!isText && !isNumeric) throw manualFilterBadRequest(`Unsupported filter field: ${field || '(empty)'}`);
+    if (isText && !MANUAL_FILTER_TEXT_OPERATORS.has(operator)) {
+      throw manualFilterBadRequest(`Unsupported operator ${operator || '(empty)'} for ${field}`);
+    }
+    if (isNumeric && !MANUAL_FILTER_NUMERIC_OPERATORS.has(operator)) {
+      throw manualFilterBadRequest(`Unsupported operator ${operator || '(empty)'} for ${field}`);
+    }
+    if (isText) {
+      const value = String(raw.value ?? '').trim();
+      if (!value) return [];
+      const ecScope = ['top1', 'top2', 'top3'].includes(String(raw.ecScope || ''))
+        ? String(raw.ecScope)
+        : 'any';
+      return [{ field, operator, value, ecScope }];
+    }
+    if (raw.value === '' || raw.value === null || raw.value === undefined) return [];
+    if (operator === 'between' && (raw.value2 === '' || raw.value2 === null || raw.value2 === undefined)) return [];
+    const value = Number(raw.value);
+    const value2 = Number(raw.value2);
+    if (!Number.isFinite(value)) return [];
+    if (operator === 'between' && !Number.isFinite(value2)) return [];
+    return [{ field, operator, value, value2 }];
+  });
+}
+
+function finiteNumberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function manualFilterValue(row, condition) {
+  if (condition.field !== 'ec') return row[condition.field];
+  if (condition.ecScope === 'top1') return row.ec_top1;
+  if (condition.ecScope === 'top2') return row.ec_top2;
+  if (condition.ecScope === 'top3') return row.ec_top3;
+  return [row.ec_top1, row.ec_top2, row.ec_top3].filter(Boolean).join(' ');
+}
+
+function manualFilterConditionMatches(row, condition) {
+  const rawValue = manualFilterValue(row, condition);
+  if (MANUAL_FILTER_TEXT_FIELDS.has(condition.field)) {
+    const actual = String(rawValue ?? '').toLocaleLowerCase();
+    const expected = String(condition.value ?? '').toLocaleLowerCase();
+    if (condition.operator === 'contains') return actual.includes(expected);
+    if (condition.operator === 'not_contains') return !actual.includes(expected);
+    if (condition.operator === 'equals') return actual === expected;
+    if (condition.operator === 'not_equals') return actual !== expected;
+    if (condition.operator === 'starts_with') return actual.startsWith(expected);
+    return false;
+  }
+  const actual = finiteNumberOrNull(rawValue);
+  if (actual === null) return false;
+  if (condition.operator === 'gt') return actual > condition.value;
+  if (condition.operator === 'gte') return actual >= condition.value;
+  if (condition.operator === 'lt') return actual < condition.value;
+  if (condition.operator === 'lte') return actual <= condition.value;
+  if (condition.operator === 'eq') return Math.abs(actual - condition.value) <= 1e-12;
+  if (condition.operator === 'between') {
+    const lower = Math.min(condition.value, condition.value2);
+    const upper = Math.max(condition.value, condition.value2);
+    return actual >= lower && actual <= upper;
+  }
+  return false;
+}
+
+function compareManualFilterRows(left, right, field, direction) {
+  const leftValue = field === 'ec'
+    ? [left.ec_top1, left.ec_top2, left.ec_top3].filter(Boolean).join(' ')
+    : left[field];
+  const rightValue = field === 'ec'
+    ? [right.ec_top1, right.ec_top2, right.ec_top3].filter(Boolean).join(' ')
+    : right[field];
+  const leftMissing = leftValue === null || leftValue === undefined || leftValue === '';
+  const rightMissing = rightValue === null || rightValue === undefined || rightValue === '';
+  if (leftMissing || rightMissing) {
+    if (leftMissing && rightMissing) return String(left.id).localeCompare(String(right.id));
+    return leftMissing ? 1 : -1;
+  }
+  let compared;
+  if (MANUAL_FILTER_NUMERIC_FIELDS.has(field)) {
+    compared = Number(leftValue) - Number(rightValue);
+  } else {
+    compared = String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true, sensitivity: 'base' });
+  }
+  if (compared === 0) compared = String(left.id).localeCompare(String(right.id), undefined, { numeric: true });
+  return direction === 'desc' ? -compared : compared;
+}
+
+// Filter every candidate that already has cached property predictions. This is
+// intentionally independent of the automatic Top-N recommendation output.
+route.post('/api/network/filter-predicted-candidates', async (req, res) => {
+  try {
+    const { workDir } = await resolveWorkDirForReq(req);
+    const conditions = normalizeManualFilterConditions(req.body?.conditions);
+    const logic = String(req.body?.logic || 'and').toLowerCase() === 'or' ? 'or' : 'and';
+    const pageSize = Math.max(1, Math.min(200, Math.floor(Number(req.body?.pageSize) || 50)));
+    const requestedPage = Math.max(1, Math.floor(Number(req.body?.page) || 1));
+    const includeAllIds = req.body?.includeAllIds === true;
+    const sortField = MANUAL_FILTER_SORT_FIELDS.has(String(req.body?.sort?.field || ''))
+      ? String(req.body.sort.field)
+      : 'id';
+    const sortDirection = String(req.body?.sort?.direction || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
+    const predictedSubWeights = normalizePredictedSubWeights(req.body?.subWeights);
+    const tmTarget = Number.isFinite(Number(req.body?.tmTarget)) ? Number(req.body.tmTarget) : 60;
+
+    const rawPredictedMetrics = await loadPredictedMetricsMap(workDir);
+    const ids = Array.from(rawPredictedMetrics.keys()).filter(Boolean);
+    if (!ids.length) {
+      res.json({
+        ok: true,
+        totalPredicted: 0,
+        filteredCount: 0,
+        page: 1,
+        pageSize,
+        totalPages: 1,
+        rows: [],
+        ...(includeAllIds ? { matchingIds: [] } : {}),
+      });
+      return;
+    }
+
+    const [records, metadata] = await Promise.all([
+      loadRecommendedSequenceRecords(workDir, ids),
+      loadRecommendedMetadata(workDir, ids),
+    ]);
+    const normalizedMetrics = computePredictedNormalization(
+      Array.from(rawPredictedMetrics.values()),
+      predictedSubWeights,
+      tmTarget,
+    );
+    const rows = ids.map((id) => {
+      const predicted = rawPredictedMetrics.get(id) || {};
+      const normalized = normalizedMetrics.get(id) || {};
+      const meta = metadata.get(id) || {};
+      const record = records.get(id);
+      const sequence = String(record?.seq || meta.sequence || '').replace(/\s+/g, '').toUpperCase();
+      return {
+        id,
+        sequence,
+        length: sequence ? sequence.length : finiteNumberOrNull(meta.length || meta.slen),
+        hmm_score: finiteNumberOrNull(meta.hmm_score),
+        evalue: finiteNumberOrNull(meta.evalue),
+        bitscore: finiteNumberOrNull(meta.bitscore),
+        pident: finiteNumberOrNull(meta.pident),
+        qcovs: finiteNumberOrNull(meta.qcovs),
+        uniprot_accession: meta.uniprot_accession || meta.accession || '',
+        uniprot_identifier: meta.uniprot_identifier || meta.identifier || '',
+        taxonomy_id: meta.taxonomy_id || '',
+        kingdom: meta.kingdom || '',
+        phylum: meta.phylum || '',
+        class: meta.class || '',
+        order: meta.order || '',
+        family: meta.family || '',
+        genus: meta.genus || '',
+        species: meta.species || '',
+        description: meta.description || '',
+        kcat: finiteNumberOrNull(predicted.kcat),
+        km: finiteNumberOrNull(predicted.km),
+        catalytic_efficiency: finiteNumberOrNull(normalized.catalyticEfficiency),
+        solubility: finiteNumberOrNull(predicted.solubility),
+        tm: finiteNumberOrNull(predicted.tm),
+        ec_top1: predicted.ec_top1 || '',
+        ec_score1: finiteNumberOrNull(predicted.ec_score1),
+        ec_top2: predicted.ec_top2 || '',
+        ec_score2: finiteNumberOrNull(predicted.ec_score2),
+        ec_top3: predicted.ec_top3 || '',
+        ec_score3: finiteNumberOrNull(predicted.ec_score3),
+        predicted_score: finiteNumberOrNull(normalized.predictedScore),
+        cataPro_source: predicted.cataPro_source || '',
+        solubility_source: predicted.solubility_source || '',
+        tm_source: predicted.tm_source || '',
+        ec_source: predicted.ec_source || '',
+      };
+    });
+
+    const filteredRows = conditions.length
+      ? rows.filter((row) => logic === 'or'
+        ? conditions.some((condition) => manualFilterConditionMatches(row, condition))
+        : conditions.every((condition) => manualFilterConditionMatches(row, condition)))
+      : rows;
+    filteredRows.sort((left, right) => compareManualFilterRows(left, right, sortField, sortDirection));
+    const filteredCount = filteredRows.length;
+    const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const offset = (page - 1) * pageSize;
+
+    res.json({
+      ok: true,
+      totalPredicted: rows.length,
+      filteredCount,
+      page,
+      pageSize,
+      totalPages,
+      rows: filteredRows.slice(offset, offset + pageSize),
+      ...(includeAllIds ? { matchingIds: filteredRows.map((row) => row.id) } : {}),
+    });
+  } catch (err) {
+    jsonError(res, 'Failed to filter predicted candidates', err);
+  }
+});
+
 // --- Export recommended candidates as FASTA ---
 route.post('/api/network/export-recommended-fasta', async (req, res) => {
   try {
@@ -6052,6 +6280,15 @@ route.post('/api/network/export-recommended-csv', async (req, res) => {
       loadPredictedMetricsMap(workDir),
     ]);
     const predictedMetrics = lookupMapByNormalizedId(rawPredictedMetrics, ids);
+    const exportSubWeights = normalizePredictedSubWeights(req.body?.predictedSubWeights);
+    const exportTmTarget = Number.isFinite(Number(req.body?.predictedTmTarget))
+      ? Number(req.body.predictedTmTarget)
+      : 60;
+    const normalizedPredictedMetrics = computePredictedNormalization(
+      Array.from(rawPredictedMetrics.values()),
+      exportSubWeights,
+      exportTmTarget,
+    );
     const headers = [
       'id', 'sequence', 'length', 'hmm_score', 'evalue', 'bitscore', 'pident', 'qcovs',
       'uniprot_accession', 'uniprot_identifier', 'taxonomy_id', 'kingdom', 'phylum', 'class',
@@ -6069,6 +6306,7 @@ route.post('/api/network/export-recommended-csv', async (req, res) => {
       const meta = metadata.get(id) || {};
       const candidate = candidateById.get(id) || {};
       const predicted = predictedMetrics.get(id) || {};
+      const normalizedPredicted = normalizedPredictedMetrics.get(predicted.id || id) || {};
       const sequence = String(rec?.seq || meta.sequence || '').replace(/\s+/g, '').toUpperCase();
       const efficiency = catalyticEfficiency(predicted);
       return {
@@ -6120,7 +6358,7 @@ route.post('/api/network/export-recommended-csv', async (req, res) => {
         solubility_source: predicted.solubility_source || '',
         tm_source: predicted.tm_source || '',
         ec_source: predicted.ec_source || '',
-        predicted_score: candidate.predictedScore ?? '',
+        predicted_score: candidate.predictedScore ?? normalizedPredicted.predictedScore ?? '',
       };
     });
     const csv = [headers.map(csvEscape).join(',')]
