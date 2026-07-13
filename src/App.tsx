@@ -45,6 +45,7 @@ import {
   fetchBrowserGraphData,
   recommendCandidates,
   exportRecommendedFasta,
+  exportRecommendedCsv,
   predictNetworkMetrics,
   loadPipelineState,
   loadTaskArtifacts,
@@ -435,6 +436,61 @@ const PREDICTED_SUB_WEIGHT_LABELS: { key: keyof PredictedSubWeights; label: stri
   { key: 'tm', label: 'Tm' },
 ];
 
+function RecommendedSaveControls({ candidates }: { candidates: RecommendCandidate[] }) {
+  const [format, setFormat] = useState<'fasta' | 'csv'>('fasta');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!candidates.length || saving) return;
+    setSaving(true);
+    try {
+      const ids = candidates.map((candidate) => candidate.id);
+      const content = format === 'fasta'
+        ? (await exportRecommendedFasta(ids)).fasta
+        : `\uFEFF${(await exportRecommendedCsv(candidates)).csv}`;
+      const blob = new Blob(
+        [content],
+        { type: format === 'fasta' ? 'text/plain;charset=utf-8' : 'text/csv;charset=utf-8' },
+      );
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `recommended_candidates_${candidates.length}.${format}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error: any) {
+      alert(`Save failed: ${error?.message || error}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="inline-flex overflow-hidden rounded-lg border border-emerald-700 shadow-sm">
+      <button
+        type="button"
+        className="bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
+        onClick={handleSave}
+        disabled={saving}
+      >
+        {saving ? 'Saving…' : `Save (${candidates.length})`}
+      </button>
+      <select
+        aria-label="Recommended sequence save format"
+        value={format}
+        onChange={(event) => setFormat(event.target.value as 'fasta' | 'csv')}
+        disabled={saving}
+        className="border-l border-emerald-700 bg-emerald-50 px-2 py-2 text-sm font-medium text-emerald-900 outline-none disabled:opacity-60"
+      >
+        <option value="fasta">FASTA</option>
+        <option value="csv">CSV</option>
+      </select>
+    </div>
+  );
+}
+
 function normalizeSavedRecommendResults(results: unknown, topN: unknown): { results: RecommendCandidate[] | null; stale: boolean } {
   if (!Array.isArray(results)) {
     return { results: null, stale: false };
@@ -461,6 +517,9 @@ function normalizeSavedRecommendResults(results: unknown, topN: unknown): { resu
       kingdom: str(r.kingdom),
       phylum: str(r.phylum),
       class: str(r.class),
+      order: str(r.order),
+      family: str(r.family),
+      genus: str(r.genus),
       species: str(r.species),
       avgRefSimilarity: num(r.avgRefSimilarity),
       maxRefSimilarity: num(r.maxRefSimilarity),
@@ -4472,19 +4531,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               )}
               {recommendResults.length > 0 && (
                 <div className="flex gap-2 flex-wrap">
-                  <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm"
-                    onClick={async () => {
-                      try {
-                        const data = await exportRecommendedFasta(recommendResults.map(c => c.id));
-                        const blob = new Blob([data.fasta], { type: 'text/plain' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url; a.download = `recommended_candidates_${recommendResults.length}.fasta`;
-                        a.click(); URL.revokeObjectURL(url);
-                      } catch (err: any) { alert('Export failed: ' + (err?.message || err)); }
-                    }}>
-                    Export FASTA ({recommendResults.length})
-                  </button>
+                  <RecommendedSaveControls candidates={recommendResults} />
                   <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                     onClick={highlightRecommendationsInNetwork}>
                     Highlight in Network
@@ -6885,19 +6932,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               )}
               {recommendResults.length > 0 && (
                 <div className="flex gap-2 flex-wrap">
-                  <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm"
-                    onClick={async () => {
-                      try {
-                        const data = await exportRecommendedFasta(recommendResults.map(c => c.id));
-                        const blob = new Blob([data.fasta], { type: 'text/plain' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url; a.download = `recommended_candidates_${recommendResults.length}.fasta`;
-                        a.click(); URL.revokeObjectURL(url);
-                      } catch (err: any) { alert('Export failed: ' + (err?.message || err)); }
-                    }}>
-                    Export FASTA ({recommendResults.length})
-                  </button>
+                  <RecommendedSaveControls candidates={recommendResults} />
                   <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                     onClick={highlightRecommendationsInNetwork}>
                     Highlight in Network
@@ -7908,19 +7943,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
             )}
             {recommendResults.length > 0 && (
               <div className="flex gap-2 flex-wrap">
-                <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm"
-                  onClick={async () => {
-                    try {
-                      const data = await exportRecommendedFasta(recommendResults.map(c => c.id));
-                      const blob = new Blob([data.fasta], { type: 'text/plain' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url; a.download = `recommended_candidates_${recommendResults.length}.fasta`;
-                      a.click(); URL.revokeObjectURL(url);
-                    } catch (err: any) { alert('Export failed: ' + (err?.message || err)); }
-                  }}>
-                  Export FASTA ({recommendResults.length})
-                </button>
+                <RecommendedSaveControls candidates={recommendResults} />
                 <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                   onClick={highlightRecommendationsInNetwork}>
                   Highlight in Network

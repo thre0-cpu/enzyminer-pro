@@ -708,6 +708,9 @@ export type RecommendCandidate = {
   kingdom: string;
   phylum: string;
   class: string;
+  order?: string;
+  family?: string;
+  genus?: string;
   species: string;
   avgRefSimilarity: number;
   maxRefSimilarity: number;
@@ -860,6 +863,14 @@ export function exportRecommendedFasta(ids: string[]) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids }),
+  });
+}
+
+export function exportRecommendedCsv(candidates: RecommendCandidate[]) {
+  return request<{ csv: string; foundCount: number; requestedCount: number }>('/api/network/export-recommended-csv', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: candidates.map((candidate) => candidate.id), candidates }),
   });
 }
 

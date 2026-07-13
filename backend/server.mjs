@@ -5901,62 +5901,234 @@ route.post('/api/network/highlight-cytoscape', async (req, res) => {
   }
 });
 
+function normalizeRecommendedExportIds(rawIds) {
+  if (!Array.isArray(rawIds) || rawIds.length === 0) {
+    throw new Error('ids array is required');
+  }
+  if (rawIds.length > 5000) {
+    throw new Error('Too many ids to export (max 5000)');
+  }
+  const ids = rawIds.map((id) => String(id || '').trim()).filter(Boolean);
+  if (!ids.length) {
+    throw new Error('ids array is required');
+  }
+  return ids;
+}
+
+function buildRequestedTokenIndex(ids) {
+  const index = new Map();
+  for (const id of ids) {
+    for (const token of new Set([id, ...normalizeIdTokens(id)])) {
+      const matches = index.get(token) || [];
+      matches.push(id);
+      index.set(token, matches);
+    }
+  }
+  return index;
+}
+
+async function loadRecommendedSequenceRecords(workDir, ids) {
+  const tokenIndex = buildRequestedTokenIndex(ids);
+  const found = new Map();
+  const allPaths = [
+    ...resolveNetworkSourceFasta(workDir),
+    path.join(workDir, 'ref.fasta'),
+    path.join(workDir, 'ref_dedup.fasta'),
+  ];
+
+  for (const filePath of allPaths) {
+    try {
+      const records = parseFastaRecords(await fs.readFile(filePath, 'utf-8'));
+      for (const rec of records) {
+        const recordTokens = new Set([
+          ...normalizeIdTokens(rec.id),
+          ...normalizeIdTokens(rec.header),
+        ]);
+        for (const token of recordTokens) {
+          for (const requestedId of tokenIndex.get(token) || []) {
+            if (!found.has(requestedId)) found.set(requestedId, rec);
+          }
+        }
+      }
+    } catch {
+      // Optional/legacy FASTA source is absent.
+    }
+  }
+  return found;
+}
+
+function mergeNonEmptyFields(target, source) {
+  for (const [key, value] of Object.entries(source || {})) {
+    if ((target[key] === undefined || target[key] === null || target[key] === '') && value !== undefined && value !== null && value !== '') {
+      target[key] = value;
+    }
+  }
+}
+
+async function loadRecommendedMetadata(workDir, ids) {
+  const tokenIndex = buildRequestedTokenIndex(ids);
+  const metadata = new Map(ids.map((id) => [id, {}]));
+  const csvFiles = [
+    'hits_filtered.csv',
+    'blast_hits_filtered.csv',
+    'hits_all.csv',
+    'blast_hits_all.csv',
+    'scored_results.csv',
+    'nodes.csv',
+    '.nodes_meta_cache.csv',
+    'ref.csv',
+  ];
+  const identityColumns = ['id', 'target', 'accession', 'uniprot_accession', 'uniprot_identifier'];
+
+  for (const fileName of csvFiles) {
+    try {
+      const { rows } = await readCsvRows(path.join(workDir, fileName));
+      for (const row of rows) {
+        const rowTokens = new Set();
+        for (const column of identityColumns) {
+          for (const token of normalizeIdTokens(row[column])) rowTokens.add(token);
+        }
+        const matchedIds = new Set();
+        for (const token of rowTokens) {
+          for (const requestedId of tokenIndex.get(token) || []) matchedIds.add(requestedId);
+        }
+        for (const requestedId of matchedIds) mergeNonEmptyFields(metadata.get(requestedId), row);
+      }
+    } catch {
+      // Metadata sources are optional and differ between HMMER/BLAST/legacy tasks.
+    }
+  }
+  return metadata;
+}
+
+function lookupMapByNormalizedId(sourceMap, ids) {
+  const byToken = new Map();
+  for (const [sourceId, value] of sourceMap.entries()) {
+    for (const token of normalizeIdTokens(sourceId)) {
+      if (!byToken.has(token)) byToken.set(token, value);
+    }
+  }
+  const out = new Map();
+  for (const id of ids) {
+    const value = sourceMap.get(id) || normalizeIdTokens(id).map((token) => byToken.get(token)).find(Boolean);
+    if (value) out.set(id, value);
+  }
+  return out;
+}
+
 // --- Export recommended candidates as FASTA ---
 route.post('/api/network/export-recommended-fasta', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
-    const ids = req.body?.ids;
-    if (!Array.isArray(ids) || ids.length === 0) {
-      return jsonError(res, 'ids array is required');
-    }
-    const idSet = new Set(ids.map(String));
-
-    // Collect all candidate + reference FASTA sources
-    const candidatePaths = resolveNetworkSourceFasta(workDir);
-    const refPaths = [
-      path.join(workDir, 'ref.fasta'),
-      path.join(workDir, 'ref_dedup.fasta'),
-    ];
-    const allPaths = [...candidatePaths, ...refPaths];
-
-    const found = new Map();
-    for (const p of allPaths) {
-      try {
-        const text = await fs.readFile(p, 'utf-8');
-        const records = parseFastaRecords(text);
-        for (const rec of records) {
-          const tokens = normalizeIdTokens(rec.id);
-          for (const tok of tokens) {
-            if (idSet.has(tok) && !found.has(tok)) {
-              found.set(tok, rec);
-            }
-          }
-          // Also try header tokens
-          const htokens = normalizeIdTokens(rec.header);
-          for (const tok of htokens) {
-            if (idSet.has(tok) && !found.has(tok)) {
-              found.set(tok, rec);
-            }
-          }
-        }
-      } catch { /* file not found, skip */ }
-    }
-
+    const ids = normalizeRecommendedExportIds(req.body?.ids);
+    const found = await loadRecommendedSequenceRecords(workDir, ids);
     const lines = [];
     for (const id of ids) {
       const rec = found.get(id);
-      if (rec) {
-        lines.push(`>${rec.header}`);
-        // Wrap sequence at 80 chars
-        for (let i = 0; i < rec.seq.length; i += 80) {
-          lines.push(rec.seq.slice(i, i + 80));
-        }
-      }
+      if (!rec) continue;
+      lines.push(`>${rec.header}`);
+      for (let i = 0; i < rec.seq.length; i += 80) lines.push(rec.seq.slice(i, i + 80));
     }
-
     res.json({ ok: true, fasta: lines.join('\n'), foundCount: found.size, requestedCount: ids.length });
   } catch (err) {
     jsonError(res, 'Failed to export FASTA', err);
+  }
+});
+
+// --- Export recommended candidates with source metadata, scores and predictions ---
+route.post('/api/network/export-recommended-csv', async (req, res) => {
+  try {
+    const { workDir } = await resolveWorkDirForReq(req);
+    const ids = normalizeRecommendedExportIds(req.body?.ids);
+    const suppliedCandidates = Array.isArray(req.body?.candidates) ? req.body.candidates : [];
+    const candidateById = new Map(
+      suppliedCandidates
+        .filter((candidate) => candidate && typeof candidate === 'object' && ids.includes(String(candidate.id || '')))
+        .map((candidate) => [String(candidate.id), candidate]),
+    );
+    const [records, metadata, rawPredictedMetrics] = await Promise.all([
+      loadRecommendedSequenceRecords(workDir, ids),
+      loadRecommendedMetadata(workDir, ids),
+      loadPredictedMetricsMap(workDir),
+    ]);
+    const predictedMetrics = lookupMapByNormalizedId(rawPredictedMetrics, ids);
+    const headers = [
+      'id', 'sequence', 'length', 'hmm_score', 'evalue', 'bitscore', 'pident', 'qcovs',
+      'uniprot_accession', 'uniprot_identifier', 'taxonomy_id', 'kingdom', 'phylum', 'class',
+      'order', 'family', 'genus', 'species', 'description', 'external_link', 'scoring_score',
+      'cluster', 'cluster_size', 'network_component', 'network_component_size', 'representative',
+      'avg_ref_similarity', 'max_ref_similarity', 'ref_edge_count', 'cluster_size_norm',
+      'network_component_size_norm', 'taxonomy_diversity', 'recommendation_score',
+      'kcat', 'km', 'catalytic_efficiency', 'solubility', 'tm',
+      'ec_top1', 'ec_score1', 'ec_top2', 'ec_score2', 'ec_top3', 'ec_score3',
+      'catapro_source', 'solubility_source', 'tm_source', 'ec_source', 'predicted_score',
+    ];
+    const finiteOrBlank = (value) => Number.isFinite(Number(value)) ? Number(value) : '';
+    const rows = ids.map((id) => {
+      const rec = records.get(id);
+      const meta = metadata.get(id) || {};
+      const candidate = candidateById.get(id) || {};
+      const predicted = predictedMetrics.get(id) || {};
+      const sequence = String(rec?.seq || meta.sequence || '').replace(/\s+/g, '').toUpperCase();
+      const efficiency = catalyticEfficiency(predicted);
+      return {
+        id,
+        sequence,
+        length: sequence ? sequence.length : (meta.length || meta.slen || ''),
+        hmm_score: meta.hmm_score || '',
+        evalue: meta.evalue || '',
+        bitscore: meta.bitscore || '',
+        pident: meta.pident || '',
+        qcovs: meta.qcovs || '',
+        uniprot_accession: meta.uniprot_accession || meta.accession || '',
+        uniprot_identifier: meta.uniprot_identifier || meta.identifier || '',
+        taxonomy_id: meta.taxonomy_id || '',
+        kingdom: meta.kingdom || candidate.kingdom || '',
+        phylum: meta.phylum || candidate.phylum || '',
+        class: meta.class || candidate.class || '',
+        order: meta.order || candidate.order || '',
+        family: meta.family || candidate.family || '',
+        genus: meta.genus || candidate.genus || '',
+        species: meta.species || candidate.species || '',
+        description: meta.description || '',
+        external_link: meta.external_link || '',
+        scoring_score: meta.score || '',
+        cluster: candidate.cluster || meta.cluster || '',
+        cluster_size: candidate.cluster_size ?? meta.cluster_size ?? '',
+        network_component: candidate.networkComponent || '',
+        network_component_size: candidate.networkComponentSize ?? '',
+        representative: candidate.representative ?? parseBooleanLike(meta.representative),
+        avg_ref_similarity: candidate.avgRefSimilarity ?? '',
+        max_ref_similarity: candidate.maxRefSimilarity ?? '',
+        ref_edge_count: candidate.refEdgeCount ?? '',
+        cluster_size_norm: candidate.clusterSizeNorm ?? '',
+        network_component_size_norm: candidate.networkComponentSizeNorm ?? '',
+        taxonomy_diversity: candidate.taxonomyDiversity ?? '',
+        recommendation_score: candidate.score ?? '',
+        kcat: finiteOrBlank(predicted.kcat),
+        km: finiteOrBlank(predicted.km),
+        catalytic_efficiency: Number.isFinite(efficiency) ? efficiency : '',
+        solubility: finiteOrBlank(predicted.solubility),
+        tm: finiteOrBlank(predicted.tm),
+        ec_top1: predicted.ec_top1 || '',
+        ec_score1: finiteOrBlank(predicted.ec_score1),
+        ec_top2: predicted.ec_top2 || '',
+        ec_score2: finiteOrBlank(predicted.ec_score2),
+        ec_top3: predicted.ec_top3 || '',
+        ec_score3: finiteOrBlank(predicted.ec_score3),
+        catapro_source: predicted.cataPro_source || '',
+        solubility_source: predicted.solubility_source || '',
+        tm_source: predicted.tm_source || '',
+        ec_source: predicted.ec_source || '',
+        predicted_score: candidate.predictedScore ?? '',
+      };
+    });
+    const csv = [headers.map(csvEscape).join(',')]
+      .concat(rows.map((row) => headers.map((header) => csvEscape(row[header] ?? '')).join(',')))
+      .join('\n');
+    res.json({ ok: true, csv, foundCount: records.size, requestedCount: ids.length });
+  } catch (err) {
+    jsonError(res, 'Failed to export CSV', err);
   }
 });
 

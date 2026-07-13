@@ -21,8 +21,8 @@
 | 5 | **Scoring** | 基于比对位点的自定义打分规则，支持 JSON 导入/导出，阈值过滤 |
 | 6 | **Clustering** | CD-HIT 聚类（默认 85% identity），去冗余 |
 | 7 | **Similarity** | 全序列 pairwise 相似性计算（global/local alignment），进度条实时显示 |
-| 8 | **Network Push** | 按相似性阈值推送网络到 Cytoscape 桌面端（CyREST），自动应用 phylum 着色样式 |
-| 9 | **候选推荐** | 基于多维加权评分的候选序列自动推荐，支持 FASTA 导出和 Cytoscape 高亮 |
+| 8 | **Network Push** | 按相似性阈值推送网络到 Cytoscape 桌面端（CyREST），或在浏览器中查看网络并下载 PNG/SVG 图像 |
+| 9 | **候选推荐** | 基于多维加权评分的候选序列自动推荐，支持 FASTA/完整 CSV 保存和 Cytoscape 高亮 |
 
 ### HMMER 模块（基于隐马尔可夫模型搜索）
 
@@ -35,8 +35,8 @@
 | 5 | **Scoring** | 自定义位点打分规则，支持 JSON 导入/导出 |
 | 6 | **Clustering** | CD-HIT 聚类去冗余 |
 | 7 | **Similarity** | Pairwise 相似性计算 |
-| 8 | **Network Push** | 推送到 Cytoscape |
-| 9 | **候选推荐** | 基于多维加权评分的候选序列自动推荐 |
+| 8 | **Network Push** | 推送到 Cytoscape，或在浏览器中查看并下载 PNG/SVG 网络图 |
+| 9 | **候选推荐** | 基于多维加权评分的候选序列自动推荐，支持 FASTA/CSV 保存 |
 
 ### Compare 模块（网络对比）
 
@@ -244,6 +244,7 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 - `POST /api/network/predict-metrics` — 性质预测（kcat/solubility/Tm），结果缓存到 `predicted_metrics.csv`
 - `POST /api/network/recommend-candidates` — 候选序列推荐（六维加权，含 Strategy 1 预测评分）
 - `POST /api/network/export-recommended-fasta` — 导出推荐候选 FASTA
+- `POST /api/network/export-recommended-csv` — 导出推荐候选完整 CSV（序列、HMM/UniProt/taxonomy 元数据、网络评分及预测性质）
 - `POST /api/network/highlight-cytoscape` — 在 Cytoscape 中高亮选中节点
 
 ## 8. 候选推荐系统
@@ -334,7 +335,8 @@ $$
 
 ### 附加功能
 
-- **FASTA 导出**：将推荐候选序列导出为 FASTA 格式文件下载
+- **浏览器网络图下载**：在线 D3/Cytoscape.js 网络图可直接保存为 PNG 或 SVG；仅导出图本身，不包含页面工具栏和提示框
+- **FASTA/CSV 保存**：推荐结果的 Save 下拉可选择 FASTA 或 CSV。CSV 包含完整序列、长度、HMM 分数、UniProt/分类学/描述字段、网络与推荐评分，以及 kcat、Km、kcat/Km、溶解度、Tm、EC 和预测来源
 - **Cytoscape 高亮**：一键在 Cytoscape 桌面端选中/高亮推荐的候选节点（通过 CyREST Commands API）
 - **状态持久化**：推荐结果和所有参数（包括 Strategy 1 的权重、Tm 目标温度、网络连通性阈值等）在页面刷新后自动恢复
 - **全局错误边界**：前端增加了 `GlobalErrorBoundary`，捕获渲染阶段的运行时错误（如缓存数据缺少新字段），展示友好的错误提示和重载按钮，避免白屏

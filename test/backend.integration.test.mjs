@@ -317,3 +317,101 @@ test('prediction batches requests, reports real progress and ETA, and falls back
   assert.equal(finalProgress.predictors.tm.completedBatches, ids.length);
 });
 
+
+test('recommended CSV export merges sequence, source metadata, recommendation scores, and predictions', async () => {
+  const taskId = 'recommended-export-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  await fs.writeFile(
+    path.join(taskDir, 'candidates.fasta'),
+    '>sp|P12345|TEST_ENZYME exported candidate\nMKTIIALSYIFCLVFADY\n',
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'hits_filtered.csv'),
+    [
+      'target,hmm_score,evalue,length,sequence,uniprot_accession,uniprot_identifier,taxonomy_id,kingdom,phylum,class,species,description,external_link',
+      'P12345,245.7,1e-40,18,,P12345,TEST_ENZYME,9606,Eukaryota,Chordata,Mammalia,Homo sapiens,"Oxidase, alpha ""test""",https://example.test/P12345',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'predicted_metrics.csv'),
+    [
+      'id,kcat,km,solubility,tm,ec_top1,ec_score1,ec_top2,ec_score2,ec_top3,ec_score3,cataPro_source,solubility_source,tm_source,ec_source',
+      'P12345,20,4,0.82,68.5,1.1.1.1,0.91,2.2.2.2,0.12,,,real,real,real,real',
+    ].join('\n'),
+  );
+
+  const candidate = {
+    id: 'P12345',
+    cluster: 'P12345',
+    cluster_size: 7,
+    networkComponent: 'P12345',
+    networkComponentSize: 7,
+    representative: true,
+    kingdom: 'Eukaryota',
+    phylum: 'Chordata',
+    class: 'Mammalia',
+    order: 'Primates',
+    family: 'Hominidae',
+    genus: 'Homo',
+    species: 'Homo sapiens',
+    avgRefSimilarity: 0.72,
+    maxRefSimilarity: 0.88,
+    clusterSizeNorm: 0.7,
+    networkComponentSizeNorm: 0.7,
+    taxonomyDiversity: 0.5,
+    predictedScore: 0.81,
+    score: 0.84,
+    refEdgeCount: 3,
+  };
+  const result = await api(`/api/network/export-recommended-csv?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids: [candidate.id], candidates: [candidate] }),
+  });
+
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.foundCount, 1);
+  assert.equal(result.body.requestedCount, 1);
+  const [headerLine, rowLine] = result.body.csv.split('\n');
+  const parseLine = (line) => {
+    const cells = [];
+    let cell = '';
+    let quoted = false;
+    for (let index = 0; index < line.length; index++) {
+      if (line[index] === '"') {
+        if (quoted && line[index + 1] === '"') {
+          cell += '"';
+          index++;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (line[index] === ',' && !quoted) {
+        cells.push(cell);
+        cell = '';
+      } else {
+        cell += line[index];
+      }
+    }
+    cells.push(cell);
+    return cells;
+  };
+  const headers = parseLine(headerLine);
+  const values = parseLine(rowLine);
+  const row = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
+  assert.equal(row.id, 'P12345');
+  assert.equal(row.sequence, 'MKTIIALSYIFCLVFADY');
+  assert.equal(row.length, '18');
+  assert.equal(row.hmm_score, '245.7');
+  assert.equal(row.uniprot_identifier, 'TEST_ENZYME');
+  assert.equal(row.description, 'Oxidase, alpha "test"');
+  assert.equal(row.order, 'Primates');
+  assert.equal(row.recommendation_score, '0.84');
+  assert.equal(row.kcat, '20');
+  assert.equal(row.km, '4');
+  assert.equal(row.catalytic_efficiency, '5');
+  assert.equal(row.solubility, '0.82');
+  assert.equal(row.tm, '68.5');
+  assert.equal(row.ec_top1, '1.1.1.1');
+  assert.equal(row.predicted_score, '0.81');
+});

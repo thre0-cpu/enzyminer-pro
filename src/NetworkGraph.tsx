@@ -23,6 +23,8 @@ const PALETTE = [
 
 type RendererMode = 'd3' | 'cytoscape';
 type CategoryCol = 'phylum' | 'class' | 'kingdom' | 'order' | 'family' | 'genus' | 'species' | 'cluster';
+type GraphExportFormat = 'png' | 'svg';
+type GraphExporter = (format: GraphExportFormat) => Promise<Blob>;
 
 type VisibilityState = {
   threshold: number;
@@ -54,6 +56,131 @@ interface RendererProps extends Omit<Props, 'mode' | 'initialThreshold'> {
   hideSingletonsRef: React.MutableRefObject<boolean>;
   /** Register a callback the slider will invoke directly (no React re-render) */
   onRegisterApply: (fn: (state: VisibilityState) => void) => void;
+  /** Register an exporter for the currently mounted renderer. */
+  onRegisterExporter: (fn: GraphExporter | null) => void;
+}
+
+function serializeSvgElement(svg: SVGSVGElement) {
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  const width = Math.max(1, Math.round(svg.clientWidth || svg.getBoundingClientRect().width || 800));
+  const height = Math.max(1, Math.round(svg.clientHeight || svg.getBoundingClientRect().height || 600));
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  clone.setAttribute('width', String(width));
+  clone.setAttribute('height', String(height));
+  clone.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+  const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  background.setAttribute('x', '0');
+  background.setAttribute('y', '0');
+  background.setAttribute('width', String(width));
+  background.setAttribute('height', String(height));
+  background.setAttribute('fill', '#ffffff');
+  clone.insertBefore(background, clone.firstChild);
+
+  return {
+    text: `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`,
+    width,
+    height,
+  };
+}
+
+async function svgTextToPngBlob(svgText: string, width: number, height: number) {
+  const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+  try {
+    const image = new Image();
+    image.decoding = 'async';
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error('Unable to render the graph as PNG'));
+      image.src = url;
+    });
+
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas is not available in this browser');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('Unable to encode the graph as PNG')), 'image/png');
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function dataUriToBlob(dataUri: string) {
+  const [meta, data = ''] = dataUri.split(',', 2);
+  const mime = /data:([^;,]+)/.exec(meta)?.[1] || 'application/octet-stream';
+  const binary = meta.includes(';base64') ? atob(data) : decodeURIComponent(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mime });
+}
+
+function buildCytoscapeSvg(cy: any) {
+  const visibleNodes = cy.nodes().filter((node: any) => !node.hasClass('hidden') && node.style('display') !== 'none');
+  if (!visibleNodes.length) throw new Error('There are no visible nodes to export');
+  const visibleIds = new Set<string>();
+  visibleNodes.forEach((node: any) => visibleIds.add(String(node.id())));
+  const visibleEdges = cy.edges().filter((edge: any) => (
+    !edge.hasClass('hidden')
+    && edge.style('display') !== 'none'
+    && visibleIds.has(String(edge.source().id()))
+    && visibleIds.has(String(edge.target().id()))
+  ));
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  visibleNodes.forEach((node: any) => {
+    const pos = node.position();
+    const width = Number.parseFloat(node.style('width')) || 18;
+    const height = Number.parseFloat(node.style('height')) || 18;
+    const border = Number.parseFloat(node.style('border-width')) || 0;
+    minX = Math.min(minX, pos.x - width / 2 - border);
+    minY = Math.min(minY, pos.y - height / 2 - border);
+    maxX = Math.max(maxX, pos.x + width / 2 + border);
+    maxY = Math.max(maxY, pos.y + height / 2 + border);
+  });
+
+  const padding = 36;
+  const viewX = minX - padding;
+  const viewY = minY - padding;
+  const width = Math.max(1, maxX - minX + padding * 2);
+  const height = Math.max(1, maxY - minY + padding * 2);
+  const parts = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.ceil(width)}" height="${Math.ceil(height)}" viewBox="${viewX} ${viewY} ${width} ${height}">`,
+    `<rect x="${viewX}" y="${viewY}" width="${width}" height="${height}" fill="#ffffff"/>`,
+    '<g class="edges">',
+  ];
+  visibleEdges.forEach((edge: any) => {
+    const source = edge.source().position();
+    const target = edge.target().position();
+    const color = edge.style('line-color') || '#bbbbbb';
+    const lineWidth = Number.parseFloat(edge.style('width')) || 1;
+    const opacity = Number.parseFloat(edge.style('opacity'));
+    parts.push(`<line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="${color}" stroke-width="${lineWidth}" stroke-opacity="${Number.isFinite(opacity) ? opacity : 0.5}"/>`);
+  });
+  parts.push('</g>', '<g class="nodes">');
+  visibleNodes.forEach((node: any) => {
+    const pos = node.position();
+    const width = Number.parseFloat(node.style('width')) || 18;
+    const height = Number.parseFloat(node.style('height')) || 18;
+    const fill = node.style('background-color') || '#cccccc';
+    const stroke = node.style('border-color') || '#555555';
+    const strokeWidth = Number.parseFloat(node.style('border-width')) || 0;
+    parts.push(`<ellipse cx="${pos.x}" cy="${pos.y}" rx="${width / 2}" ry="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`);
+  });
+  parts.push('</g>', '</svg>');
+  return { text: parts.join('\n'), width: Math.ceil(width), height: Math.ceil(height) };
 }
 
 function computeVisibilitySummary(
@@ -163,7 +290,7 @@ interface D3Link extends SimulationLinkDatum<D3Node> {
   similarity: number;
 }
 
-function D3Renderer({ nodes, edges, categoryColumn, thresholdRef, hideSingletonsRef, onRegisterApply, highlightIds, onSelectNode, height }: RendererProps) {
+function D3Renderer({ nodes, edges, categoryColumn, thresholdRef, hideSingletonsRef, onRegisterApply, onRegisterExporter, highlightIds, onSelectNode, height }: RendererProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const simRef = useRef<ReturnType<typeof forceSimulation<D3Node>> | null>(null);
   const linkSelRef = useRef<any>(null);
@@ -318,6 +445,14 @@ function D3Renderer({ nodes, edges, categoryColumn, thresholdRef, hideSingletons
 
     simRef.current = sim;
 
+    onRegisterExporter(async (format) => {
+      const exported = serializeSvgElement(svg);
+      if (format === 'svg') {
+        return new Blob([exported.text], { type: 'image/svg+xml;charset=utf-8' });
+      }
+      return svgTextToPngBlob(exported.text, exported.width, exported.height);
+    });
+
     // Auto-fit
     const bounds = g.node()?.getBBox();
     if (bounds && bounds.width > 0 && bounds.height > 0) {
@@ -328,7 +463,10 @@ function D3Renderer({ nodes, edges, categoryColumn, thresholdRef, hideSingletons
       sel.call(zoomBehavior.transform, zoomIdentity.translate(tx, ty).scale(scale));
     }
 
-    return () => { sim.stop(); };
+    return () => {
+      sim.stop();
+      onRegisterExporter(null);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, edges, categoryColumn, highlightIds, onSelectNode, height]);
 
@@ -357,7 +495,7 @@ function D3Renderer({ nodes, edges, categoryColumn, thresholdRef, hideSingletons
 }
 
 // ====== Cytoscape.js renderer ======
-function CytoscapeRenderer({ nodes, edges, categoryColumn, thresholdRef, hideSingletonsRef, onRegisterApply, highlightIds, onSelectNode, height }: RendererProps) {
+function CytoscapeRenderer({ nodes, edges, categoryColumn, thresholdRef, hideSingletonsRef, onRegisterApply, onRegisterExporter, highlightIds, onSelectNode, height }: RendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<any>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; node: BrowserGraphNode } | null>(null);
@@ -616,6 +754,16 @@ function CytoscapeRenderer({ nodes, edges, categoryColumn, thresholdRef, hideSin
       cy.on('tap', 'node', (evt: any) => onSelectNode?.(evt.target.id()));
 
       cyRef.current = cy;
+      onRegisterExporter(async (format) => {
+        if (!cy || (typeof cy.destroyed === 'function' && cy.destroyed())) {
+          throw new Error('The graph renderer is not ready');
+        }
+        if (format === 'png') {
+          return dataUriToBlob(cy.png({ full: true, scale: 2, bg: '#ffffff', maxWidth: 8192, maxHeight: 8192 }));
+        }
+        const exported = buildCytoscapeSvg(cy);
+        return new Blob([exported.text], { type: 'image/svg+xml;charset=utf-8' });
+      });
     })();
 
     return () => {
@@ -627,6 +775,7 @@ function CytoscapeRenderer({ nodes, edges, categoryColumn, thresholdRef, hideSin
         activeLayout.stop();
         activeLayout = null;
       }
+      onRegisterExporter(null);
       if (cy) cy.destroy();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -685,8 +834,11 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
   const hideSingletonsRef = useRef(defaultHideSingletons);
   const [hideSingletons, setHideSingletons] = useState(defaultHideSingletons);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [exportFormat, setExportFormat] = useState<GraphExportFormat>('png');
+  const [exporting, setExporting] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(() => (typeof window !== 'undefined' ? window.innerHeight : 900));
   const applyRef = useRef<((state: VisibilityState) => void) | null>(null);
+  const exporterRef = useRef<GraphExporter | null>(null);
   const sliderRef = useRef<HTMLInputElement>(null);
   const labelRef = useRef<HTMLSpanElement>(null);
   const countRef = useRef<HTMLSpanElement>(null);
@@ -696,6 +848,31 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
   const onRegisterApply = useCallback((fn: (state: VisibilityState) => void) => {
     applyRef.current = fn;
   }, []);
+
+  const onRegisterExporter = useCallback((fn: GraphExporter | null) => {
+    exporterRef.current = fn;
+  }, []);
+
+  const handleExport = useCallback(async () => {
+    const exporter = exporterRef.current;
+    if (!exporter || exporting) return;
+    setExporting(true);
+    try {
+      const blob = await exporter(exportFormat);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `sequence_similarity_network.${exportFormat}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error: any) {
+      alert(`Graph export failed: ${error?.message || error}`);
+    } finally {
+      setExporting(false);
+    }
+  }, [exportFormat, exporting]);
 
   const updateControlRefs = useCallback((summary: VisibilitySummary, nextHideSingletons: boolean) => {
     if (countRef.current) {
@@ -828,13 +1005,32 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-          onClick={handleFullscreenToggle}
-        >
-          {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Graph download format"
+            value={exportFormat}
+            onChange={(event) => setExportFormat(event.target.value as GraphExportFormat)}
+            className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700"
+          >
+            <option value="png">PNG</option>
+            <option value="svg">SVG</option>
+          </select>
+          <button
+            type="button"
+            className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60"
+            onClick={handleExport}
+            disabled={exporting}
+          >
+            {exporting ? 'Exporting…' : 'Download Image'}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            onClick={handleFullscreenToggle}
+          >
+            {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+          </button>
+        </div>
       </div>
       </div>
       {mode === 'd3' ? (
@@ -845,6 +1041,7 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
           thresholdRef={thresholdRef}
           hideSingletonsRef={hideSingletonsRef}
           onRegisterApply={onRegisterApply}
+          onRegisterExporter={onRegisterExporter}
           highlightIds={highlightIds}
           onSelectNode={onSelectNode}
           height={graphHeight}
@@ -857,6 +1054,7 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
           thresholdRef={thresholdRef}
           hideSingletonsRef={hideSingletonsRef}
           onRegisterApply={onRegisterApply}
+          onRegisterExporter={onRegisterExporter}
           highlightIds={highlightIds}
           onSelectNode={onSelectNode}
           height={graphHeight}
