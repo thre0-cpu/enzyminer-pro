@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 import { spawn, execFile as _execFile } from 'node:child_process';
 import util from 'node:util';
 const execFile = util.promisify(_execFile);
@@ -8,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
+import { createHash } from 'node:crypto';
 
 import express from 'express';
 import cors from 'cors';
@@ -19,13 +22,42 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-// --- CORS ---
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',')
-  : undefined; // undefined = allow all in dev; set in production
-app.use(
-  cors(allowedOrigins ? { origin: allowedOrigins } : {}),
+// Express 4 does not automatically forward rejected promises from async route
+// handlers. Register routes through this wrapper so validation and runtime
+// failures reach the central error handler instead of terminating Node.js.
+function asyncHandler(handler) {
+  return function wrappedAsyncHandler(req, res, next) {
+    try {
+      Promise.resolve(handler(req, res, next)).catch(next);
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+const route = Object.fromEntries(
+  ['get', 'post', 'put', 'patch', 'delete'].map((method) => [
+    method,
+    (routePath, ...handlers) => app[method](
+      routePath,
+      ...handlers.map((handler) => asyncHandler(handler)),
+    ),
+  ]),
 );
+
+// --- CORS ---
+const defaultAllowedOrigins = [
+  'http://127.0.0.1:3000',
+  'http://localhost:3000',
+];
+const configuredAllowedOrigins = String(process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = configuredAllowedOrigins.length > 0
+  ? configuredAllowedOrigins
+  : defaultAllowedOrigins;
+app.use(cors({ origin: allowedOrigins }));
 
 // --- Rate limiter ---
 app.use(
@@ -63,6 +95,7 @@ const mmseqsThreadsRaw = Number(process.env.MMSEQS_THREADS || 8);
 const mmseqsThreads = Number.isFinite(mmseqsThreadsRaw)
   ? Math.max(1, Math.floor(mmseqsThreadsRaw))
   : 8;
+const apiHost = String(process.env.API_HOST || '127.0.0.1').trim() || '127.0.0.1';
 const apiPort = Number(process.env.API_PORT || 8787);
 const runtimeStaleMs = Number(process.env.RUNTIME_STALE_MS || 45 * 60 * 1000);
 const uniprotFillTimeoutMs = Number(process.env.UNIPROT_FILL_TIMEOUT_MS || 30 * 60 * 1000);
@@ -98,7 +131,9 @@ function normalizeTaskId(raw) {
     return 'default';
   }
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(taskId)) {
-    throw new Error('Invalid taskId, only [a-z0-9_-] is allowed and max length is 64');
+    const err = new Error('Invalid taskId, only [a-z0-9_-] is allowed and max length is 64');
+    err.status = 400;
+    throw err;
   }
   return taskId;
 }
@@ -123,33 +158,68 @@ async function ensureDir(dirPath) {
   return dirPath;
 }
 
+function createHttpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
 /**
- * Assert that resolvedPath is inside allowedDir (following symlinks).
- * Throws if the path escapes.
+ * Resolve a path for a boundary check while following any existing symlinked
+ * parent directories. This also protects paths whose final file does not yet
+ * exist.
  */
-function assertPathInsideDir(resolvedPath, allowedDir) {
-  let realTarget;
-  try {
-    realTarget = fsSync.realpathSync(resolvedPath);
-  } catch {
-    // File may not exist yet — fall back to path.resolve which won't follow symlinks
-    realTarget = path.resolve(resolvedPath);
+function resolveRealPathForBoundaryCheck(targetPath) {
+  const absoluteTarget = path.resolve(targetPath);
+  let existingAncestor = absoluteTarget;
+  while (!fsSync.existsSync(existingAncestor)) {
+    const parent = path.dirname(existingAncestor);
+    if (parent === existingAncestor) break;
+    existingAncestor = parent;
   }
+  const realAncestor = fsSync.realpathSync(existingAncestor);
+  return path.resolve(realAncestor, path.relative(existingAncestor, absoluteTarget));
+}
+
+/** Assert that a path remains inside an allowed directory after symlink resolution. */
+function assertPathInsideDir(resolvedPath, allowedDir) {
   const realAllowed = fsSync.realpathSync(allowedDir);
-  if (!realTarget.startsWith(realAllowed + path.sep) && realTarget !== realAllowed) {
-    throw new Error(`Path outside allowed directory: ${resolvedPath}`);
+  const realTarget = resolveRealPathForBoundaryCheck(resolvedPath);
+  const relative = path.relative(realAllowed, realTarget);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw createHttpError(400, `Path outside allowed directory: ${resolvedPath}`);
   }
   return realTarget;
 }
 
-/** Resolve and validate a user-supplied file path against pipelineRoot.
- *  Uses pipelineRoot (not workDir) so that cross-task references (e.g. ref.fasta
- *  from a previous task) are accepted while still preventing directory traversal. */
+/**
+ * Resolve a user-supplied input path. Cross-task inputs remain supported, but
+ * access is limited to tasksRoot rather than the whole project workspace.
+ */
 function resolveAndValidatePath(userPath, workDir, defaultPath) {
   const resolved = userPath
     ? (path.isAbsolute(String(userPath)) ? path.resolve(String(userPath)) : path.resolve(workDir, String(userPath)))
-    : defaultPath;
-  assertPathInsideDir(resolved, pipelineRoot);
+    : path.resolve(defaultPath);
+  assertPathInsideDir(resolved, tasksRoot);
+  return resolved;
+}
+
+function normalizeFilePrefix(raw, fallback = 'ref') {
+  const prefix = String(raw || fallback).trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(prefix)) {
+    throw createHttpError(400, 'prefix may only contain letters, numbers, _ or - and must be at most 64 characters');
+  }
+  return prefix;
+}
+
+function resolveTaskArtifactPath(userPath, workDir, defaultName, allowedNames) {
+  const resolved = userPath
+    ? (path.isAbsolute(String(userPath)) ? path.resolve(String(userPath)) : path.resolve(workDir, String(userPath)))
+    : path.join(workDir, defaultName);
+  assertPathInsideDir(resolved, workDir);
+  if (!allowedNames.includes(path.basename(resolved))) {
+    throw createHttpError(400, `Unsupported artifact: ${path.basename(resolved)}`);
+  }
   return resolved;
 }
 
@@ -170,8 +240,13 @@ function validateEmail(email) {
 const MAX_CSV_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
 
 async function resolveWorkDirByTaskId(taskId) {
+  const normalizedTaskId = normalizeTaskId(taskId);
   await ensureDir(tasksRoot);
-  return ensureDir(taskId === 'default' ? defaultWorkDir : path.join(tasksRoot, taskId));
+  const workDir = normalizedTaskId === 'default'
+    ? defaultWorkDir
+    : path.join(tasksRoot, normalizedTaskId);
+  assertPathInsideDir(workDir, tasksRoot);
+  return ensureDir(workDir);
 }
 
 async function resolveWorkDirForReq(req) {
@@ -354,8 +429,14 @@ function updateAlignmentProgress(patch, taskId = getCurrentTaskId()) {
   runtimeState.updatedAt = Date.now();
 }
 
-function jsonError(res, message, details = '') {
-  res.status(500).json({ ok: false, message, details });
+function jsonError(res, message, error = '') {
+  const status = Number.isInteger(error?.status) ? error.status : 500;
+  const details = status >= 500 && error ? String(error) : '';
+  res.status(status).json({
+    ok: false,
+    message: status < 500 ? String(error?.message || message) : message,
+    ...(details ? { details } : {}),
+  });
 }
 
 function runCmd(cmd, args, cwd = pipelineRoot, opts = {}) {
@@ -527,6 +608,21 @@ const SOL_URL     = process.env.SOL_URL     || 'http://localhost:8004';
 const EC_URL      = process.env.EC_URL      || 'http://localhost:8000';
 const TM_URL      = process.env.TM_URL      || 'http://localhost:8005';
 
+function boundedPositiveInteger(value, fallback, maximum) {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
+}
+
+// The external batch APIs accept at most 256 items by default. A smaller
+// application-level batch keeps progress observable and avoids a single very
+// long HTTP request for large candidate sets.
+const PREDICTION_BATCH_SIZE = boundedPositiveInteger(process.env.PREDICTION_BATCH_SIZE, 64, 256);
+const PREDICTION_REQUEST_TIMEOUT_MS = boundedPositiveInteger(
+  process.env.PREDICTION_REQUEST_TIMEOUT_MS,
+  10 * 60 * 1000,
+  24 * 60 * 60 * 1000,
+);
+
 // Service health cache: { url: { online: bool, lastCheck: number } }
 const serviceHealthCache = new Map();
 const HEALTH_CHECK_TTL = 30_000; // 30 seconds
@@ -571,30 +667,53 @@ function hashSeqToUnit(seq, salt) {
   return ((hash >>> 0) % 1000000) / 1000000;
 }
 
-// ── kcat / Km prediction (CataPro) ───────────────────────────────────────
-// Returns { kcat: number, km: number } | null
-async function predictCataPro(seq, smiles) {
-  try {
-    const resp = await fetch(`${CATAPRO_URL}/predict`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([{ id: 'predict', sequence: seq, smiles }]),
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (Array.isArray(data) && data.length > 0) {
-      const kcatRaw = Number(data[0].kcat_value);
-      const kmRaw = Number(data[0].km_value);
-      return {
-        kcat: Number.isFinite(kcatRaw) && kcatRaw > 0 ? kcatRaw : 0,
-        km: Number.isFinite(kmRaw) && kmRaw > 0 ? kmRaw : 0,
-      };
-    }
-    return null;
-  } catch {
-    return null;
+// ── Batched external prediction clients ──────────────────────────────────
+function splitIntoBatches(items, batchSize = PREDICTION_BATCH_SIZE) {
+  const batches = [];
+  for (let start = 0; start < items.length; start += batchSize) {
+    batches.push(items.slice(start, start + batchSize));
   }
+  return batches;
+}
+
+async function fetchPredictionJson(url, payload) {
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(PREDICTION_REQUEST_TIMEOUT_MS),
+  });
+  if (!resp.ok) {
+    let details = '';
+    try {
+      details = String(await resp.text()).trim().slice(0, 500);
+    } catch { /* ignore response body errors */ }
+    throw new Error(`HTTP ${resp.status}${details ? `: ${details}` : ''}`);
+  }
+  return resp.json();
+}
+
+// Returns Map<candidate id, { kcat: number, km: number }> for successful rows.
+// Results are matched by the service-provided index, not by fasta_id, because
+// CataPro appends suffixes such as "_wild" to identifiers.
+async function predictCataProBatch(items, smiles) {
+  const data = await fetchPredictionJson(
+    `${CATAPRO_URL}/predict/batch`,
+    items.map((item) => ({ id: item.id, sequence: item.sequence, smiles })),
+  );
+  const resultMap = new Map();
+  const results = Array.isArray(data?.results) ? data.results : [];
+  for (const result of results) {
+    const index = Number(result?.index);
+    const item = Number.isInteger(index) ? items[index] : null;
+    if (!item || result?.status !== 'success') continue;
+    const kcat = Number(result.kcat_value);
+    const km = Number(result.km_value);
+    if (Number.isFinite(kcat) && kcat > 0 && Number.isFinite(km) && km > 0) {
+      resultMap.set(item.id, { kcat, km });
+    }
+  }
+  return resultMap;
 }
 
 // Fallback mock for kcat
@@ -607,28 +726,27 @@ async function predictKmMock(seq) {
   return Number((0.1 + hashSeqToUnit(seq, 'km') * 99.9).toFixed(3));
 }
 
-// ── Solubility prediction (PLM_Sol) ──────────────────────────────────────
-// Returns { soluble: boolean, score: number } | null
-async function predictSolubilityReal(seq) {
-  try {
-    const resp = await fetch(`${SOL_URL}/predict`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'candidate', sequence: seq }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    // PLM_Sol returns score as 0-100 percentage; normalize to 0-1 for consistent display
-    const raw = Number(data.score);
-    const score = Number.isFinite(raw) ? (raw > 1 ? raw / 100 : raw) : 0;
-    return {
-      soluble: data.prediction === 'Soluble',
+// Returns Map<candidate id, { soluble: boolean, score: number }> for successful rows.
+async function predictSolubilityBatch(items) {
+  const data = await fetchPredictionJson(
+    `${SOL_URL}/predict/batch`,
+    items.map((item) => ({ name: item.id, sequence: item.sequence })),
+  );
+  const resultMap = new Map();
+  const results = Array.isArray(data?.results) ? data.results : [];
+  for (const result of results) {
+    const index = Number(result?.index);
+    const item = Number.isInteger(index) ? items[index] : null;
+    if (!item || result?.status !== 'success') continue;
+    const raw = Number(result.score);
+    if (!Number.isFinite(raw)) continue;
+    const score = Math.max(0, Math.min(1, raw > 1 ? raw / 100 : raw));
+    resultMap.set(item.id, {
+      soluble: result.prediction === 'Soluble',
       score,
-    };
-  } catch {
-    return null;
+    });
   }
+  return resultMap;
 }
 
 // Fallback mock for solubility (returns 0-1 probability)
@@ -636,54 +754,79 @@ async function predictSolubilityMock(seq) {
   return Number(hashSeqToUnit(seq, 'solubility').toFixed(4));
 }
 
-// ── Tm prediction (kept as mock) ─────────────────────────────────────────
+// ── Tm prediction (single-item API; no batch endpoint is documented) ──────
+function extractTmPrediction(value, depth = 0) {
+  if (depth > 5 || value === null || value === undefined) return null;
+  if (typeof value === 'number' || typeof value === 'string') {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const parsed = extractTmPrediction(item, depth + 1);
+      if (parsed !== null) return parsed;
+    }
+    return null;
+  }
+  if (typeof value !== 'object') return null;
+
+  const directKeys = ['tm', 'Tm', 'TM', 'temperature', 'melting_temperature', 'meltingTemperature'];
+  for (const key of directKeys) {
+    if (Object.hasOwn(value, key)) {
+      const parsed = extractTmPrediction(value[key], depth + 1);
+      if (parsed !== null) return parsed;
+    }
+  }
+  const containerKeys = ['prediction', 'result', 'results', 'data', 'output'];
+  for (const key of containerKeys) {
+    if (Object.hasOwn(value, key)) {
+      const parsed = extractTmPrediction(value[key], depth + 1);
+      if (parsed !== null) return parsed;
+    }
+  }
+  return null;
+}
+
+async function predictTmReal(seq) {
+  try {
+    const data = await fetchPredictionJson(`${TM_URL}/predict`, { name: 'candidate', sequence: seq });
+    return extractTmPrediction(data);
+  } catch {
+    return null;
+  }
+}
+
 async function predictTmMock(seq) {
   return Number((30 + hashSeqToUnit(seq, 'tm') * 60).toFixed(2));
 }
 
-// ── EC number prediction (CLEAN) ─────────────────────────────────────────
-// Returns [{ec: string, score: number}] | null
-// Normalizes field names from the CLEAN API which may use different casing.
-async function predictECReal(seq) {
-  try {
-    const resp = await fetch(`${EC_URL}/predict`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'candidate', sequence: seq }),
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
+function normalizeEcEntries(raw) {
+  if (!Array.isArray(raw)) return null;
+  const normalised = raw.map((result) => ({
+    ec: String(result?.ec || result?.EC || result?.ec_number || result?.label || '').trim(),
+    score: Number(result?.score ?? result?.probability ?? result?.confidence ?? 0),
+  })).filter((result) => result.ec);
+  return normalised.length
+    ? normalised.sort((a, b) => b.score - a.score).slice(0, 3)
+    : null;
+}
 
-    // Support multiple response shapes:
-    //   { status: 'success', results: [{ec, score}] }
-    //   { results: [{EC, probability}] }
-    //   { ec_numbers: [{ec_number, probability}] }
-    //   [{ec, score}]
-    let raw = [];
-    if (Array.isArray(data)) {
-      raw = data;
-    } else if (data.status === 'success' && Array.isArray(data.results)) {
-      raw = data.results;
-    } else if (Array.isArray(data.results)) {
-      raw = data.results;
-    } else if (Array.isArray(data.ec_numbers)) {
-      raw = data.ec_numbers;
-    }
-
-    if (!raw.length) return null;
-
-    const normalised = raw.map((r) => ({
-      ec: String(r.ec || r.EC || r.ec_number || r.label || '').trim(),
-      score: Number(r.score ?? r.probability ?? r.confidence ?? 0),
-    })).filter((r) => r.ec);
-
-    if (!normalised.length) return null;
-
-    return normalised.sort((a, b) => b.score - a.score).slice(0, 3);
-  } catch {
-    return null;
+// Returns Map<candidate id, [{ ec, score }]> for successful rows.
+async function predictECBatch(items) {
+  const data = await fetchPredictionJson(
+    `${EC_URL}/predict/batch`,
+    items.map((item) => ({ name: item.id, sequence: item.sequence })),
+  );
+  const resultMap = new Map();
+  const results = Array.isArray(data?.results) ? data.results : [];
+  for (const result of results) {
+    const index = Number(result?.index);
+    const item = Number.isInteger(index) ? items[index] : null;
+    if (!item || result?.status !== 'success') continue;
+    const entries = normalizeEcEntries(result.results);
+    if (entries) resultMap.set(item.id, entries);
   }
+  return resultMap;
 }
 
 // Fallback mock for EC
@@ -694,13 +837,274 @@ async function predictECMock(seq) {
   return [{ ec: ecs[idx], score }];
 }
 
+function createPredictionProgressTracker(items, modes) {
+  const totalItems = items.length;
+  const startedAt = Date.now();
+  const emaMsPerItem = {};
+  const batchCount = (name) => {
+    if (!totalItems) return 0;
+    if (!modes[name]) return 1;
+    return name === 'tm'
+      ? totalItems
+      : Math.ceil(totalItems / PREDICTION_BATCH_SIZE);
+  };
+  const predictors = Object.fromEntries(
+    ['cataPro', 'solubility', 'ec', 'tm'].map((name) => [name, {
+      current: 0,
+      total: totalItems,
+      completedBatches: 0,
+      totalBatches: batchCount(name),
+      status: totalItems ? 'pending' : 'done',
+      mode: modes[name] ? 'real' : 'mock',
+      elapsedMs: 0,
+      estimatedRemainingMs: totalItems ? null : 0,
+    }]),
+  );
+  const state = {
+    current: 0,
+    total: totalItems * 4,
+    done: totalItems === 0,
+    startedAt,
+    elapsedMs: 0,
+    estimatedRemainingMs: totalItems ? null : 0,
+    predictors,
+  };
+
+  const publish = () => {
+    state.current = Object.values(predictors).reduce((sum, value) => sum + value.current, 0);
+    state.elapsedMs = Date.now() - startedAt;
+    state.done = Object.values(predictors).every((value) => value.status === 'done');
+    const unfinished = Object.values(predictors).filter((value) => value.status !== 'done');
+    if (!unfinished.length) {
+      state.estimatedRemainingMs = 0;
+    } else if (unfinished.some((value) => !Number.isFinite(value.estimatedRemainingMs))) {
+      // Do not invent an overall ETA before every concurrently running service
+      // has completed at least one real unit of work.
+      state.estimatedRemainingMs = null;
+    } else {
+      state.estimatedRemainingMs = Math.max(...unfinished.map((value) => value.estimatedRemainingMs));
+    }
+    setRuntimeMeta({ predictProgress: JSON.parse(JSON.stringify(state)) });
+  };
+
+  const start = (name) => {
+    predictors[name].status = predictors[name].total ? 'running' : 'done';
+    publish();
+  };
+
+  const completeBatch = (name, itemCount, durationMs) => {
+    const predictor = predictors[name];
+    const completed = Math.max(0, Math.min(itemCount, predictor.total - predictor.current));
+    predictor.current += completed;
+    predictor.completedBatches = Math.min(predictor.totalBatches, predictor.completedBatches + 1);
+    predictor.elapsedMs = Date.now() - startedAt;
+    if (completed > 0) {
+      const latestMsPerItem = Math.max(0, durationMs) / completed;
+      emaMsPerItem[name] = Number.isFinite(emaMsPerItem[name])
+        ? emaMsPerItem[name] * 0.7 + latestMsPerItem * 0.3
+        : latestMsPerItem;
+    }
+    const remainingItems = Math.max(0, predictor.total - predictor.current);
+    predictor.estimatedRemainingMs = remainingItems === 0
+      ? 0
+      : Number.isFinite(emaMsPerItem[name])
+        ? Math.round(emaMsPerItem[name] * remainingItems)
+        : null;
+    predictor.status = remainingItems === 0 ? 'done' : 'running';
+    publish();
+  };
+
+  publish();
+  return { start, completeBatch, snapshot: () => JSON.parse(JSON.stringify(state)) };
+}
+
+async function runCataProPredictions(items, smiles, useReal, progress) {
+  const output = new Map();
+  progress.start('cataPro');
+  const batches = useReal ? splitIntoBatches(items) : [items];
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    const batchStartedAt = Date.now();
+    let realResults = new Map();
+    if (useReal) {
+      try {
+        realResults = await predictCataProBatch(batch, smiles);
+      } catch (err) {
+        pushRuntimeLine(`[predict-metrics] kcat/Km batch ${batchIndex + 1}/${batches.length} failed; using mock fallback: ${err.message}`);
+      }
+    }
+    let realCount = 0;
+    for (const item of batch) {
+      const real = realResults.get(item.id);
+      if (real) {
+        output.set(item.id, { ...real, source: 'real' });
+        realCount++;
+      } else {
+        const [kcat, km] = await Promise.all([
+          predictKcatMock(item.sequence),
+          predictKmMock(item.sequence),
+        ]);
+        output.set(item.id, { kcat, km, source: 'mock' });
+      }
+    }
+    progress.completeBatch('cataPro', batch.length, Date.now() - batchStartedAt);
+    pushRuntimeLine(`[predict-metrics] kcat/Km batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} mock)`);
+  }
+  return output;
+}
+
+async function runSolubilityPredictions(items, useReal, progress) {
+  const output = new Map();
+  progress.start('solubility');
+  const batches = useReal ? splitIntoBatches(items) : [items];
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    const batchStartedAt = Date.now();
+    let realResults = new Map();
+    if (useReal) {
+      try {
+        realResults = await predictSolubilityBatch(batch);
+      } catch (err) {
+        pushRuntimeLine(`[predict-metrics] solubility batch ${batchIndex + 1}/${batches.length} failed; using mock fallback: ${err.message}`);
+      }
+    }
+    let realCount = 0;
+    for (const item of batch) {
+      const real = realResults.get(item.id);
+      if (real) {
+        output.set(item.id, { score: real.score, source: 'real' });
+        realCount++;
+      } else {
+        output.set(item.id, { score: await predictSolubilityMock(item.sequence), source: 'mock' });
+      }
+    }
+    progress.completeBatch('solubility', batch.length, Date.now() - batchStartedAt);
+    pushRuntimeLine(`[predict-metrics] solubility batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} mock)`);
+  }
+  return output;
+}
+
+async function runECPredictions(items, useReal, progress) {
+  const output = new Map();
+  progress.start('ec');
+  const batches = useReal ? splitIntoBatches(items) : [items];
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    const batchStartedAt = Date.now();
+    let realResults = new Map();
+    if (useReal) {
+      try {
+        realResults = await predictECBatch(batch);
+      } catch (err) {
+        pushRuntimeLine(`[predict-metrics] EC batch ${batchIndex + 1}/${batches.length} failed; using mock fallback: ${err.message}`);
+      }
+    }
+    let realCount = 0;
+    for (const item of batch) {
+      const real = realResults.get(item.id);
+      if (real) {
+        output.set(item.id, { entries: real, source: 'real' });
+        realCount++;
+      } else {
+        output.set(item.id, { entries: await predictECMock(item.sequence), source: 'mock' });
+      }
+    }
+    progress.completeBatch('ec', batch.length, Date.now() - batchStartedAt);
+    pushRuntimeLine(`[predict-metrics] EC batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} mock)`);
+  }
+  return output;
+}
+
+async function runTmPredictions(items, useReal, progress) {
+  const output = new Map();
+  progress.start('tm');
+  if (!useReal) {
+    const startedAt = Date.now();
+    for (const item of items) {
+      output.set(item.id, { value: await predictTmMock(item.sequence), source: 'mock' });
+    }
+    progress.completeBatch('tm', items.length, Date.now() - startedAt);
+    pushRuntimeLine(`[predict-metrics] Tm mock predictions complete (${items.length} item(s))`);
+    return output;
+  }
+
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    const startedAt = Date.now();
+    const real = await predictTmReal(item.sequence);
+    if (Number.isFinite(real)) {
+      output.set(item.id, { value: real, source: 'real' });
+    } else {
+      output.set(item.id, { value: await predictTmMock(item.sequence), source: 'mock' });
+    }
+    progress.completeBatch('tm', 1, Date.now() - startedAt);
+    if ((index + 1) % 5 === 0 || index + 1 === items.length) {
+      pushRuntimeLine(`[predict-metrics] Tm ${index + 1}/${items.length} complete`);
+    }
+  }
+  return output;
+}
+
 function resolvePredictedMetricsPath(workDir) {
   return path.join(workDir, 'predicted_metrics.csv');
 }
 
-// Normalizes raw predicted kcat/solubility/Tm values into [0, 1] scores and
+const PREDICTION_CACHE_VERSION = 2;
+
+function resolvePredictedMetricsMetaPath(workDir) {
+  return path.join(workDir, 'predicted_metrics.meta.json');
+}
+
+function sha256(value) {
+  return createHash('sha256').update(String(value)).digest('hex');
+}
+
+function buildPredictionCacheContext({ candidateIds, seqLookup, smiles, modes }) {
+  const sequences = candidateIds
+    .map((id) => [id, seqLookup.get(id) ? sha256(seqLookup.get(id)) : null])
+    .sort(([a], [b]) => a.localeCompare(b));
+  const context = {
+    version: PREDICTION_CACHE_VERSION,
+    smiles,
+    sequences,
+    predictors: {
+      cataPro: { mode: modes.cataPro ? 'real' : 'mock', url: CATAPRO_URL },
+      solubility: { mode: modes.solubility ? 'real' : 'mock', url: SOL_URL },
+      ec: { mode: modes.ec ? 'real' : 'mock', url: EC_URL },
+      tm: { mode: modes.tm ? 'real' : 'mock', url: TM_URL },
+    },
+  };
+  return { ...context, fingerprint: sha256(JSON.stringify(context)) };
+}
+
+async function loadPredictionCacheMeta(workDir) {
+  try {
+    return JSON.parse(await fs.readFile(resolvePredictedMetricsMetaPath(workDir), 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+async function writePredictionCacheMeta(workDir, context) {
+  const metaPath = resolvePredictedMetricsMetaPath(workDir);
+  const tempPath = `${metaPath}.tmp-${process.pid}`;
+  await fs.writeFile(tempPath, `${JSON.stringify({ ...context, generatedAt: new Date().toISOString() }, null, 2)}
+`, 'utf-8');
+  await fs.rename(tempPath, metaPath);
+}
+
+function catalyticEfficiency(row) {
+  const kcat = Number(row?.kcat);
+  const km = Number(row?.km);
+  return Number.isFinite(kcat) && kcat > 0 && Number.isFinite(km) && km > 0
+    ? kcat / km
+    : NaN;
+}
+
+// Normalizes log10(kcat/Km), solubility, and Tm values into [0, 1] scores and
 // combines them into a single weighted "predictedScore" per candidate id.
-// Tm is scored by closeness to `tmTarget` (not simply "higher is better").
+// Log scaling prevents a single extreme catalytic-efficiency prediction from
+// dominating the min-max range. Tm is scored by closeness to `tmTarget`.
 function computePredictedNormalization(rows, subWeights, tmTarget) {
   const minMaxScaler = (values) => {
     const finite = values.filter((v) => Number.isFinite(v));
@@ -708,24 +1112,40 @@ function computePredictedNormalization(rows, subWeights, tmTarget) {
     const min = Math.min(...finite);
     const max = Math.max(...finite);
     const span = max - min;
-    return (v) => (Number.isFinite(v) && span > 1e-9 ? (v - min) / span : (finite.length ? 0.5 : 0));
+    return (v) => {
+      if (!Number.isFinite(v)) return 0;
+      return span > 1e-9 ? (v - min) / span : 0.5;
+    };
   };
 
-  const kcatScaler = minMaxScaler(rows.map((r) => r.kcat));
+  const efficiencyLogs = rows.map((r) => {
+    const efficiency = catalyticEfficiency(r);
+    return efficiency > 0 ? Math.log10(efficiency) : NaN;
+  });
+  const efficiencyScaler = minMaxScaler(efficiencyLogs);
   const solubilityScaler = minMaxScaler(rows.map((r) => r.solubility));
   const tmDiffScaler = minMaxScaler(rows.map((r) => -Math.abs(r.tm - tmTarget)));
 
   const wSum = (subWeights.kcat + subWeights.solubility + subWeights.tm) || 1;
   const out = new Map();
-  for (const r of rows) {
-    const kcatNorm = Number(kcatScaler(r.kcat).toFixed(4));
+  rows.forEach((r, index) => {
+    const efficiency = catalyticEfficiency(r);
+    const efficiencyNorm = Number(efficiencyScaler(efficiencyLogs[index]).toFixed(4));
     const solubilityNorm = Number(solubilityScaler(r.solubility).toFixed(4));
     const tmNorm = Number(tmDiffScaler(-Math.abs(r.tm - tmTarget)).toFixed(4));
     const predictedScore = Number((
-      (subWeights.kcat * kcatNorm + subWeights.solubility * solubilityNorm + subWeights.tm * tmNorm) / wSum
+      (subWeights.kcat * efficiencyNorm + subWeights.solubility * solubilityNorm + subWeights.tm * tmNorm) / wSum
     ).toFixed(4));
-    out.set(r.id, { kcatNorm, solubilityNorm, tmNorm, predictedScore });
-  }
+    out.set(r.id, {
+      catalyticEfficiency: Number.isFinite(efficiency) ? efficiency : 0,
+      catalyticEfficiencyNorm: efficiencyNorm,
+      // Backward-compatible alias: this field now correctly represents kcat/Km.
+      kcatNorm: efficiencyNorm,
+      solubilityNorm,
+      tmNorm,
+      predictedScore,
+    });
+  });
   return out;
 }
 
@@ -753,12 +1173,23 @@ async function loadPredictedMetricsMap(workDir) {
         ec_score2: Number(r.ec_score2) || 0,
         ec_top3: r.ec_top3 || '',
         ec_score3: Number(r.ec_score3) || 0,
+        cataPro_source: r.cataPro_source || '',
+        solubility_source: r.solubility_source || '',
+        tm_source: r.tm_source || '',
+        ec_source: r.ec_source || '',
       });
     }
     return map;
   } catch {
     return new Map();
   }
+}
+
+function predictionRowMatchesModes(row, modes) {
+  return row?.cataPro_source === (modes.cataPro ? 'real' : 'mock')
+    && row?.solubility_source === (modes.solubility ? 'real' : 'mock')
+    && row?.tm_source === (modes.tm ? 'real' : 'mock')
+    && row?.ec_source === (modes.ec ? 'real' : 'mock');
 }
 
 function sanitizeFastaId(value) {
@@ -3022,16 +3453,16 @@ async function upsertCytoscapeStyle(baseUrl, opts) {
   return { styleName, categoryColumn };
 }
 
-app.get('/api/tasks', async (_req, res) => {
+route.get('/api/tasks', async (_req, res) => {
   try {
     const tasks = await listTasks();
     res.json({ ok: true, tasks });
   } catch (err) {
-    jsonError(res, 'Failed to list tasks', String(err));
+    jsonError(res, 'Failed to list tasks', err);
   }
 });
 
-app.post('/api/tasks', async (req, res) => {
+route.post('/api/tasks', async (req, res) => {
   try {
     const rawTaskId = req.body?.taskId ? String(req.body.taskId) : '';
     const taskId = rawTaskId ? normalizeTaskId(rawTaskId) : generateTaskId();
@@ -3064,12 +3495,12 @@ app.post('/api/tasks', async (req, res) => {
     await fs.writeFile(path.join(taskDir, 'task.json'), JSON.stringify(meta, null, 2), 'utf-8');
     res.json({ ok: true, task: { id: taskId, workDir: taskDir, ...meta } });
   } catch (err) {
-    jsonError(res, 'Failed to create task', String(err));
+    jsonError(res, 'Failed to create task', err);
   }
 });
 
 
-app.post('/api/tasks/:taskId/duplicate', async (req, res) => {
+route.post('/api/tasks/:taskId/duplicate', async (req, res) => {
   try {
     const srcTaskId = normalizeTaskId(req.params.taskId);
     const rawNewTaskId = req.body?.newTaskId ? String(req.body.newTaskId) : '';
@@ -3103,11 +3534,11 @@ app.post('/api/tasks/:taskId/duplicate', async (req, res) => {
 
     res.json({ ok: true, task: { id: newTaskId, workDir: newDir, ...meta } });
   } catch (err) {
-    jsonError(res, 'Failed to duplicate task', String(err));
+    jsonError(res, 'Failed to duplicate task', err);
   }
 });
 
-app.delete('/api/tasks/:taskId', async (req, res) => {
+route.delete('/api/tasks/:taskId', async (req, res) => {
   try {
     const taskId = normalizeTaskId(req.params.taskId);
     if (RESERVED_TASK_IDS.has(taskId)) {
@@ -3123,34 +3554,62 @@ app.delete('/api/tasks/:taskId', async (req, res) => {
     runtimeStates.delete(taskId);
     res.json({ ok: true, taskId });
   } catch (err) {
-    jsonError(res, 'Failed to delete task', String(err));
+    jsonError(res, 'Failed to delete task', err);
   }
 });
 
-app.get('/api/health', async (req, res) => {
-  const checks = ['cd-hit', 'mafft', 'hmmbuild', 'hmmsearch', 'blastp', 'makeblastdb'];
+route.get('/api/health', async (req, res) => {
+  const toolBins = {
+    'cd-hit': 'cd-hit',
+    mafft: 'mafft',
+    hmmbuild: 'hmmbuild',
+    hmmsearch: 'hmmsearch',
+    blastp: 'blastp',
+    makeblastdb: 'makeblastdb',
+    mmseqs: mmseqsBin,
+  };
   const toolStates = {};
+  const pythonPackages = { pandas: false, biopython: false, requests: false, tqdm: false };
   const { taskId, workDir } = await resolveWorkDirForReq(req);
 
-  await Promise.all([
-    ...checks.map(async (tool) => {
-      try {
-        await runCmd('bash', ['-lc', `command -v ${tool}`], pipelineRoot);
-        toolStates[tool] = true;
-      } catch {
-        toolStates[tool] = false;
-      }
-    }),
-  ]);
+  await Promise.all(Object.entries(toolBins).map(async ([name, executable]) => {
+    try {
+      await runCmd('bash', ['-lc', 'command -v -- "$1"', 'tool-check', executable], pipelineRoot, { timeoutMs: 5000 });
+      toolStates[name] = true;
+    } catch {
+      toolStates[name] = false;
+    }
+  }));
+
+  let pythonAvailable = false;
+  try {
+    const probe = [
+      'import importlib.util, json',
+      "packages = {'pandas': 'pandas', 'biopython': 'Bio', 'requests': 'requests', 'tqdm': 'tqdm'}",
+      'print(json.dumps({name: importlib.util.find_spec(module) is not None for name, module in packages.items()}))',
+    ].join('\n');
+    const { stdout } = await runCmd(pythonBin, ['-c', probe], pipelineRoot, { timeoutMs: 10_000 });
+    Object.assign(pythonPackages, JSON.parse(stdout.trim()));
+    pythonAvailable = true;
+  } catch {
+    // Keep all package states false when Python itself is unavailable or the
+    // import probe cannot run.
+  }
 
   const predServices = await checkAllPredictionServices();
+  const ready = Object.values(toolStates).every(Boolean)
+    && pythonAvailable
+    && Object.values(pythonPackages).every(Boolean);
 
   res.json({
     ok: true,
+    ready,
     pipelineRoot,
     workDir,
     taskId,
     pythonBin,
+    pythonAvailable,
+    pythonPackages,
     tools: toolStates,
     predictionServices: {
       cataPro: { url: CATAPRO_URL, online: predServices.cataPro },
@@ -3161,7 +3620,7 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-app.get('/api/runtime/logs', async (req, res) => {
+route.get('/api/runtime/logs', async (req, res) => {
   const taskId = getTaskIdFromReq(req);
   const runtimeState = getRuntimeState(taskId);
   const limit = Math.max(10, Math.min(1000, Number(req.query.limit || 200)));
@@ -3180,18 +3639,18 @@ app.get('/api/runtime/logs', async (req, res) => {
   });
 });
 
-app.get('/api/pipeline/state', async (req, res) => {
+route.get('/api/pipeline/state', async (req, res) => {
   try {
     const { taskId, workDir } = await resolveWorkDirForReq(req);
     const module = String(req.query?.module || '').trim().toLowerCase() || null;
     const { exists, state } = await readPipelineState(workDir, module);
     res.json({ ok: true, taskId, exists, state });
   } catch (err) {
-    jsonError(res, 'Failed to load pipeline state', String(err));
+    jsonError(res, 'Failed to load pipeline state', err);
   }
 });
 
-app.post('/api/pipeline/state', async (req, res) => {
+route.post('/api/pipeline/state', async (req, res) => {
   try {
     const { taskId, workDir } = await resolveWorkDirForReq(req);
     const state = req.body?.state;
@@ -3203,7 +3662,7 @@ app.post('/api/pipeline/state', async (req, res) => {
     await writePipelineState(workDir, state, module);
     res.json({ ok: true, taskId, saved: true });
   } catch (err) {
-    jsonError(res, 'Failed to save pipeline state', String(err));
+    jsonError(res, 'Failed to save pipeline state', err);
   }
 });
 
@@ -3228,7 +3687,7 @@ const ARTIFACT_FILES = [
   { key: 'edges_similarity.csv',            csv: true },
 ];
 
-app.get('/api/task/artifacts', async (req, res) => {
+route.get('/api/task/artifacts', async (req, res) => {
   try {
     const { taskId, workDir } = await resolveWorkDirForReq(req);
     const artifacts = {};
@@ -3258,11 +3717,11 @@ app.get('/api/task/artifacts', async (req, res) => {
 
     res.json({ ok: true, taskId, workDir, artifacts });
   } catch (err) {
-    jsonError(res, 'Failed to list task artifacts', String(err));
+    jsonError(res, 'Failed to list task artifacts', err);
   }
 });
 
-app.post('/api/runtime/logs/clear', async (req, res) => {
+route.post('/api/runtime/logs/clear', async (req, res) => {
   const taskId = getTaskIdFromReq(req);
   const runtimeState = getRuntimeState(taskId);
   runtimeState.lines = [];
@@ -3274,7 +3733,7 @@ app.post('/api/runtime/logs/clear', async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/reference/preview', async (req, res) => {
+route.get('/api/reference/preview', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const csvPath = path.join(workDir, 'ref.csv');
@@ -3286,11 +3745,11 @@ app.get('/api/reference/preview', async (req, res) => {
     const preview = await readCsvPreview(csvPath, 100000);
     res.json({ ok: true, exists: true, preview });
   } catch (err) {
-    jsonError(res, 'Failed to load reference preview', String(err));
+    jsonError(res, 'Failed to load reference preview', err);
   }
 });
 
-app.get('/api/hmm/cdhit-preview', async (req, res) => {
+route.get('/api/hmm/cdhit-preview', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const prefix = 'ref';
@@ -3308,11 +3767,11 @@ app.get('/api/hmm/cdhit-preview', async (req, res) => {
     const filteredRows = csvData.rows.filter((row) => remainingIds.has(row.accession));
     res.json({ ok: true, exists: true, preview: { headers: csvData.headers, rows: filteredRows, total: filteredRows.length } });
   } catch (err) {
-    jsonError(res, 'Failed to load CD-HIT preview', String(err));
+    jsonError(res, 'Failed to load CD-HIT preview', err);
   }
 });
 
-app.post('/api/reference/fetch', async (req, res) => {
+route.post('/api/reference/fetch', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'reference/fetch', taskId)) {
     return;
@@ -3353,12 +3812,12 @@ app.post('/api/reference/fetch', async (req, res) => {
       finishRuntimeTask('reference/fetch', true);
     } catch (err) {
       finishRuntimeTask('reference/fetch', false);
-      jsonError(res, 'Failed to fetch reference sequences', String(err));
+      jsonError(res, 'Failed to fetch reference sequences', err);
     }
   });
 });
 
-app.post('/api/reference/import-fasta', async (req, res) => {
+route.post('/api/reference/import-fasta', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'reference/import-fasta', taskId)) {
     return;
@@ -3435,12 +3894,12 @@ app.post('/api/reference/import-fasta', async (req, res) => {
       finishRuntimeTask('reference/import-fasta', true);
     } catch (err) {
       finishRuntimeTask('reference/import-fasta', false);
-      jsonError(res, 'Failed to import reference FASTA', String(err));
+      jsonError(res, 'Failed to import reference FASTA', err);
     }
   });
 });
 
-app.post('/api/reference/pairwise-identity', async (req, res) => {
+route.post('/api/reference/pairwise-identity', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const fastaPath = resolveAndValidatePath(
@@ -3483,11 +3942,11 @@ app.post('/api/reference/pairwise-identity', async (req, res) => {
 
     res.json({ ok: true, ids, matrix });
   } catch (err) {
-    jsonError(res, 'Failed to compute pairwise identity', String(err));
+    jsonError(res, 'Failed to compute pairwise identity', err);
   }
 });
 
-app.post('/api/hmm/build', async (req, res) => {
+route.post('/api/hmm/build', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'hmm/build', taskId)) {
     return;
@@ -3504,7 +3963,7 @@ app.post('/api/hmm/build', async (req, res) => {
       const coverageShort = Number(req.body?.coverageShort ?? 0);
       const refFasta = resolveAndValidatePath(
         req.body?.refFasta, workDir, path.join(workDir, 'ref.fasta'));
-      const prefix = req.body?.prefix || 'ref';
+      const prefix = normalizeFilePrefix(req.body?.prefix, 'ref');
 
       const ref90 = path.join(workDir, `${prefix}_cdhit90.fasta`);
       const ref90Aln = path.join(workDir, `${prefix}_cdhit90.mafft.fasta`);
@@ -3631,12 +4090,12 @@ app.post('/api/hmm/build', async (req, res) => {
       finishRuntimeTask('hmm/build', true);
     } catch (err) {
       finishRuntimeTask('hmm/build', false);
-      jsonError(res, 'Failed to build HMM model', String(err));
+      jsonError(res, 'Failed to build HMM model', err);
     }
   });
 });
 
-app.post('/api/search/run', async (req, res) => {
+route.post('/api/search/run', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'search/run', taskId)) {
     return;
@@ -3699,12 +4158,12 @@ app.post('/api/search/run', async (req, res) => {
       finishRuntimeTask('search/run', true);
     } catch (err) {
       finishRuntimeTask('search/run', false);
-      jsonError(res, 'Failed to run hmmsearch', String(err));
+      jsonError(res, 'Failed to run hmmsearch', err);
     }
   });
 });
 
-app.post('/api/search/ebi/monitor', async (req, res) => {
+route.post('/api/search/ebi/monitor', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'search/ebi-monitor', taskId)) {
     return;
@@ -3724,12 +4183,12 @@ app.post('/api/search/ebi/monitor', async (req, res) => {
       finishRuntimeTask('search/ebi-monitor', true);
     } catch (err) {
       finishRuntimeTask('search/ebi-monitor', false);
-      jsonError(res, 'Failed to monitor EBI hmmsearch', String(err));
+      jsonError(res, 'Failed to monitor EBI hmmsearch', err);
     }
   });
 });
 
-app.post('/api/search/ebi/download', async (req, res) => {
+route.post('/api/search/ebi/download', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'search/ebi-download', taskId)) {
     return;
@@ -3769,12 +4228,12 @@ app.post('/api/search/ebi/download', async (req, res) => {
       finishRuntimeTask('search/ebi-download', true);
     } catch (err) {
       finishRuntimeTask('search/ebi-download', false);
-      jsonError(res, 'Failed to download EBI hmmsearch results', String(err));
+      jsonError(res, 'Failed to download EBI hmmsearch results', err);
     }
   });
 });
 
-app.post("/api/search/ebi/uniprot-fill", async (req, res) => {
+route.post("/api/search/ebi/uniprot-fill", async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, "search/uniprot-fill", taskId)) {
     return;
@@ -3800,12 +4259,12 @@ app.post("/api/search/ebi/uniprot-fill", async (req, res) => {
       finishRuntimeTask("search/uniprot-fill", true);
     } catch (err) {
       finishRuntimeTask("search/uniprot-fill", false);
-      jsonError(res, "Failed to fill UniProt data", String(err));
+      jsonError(res, "Failed to fill UniProt data", err);
     }
   });
 });
 
-app.post('/api/search/ebi/retry-failed', async (req, res) => {
+route.post('/api/search/ebi/retry-failed', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'search/ebi-retry-failed', taskId)) {
     return;
@@ -3871,12 +4330,12 @@ app.post('/api/search/ebi/retry-failed', async (req, res) => {
       finishRuntimeTask('search/ebi-retry-failed', true);
     } catch (err) {
       finishRuntimeTask('search/ebi-retry-failed', false);
-      jsonError(res, 'Failed to retry EBI failed pages', String(err));
+      jsonError(res, 'Failed to retry EBI failed pages', err);
     }
   });
 });
 
-app.get('/api/search/page', async (req, res) => {
+route.get('/api/search/page', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const page = Math.max(1, Number(req.query.page || 1));
@@ -3898,11 +4357,11 @@ app.get('/api/search/page', async (req, res) => {
       preview,
     });
   } catch (err) {
-    jsonError(res, 'Failed to load paginated search results', String(err));
+    jsonError(res, 'Failed to load paginated search results', err);
   }
 });
 
-app.post('/api/search/filter', async (req, res) => {
+route.post('/api/search/filter', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'search/filter', taskId)) {
     return;
@@ -3951,12 +4410,12 @@ app.post('/api/search/filter', async (req, res) => {
       finishRuntimeTask('search/filter', true);
     } catch (err) {
       finishRuntimeTask('search/filter', false);
-      jsonError(res, 'Failed to filter hits', String(err));
+      jsonError(res, 'Failed to filter hits', err);
     }
   });
 });
 
-app.post('/api/search/filter-box', async (req, res) => {
+route.post('/api/search/filter-box', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'search/filter-box', taskId)) {
     return;
@@ -4018,12 +4477,12 @@ app.post('/api/search/filter-box', async (req, res) => {
     finishRuntimeTask('search/filter-box', true);
     } catch (err) {
       finishRuntimeTask('search/filter-box', false);
-      jsonError(res, 'Failed to save box-filtered hits', String(err));
+      jsonError(res, 'Failed to save box-filtered hits', err);
     }
   });
 });
 
-app.post('/api/search/consistency-check', async (req, res) => {
+route.post('/api/search/consistency-check', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'search/consistency-check', taskId)) {
     return;
@@ -4101,12 +4560,12 @@ app.post('/api/search/consistency-check', async (req, res) => {
     finishRuntimeTask('search/consistency-check', true);
     } catch (err) {
       finishRuntimeTask('search/consistency-check', false);
-      jsonError(res, 'Failed to run sequence-length consistency check', String(err));
+      jsonError(res, 'Failed to run sequence-length consistency check', err);
     }
   });
 });
 
-app.post('/api/scoring/run', async (req, res) => {
+route.post('/api/scoring/run', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'scoring/run', taskId)) {
     return;
@@ -4246,12 +4705,12 @@ app.post('/api/scoring/run', async (req, res) => {
     finishRuntimeTask('scoring/run', true);
     } catch (err) {
       finishRuntimeTask('scoring/run', false);
-      jsonError(res, 'Failed to score sequences', String(err));
+      jsonError(res, 'Failed to score sequences', err);
     }
   });
 });
 
-app.post('/api/scoring/prepare-alignment', async (req, res) => {
+route.post('/api/scoring/prepare-alignment', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'scoring/prepare-alignment', taskId)) {
     return;
@@ -4291,12 +4750,12 @@ app.post('/api/scoring/prepare-alignment', async (req, res) => {
       finishRuntimeTask('scoring/prepare-alignment', true);
     } catch (err) {
       finishRuntimeTask('scoring/prepare-alignment', false);
-      jsonError(res, 'Failed to prepare scoring alignment', String(err));
+      jsonError(res, 'Failed to prepare scoring alignment', err);
     }
   });
 });
 
-app.get('/api/scoring/alignment-preview', async (req, res) => {
+route.get('/api/scoring/alignment-preview', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const alignmentPath = resolveAndValidatePath(
@@ -4332,16 +4791,19 @@ app.get('/api/scoring/alignment-preview', async (req, res) => {
       rows: windowed,
     });
   } catch (err) {
-    jsonError(res, 'Failed to preview alignment', String(err));
+    jsonError(res, 'Failed to preview alignment', err);
   }
 });
 
-app.get('/api/scoring/download', async (req, res) => {
+route.get('/api/scoring/download', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
-    const csvPath = resolveAndValidatePath(
+    const csvPath = resolveTaskArtifactPath(
       req.query?.csv ? String(req.query.csv) : null,
-      workDir, path.join(workDir, 'scored_results.csv'));
+      workDir,
+      'scored_results.csv',
+      ['scored_results.csv'],
+    );
 
     const csvText = await fs.readFile(csvPath, 'utf-8');
     const fileName = path.basename(csvPath) || 'scored_results.csv';
@@ -4349,11 +4811,11 @@ app.get('/api/scoring/download', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.send(csvText);
   } catch (err) {
-    jsonError(res, 'Failed to download scoring csv', String(err));
+    jsonError(res, 'Failed to download scoring csv', err);
   }
 });
 
-app.get('/api/scoring/threshold-preview', async (req, res) => {
+route.get('/api/scoring/threshold-preview', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const threshold = Number(req.query?.threshold ?? NaN);
@@ -4375,11 +4837,11 @@ app.get('/api/scoring/threshold-preview', async (req, res) => {
     const ratio = total > 0 ? passed / total : 0;
     res.json({ ok: true, csv: csvPath, threshold, total, passed, ratio });
   } catch (err) {
-    jsonError(res, 'Failed to preview threshold counts', String(err));
+    jsonError(res, 'Failed to preview threshold counts', err);
   }
 });
 
-app.post('/api/clustering/run', async (req, res) => {
+route.post('/api/clustering/run', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'clustering/run', taskId)) {
     return;
@@ -4433,12 +4895,12 @@ app.post('/api/clustering/run', async (req, res) => {
     finishRuntimeTask('clustering/run', true);
     } catch (err) {
       finishRuntimeTask('clustering/run', false);
-      jsonError(res, 'Failed to run clustering', String(err));
+      jsonError(res, 'Failed to run clustering', err);
     }
   });
 });
 
-app.post('/api/network/compute-similarity', async (req, res) => {
+route.post('/api/network/compute-similarity', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'network/compute-similarity', taskId)) {
     return;
@@ -4511,12 +4973,12 @@ app.post('/api/network/compute-similarity', async (req, res) => {
       finishRuntimeTask('network/compute-similarity', true);
     } catch (err) {
       finishRuntimeTask('network/compute-similarity', false);
-      jsonError(res, 'Failed to compute sequence similarity', String(err));
+      jsonError(res, 'Failed to compute sequence similarity', err);
     }
   });
 });
 
-app.get('/api/network/similarity-status', async (req, res) => {
+route.get('/api/network/similarity-status', async (req, res) => {
   try {
     const { taskId, workDir } = await resolveWorkDirForReq(req);
     const nodesPath = path.join(workDir, 'nodes.csv');
@@ -4560,11 +5022,11 @@ app.get('/api/network/similarity-status', async (req, res) => {
       edgesCsv: edgesPath,
     });
   } catch (err) {
-    jsonError(res, 'Failed to load similarity status', String(err));
+    jsonError(res, 'Failed to load similarity status', err);
   }
 });
 
-app.get('/api/network/data', async (req, res) => {
+route.get('/api/network/data', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'network/data', taskId)) {
     return;
@@ -4603,13 +5065,13 @@ app.get('/api/network/data', async (req, res) => {
       finishRuntimeTask('network/data', true);
     } catch (err) {
       finishRuntimeTask('network/data', false);
-      jsonError(res, 'Failed to read network files', String(err));
+      jsonError(res, 'Failed to read network files', err);
     }
   });
 });
 
 // ── Browser Graph Data (full nodes + filtered edges for in-browser visualization) ──
-app.post('/api/network/browser-graph', async (req, res) => {
+route.post('/api/network/browser-graph', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const pairwiseThresholdPct = Number(req.body?.pairwiseThresholdPct);
@@ -4652,11 +5114,11 @@ app.post('/api/network/browser-graph', async (req, res) => {
       maxEdges: browserGraphSelection.maxEdges,
     });
   } catch (err) {
-    jsonError(res, 'Failed to load browser graph data', String(err));
+    jsonError(res, 'Failed to load browser graph data', err);
   }
 });
 
-app.post('/api/network/push-cytoscape', async (req, res) => {
+route.post('/api/network/push-cytoscape', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'network/push-cytoscape', taskId)) {
     return;
@@ -4806,13 +5268,13 @@ app.post('/api/network/push-cytoscape', async (req, res) => {
       finishRuntimeTask('network/push-cytoscape', true);
     } catch (err) {
       finishRuntimeTask('network/push-cytoscape', false);
-      jsonError(res, 'Failed to push network to Cytoscape', String(err));
+      jsonError(res, 'Failed to push network to Cytoscape', err);
     }
   });
 });
 
 // ── Candidate property prediction (kcat / Km / solubility / Tm / EC) ──────
-app.post('/api/network/predict-metrics', async (req, res) => {
+route.post('/api/network/predict-metrics', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'network/predict-metrics', taskId)) return;
 
@@ -4826,7 +5288,6 @@ app.post('/api/network/predict-metrics', async (req, res) => {
       const subWeights = normalizePredictedSubWeights(req.body?.subWeights);
       const smiles = String(req.body?.smiles || '').trim();
 
-      // Check which services are available
       const [cataProOnline, solOnline, ecOnline, tmOnline] = await Promise.all([
         checkServiceHealth(CATAPRO_URL),
         checkServiceHealth(SOL_URL),
@@ -4834,70 +5295,112 @@ app.post('/api/network/predict-metrics', async (req, res) => {
         checkServiceHealth(TM_URL),
       ]);
 
-      const useCataPro = cataProOnline && smiles;
-      const useSol = solOnline;
-      const useEC = ecOnline;
-      // Tm predictor: real API if online, otherwise mock
-      const useTm = tmOnline;
+      const modes = {
+        cataPro: Boolean(cataProOnline && smiles),
+        solubility: solOnline,
+        ec: ecOnline,
+        tm: tmOnline,
+      };
 
       pushRuntimeLine(`[predict-metrics] services: cataPro=${cataProOnline ? 'online' : 'offline'}${!smiles && cataProOnline ? ' (no SMILES provided, using mock kcat/Km)' : ''}, sol=${solOnline ? 'online' : 'offline'}, ec=${ecOnline ? 'online' : 'offline'}, tm=${tmOnline ? 'online' : 'offline'}`);
-      pushRuntimeLine(`[predict-metrics] mode: kcat=${useCataPro ? 'REAL' : 'mock'}, sol=${useSol ? 'REAL' : 'mock'}, ec=${useEC ? 'REAL' : 'mock'}, tm=${useTm ? 'REAL' : 'mock'}`);
+      pushRuntimeLine(`[predict-metrics] mode: kcat/Km=${modes.cataPro ? 'real-preferred' : 'mock'}, sol=${modes.solubility ? 'real-preferred' : 'mock'}, ec=${modes.ec ? 'real-preferred' : 'mock'}, tm=${modes.tm ? 'real-preferred' : 'mock'}`);
 
       const { rows: nodeRows } = await readCsvRows(path.join(workDir, 'nodes.csv'));
       const candidateIds = nodeRows.filter((n) => String(n.is_reference) !== '1').map((n) => n.id);
       if (!candidateIds.length) throw new Error('No candidate sequences found in nodes.csv – run similarity computation first');
 
-      const metricsPath = resolvePredictedMetricsPath(workDir);
-      const existing = forceRecompute ? new Map() : await loadPredictedMetricsMap(workDir);
+      const candFastaPath = await firstExistingPath(resolveNetworkSourceFasta(workDir));
+      if (!candFastaPath) throw new Error('Could not find candidate FASTA to run predictions on');
+      const fastaText = await fs.readFile(candFastaPath, 'utf-8');
+      const seqLookup = buildSequenceLookup(parseFastaRecords(fastaText));
 
-      const missingIds = candidateIds.filter((id) => !existing.has(id));
+      const cacheContext = buildPredictionCacheContext({ candidateIds, seqLookup, smiles, modes });
+      const cachedMeta = forceRecompute ? null : await loadPredictionCacheMeta(workDir);
+      const cacheValid = !forceRecompute && cachedMeta?.fingerprint === cacheContext.fingerprint;
+      const existing = cacheValid ? await loadPredictedMetricsMap(workDir) : new Map();
+      if (forceRecompute) {
+        pushRuntimeLine('[predict-metrics] cache bypassed by forceRecompute');
+      } else if (!cacheValid) {
+        pushRuntimeLine('[predict-metrics] cache invalidated because sequences, SMILES, predictor mode, URL, or schema changed');
+      }
+
+      // Rows that fell back to mocks while a real service was preferred are
+      // retried on the next run instead of being treated as a valid real cache.
+      const missingIds = candidateIds.filter((id) => {
+        const row = existing.get(id);
+        return !row || !predictionRowMatchesModes(row, modes);
+      });
+
+      let recomputedCount = 0;
       if (missingIds.length) {
-        const candFastaPath = await firstExistingPath(resolveNetworkSourceFasta(workDir));
-        if (!candFastaPath) throw new Error('Could not find candidate FASTA to run predictions on');
-        const text = await fs.readFile(candFastaPath, 'utf-8');
-        const seqLookup = buildSequenceLookup(parseFastaRecords(text));
-
-        pushRuntimeLine(`[predict-metrics] running predictors for ${missingIds.length} sequence(s)`);
-        setRuntimeMeta({ predictProgress: { current: 0, total: missingIds.length } });
-        let done = 0;
+        const predictionItems = [];
         for (const id of missingIds) {
-          const seq = seqLookup.get(id);
-          if (!seq) continue;
-
-          // Run predictions: try real API first, fall back to mock
-          const [cataProResult, solResult, tmVal, ecResult] = await Promise.all([
-            useCataPro ? predictCataPro(seq, smiles) : Promise.resolve(null),
-            useSol ? predictSolubilityReal(seq) : Promise.resolve(null),
-            predictTmMock(seq),
-            useEC ? predictECReal(seq) : Promise.resolve(null),
-          ]);
-
-          const kcat = (cataProResult && cataProResult.kcat > 0) ? cataProResult.kcat : await predictKcatMock(seq);
-          const km = (cataProResult && cataProResult.km > 0) ? cataProResult.km : await predictKmMock(seq);
-          const solubility = solResult ? solResult.score : await predictSolubilityMock(seq);
-          const tm = tmVal;
-          const ecEntries = ecResult || await predictECMock(seq);
-          const ec_top1 = ecEntries[0]?.ec || '';
-          const ec_score1 = ecEntries[0]?.score || 0;
-          const ec_top2 = ecEntries[1]?.ec || '';
-          const ec_score2 = ecEntries[1]?.score || 0;
-          const ec_top3 = ecEntries[2]?.ec || '';
-          const ec_score3 = ecEntries[2]?.score || 0;
-
-          existing.set(id, { id, kcat, km, solubility, tm, ec_top1, ec_score1, ec_top2, ec_score2, ec_top3, ec_score3 });
-          done++;
-          if (done % 5 === 0 || done === missingIds.length) {
-            setRuntimeMeta({ predictProgress: { current: done, total: missingIds.length } });
-            pushRuntimeLine(`[predict-metrics] ${done}/${missingIds.length} done`);
+          const sequence = seqLookup.get(id);
+          if (sequence) {
+            predictionItems.push({ id, sequence });
+          } else {
+            pushRuntimeLine(`[predict-metrics] skipped ${id}: sequence not found in candidate FASTA`);
           }
         }
-        pushRuntimeLine(`[predict-metrics] finished ${done}/${missingIds.length} new prediction(s)`);
-        setRuntimeMeta({ predictProgress: { current: done, total: missingIds.length, done: true } });
+
+        pushRuntimeLine(`[predict-metrics] running predictors for ${predictionItems.length} sequence(s), application batch size=${PREDICTION_BATCH_SIZE}`);
+        const progress = createPredictionProgressTracker(predictionItems, modes);
+        const [cataProResults, solubilityResults, ecResults, tmResults] = await Promise.all([
+          runCataProPredictions(predictionItems, smiles, modes.cataPro, progress),
+          runSolubilityPredictions(predictionItems, modes.solubility, progress),
+          runECPredictions(predictionItems, modes.ec, progress),
+          runTmPredictions(predictionItems, modes.tm, progress),
+        ]);
+
+        for (const item of predictionItems) {
+          const cataPro = cataProResults.get(item.id);
+          const solubility = solubilityResults.get(item.id);
+          const ec = ecResults.get(item.id);
+          const tm = tmResults.get(item.id);
+          const ecEntries = ec?.entries || [];
+          existing.set(item.id, {
+            id: item.id,
+            kcat: cataPro?.kcat ?? 0,
+            km: cataPro?.km ?? 0,
+            solubility: solubility?.score ?? 0,
+            tm: tm?.value ?? 0,
+            ec_top1: ecEntries[0]?.ec || '',
+            ec_score1: ecEntries[0]?.score || 0,
+            ec_top2: ecEntries[1]?.ec || '',
+            ec_score2: ecEntries[1]?.score || 0,
+            ec_top3: ecEntries[2]?.ec || '',
+            ec_score3: ecEntries[2]?.score || 0,
+            cataPro_source: cataPro?.source || 'mock',
+            solubility_source: solubility?.source || 'mock',
+            tm_source: tm?.source || 'mock',
+            ec_source: ec?.source || 'mock',
+          });
+          recomputedCount++;
+        }
+        const finalProgress = progress.snapshot();
+        pushRuntimeLine(`[predict-metrics] finished ${recomputedCount}/${missingIds.length} new prediction(s); ${finalProgress.current}/${finalProgress.total} predictor units complete`);
+      } else {
+        setRuntimeMeta({
+          predictProgress: {
+            current: 0,
+            total: 0,
+            done: true,
+            startedAt: Date.now(),
+            elapsedMs: 0,
+            estimatedRemainingMs: 0,
+            predictors: {},
+          },
+        });
       }
 
       const allRows = candidateIds.map((id) => existing.get(id)).filter(Boolean);
-      const csvHeaders = ['id', 'kcat', 'km', 'solubility', 'tm', 'ec_top1', 'ec_score1', 'ec_top2', 'ec_score2', 'ec_top3', 'ec_score3'];
-      await writeCsvRows(metricsPath, csvHeaders, allRows);
+      const csvHeaders = [
+        'id', 'kcat', 'km', 'solubility', 'tm',
+        'ec_top1', 'ec_score1', 'ec_top2', 'ec_score2', 'ec_top3', 'ec_score3',
+        'cataPro_source', 'solubility_source', 'tm_source', 'ec_source',
+      ];
+      await writeCsvRows(resolvePredictedMetricsPath(workDir), csvHeaders, allRows);
+      await writePredictionCacheMeta(workDir, cacheContext);
 
       const normMap = computePredictedNormalization(allRows, subWeights, tmTarget);
       const rows = allRows
@@ -4913,26 +5416,43 @@ app.post('/api/network/predict-metrics', async (req, res) => {
           ec_score2: r.ec_score2 ?? 0,
           ec_top3: r.ec_top3 || '',
           ec_score3: r.ec_score3 ?? 0,
+          sources: {
+            cataPro: r.cataPro_source,
+            solubility: r.solubility_source,
+            tm: r.tm_source,
+            ec: r.ec_source,
+          },
           ...normMap.get(r.id),
         }))
         .sort((a, b) => b.predictedScore - a.predictedScore);
 
+      const realServiceUsage = {
+        cataPro: allRows.some((r) => r.cataPro_source === 'real'),
+        solubility: allRows.some((r) => r.solubility_source === 'real'),
+        ec: allRows.some((r) => r.ec_source === 'real'),
+        tm: allRows.some((r) => r.tm_source === 'real'),
+      };
+
       res.json({
-        ok: true, taskId, count: rows.length, recomputedCount: missingIds.length,
-        tmTarget, subWeights, smiles: smiles || null,
-        services: { cataPro: useCataPro, solubility: useSol, ec: useEC, tm: useTm },
+        ok: true,
+        taskId,
+        count: rows.length,
+        recomputedCount,
+        tmTarget,
+        subWeights,
+        smiles: smiles || null,
+        services: realServiceUsage,
         rows,
       });
       finishRuntimeTask('network/predict-metrics', true);
     } catch (err) {
       finishRuntimeTask('network/predict-metrics', false);
-      jsonError(res, 'Failed to predict candidate metrics', String(err));
+      jsonError(res, 'Failed to predict candidate metrics', err);
     }
   });
 });
-
 // ── Candidate Recommendation ──────────────────────────────────────
-app.post('/api/network/recommend-candidates', async (req, res) => {
+route.post('/api/network/recommend-candidates', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'network/recommend', taskId)) return;
 
@@ -5319,13 +5839,13 @@ app.post('/api/network/recommend-candidates', async (req, res) => {
       finishRuntimeTask('network/recommend', true);
     } catch (err) {
       finishRuntimeTask('network/recommend', false);
-      jsonError(res, 'Failed to compute candidate recommendations', String(err));
+      jsonError(res, 'Failed to compute candidate recommendations', err);
     }
   });
 });
 
 // --- Highlight recommended candidates in Cytoscape ---
-app.post('/api/network/highlight-cytoscape', async (req, res) => {
+route.post('/api/network/highlight-cytoscape', async (req, res) => {
   try {
     const ids = req.body?.ids;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -5377,12 +5897,12 @@ app.post('/api/network/highlight-cytoscape', async (req, res) => {
 
     res.json({ ok: true, selectedCount: matchingNames.length, requestedCount: ids.length, networkSuid: suid });
   } catch (err) {
-    jsonError(res, 'Failed to highlight in Cytoscape', String(err));
+    jsonError(res, 'Failed to highlight in Cytoscape', err);
   }
 });
 
 // --- Export recommended candidates as FASTA ---
-app.post('/api/network/export-recommended-fasta', async (req, res) => {
+route.post('/api/network/export-recommended-fasta', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const ids = req.body?.ids;
@@ -5436,16 +5956,19 @@ app.post('/api/network/export-recommended-fasta', async (req, res) => {
 
     res.json({ ok: true, fasta: lines.join('\n'), foundCount: found.size, requestedCount: ids.length });
   } catch (err) {
-    jsonError(res, 'Failed to export FASTA', String(err));
+    jsonError(res, 'Failed to export FASTA', err);
   }
 });
 
 // --- Startup validation ---
 if (!API_KEY) {
-  console.warn('WARNING: API_KEY is not set. All API endpoints are unauthenticated. Set API_KEY for production use.');
+  console.warn('NOTICE: API_KEY is not set. This is suitable only for local or trusted single-user environments.');
 }
-if (!allowedOrigins) {
-  console.warn('WARNING: ALLOWED_ORIGINS is not set. CORS allows all origins. Set ALLOWED_ORIGINS for production use.');
+if (configuredAllowedOrigins.length === 0) {
+  console.warn(`NOTICE: ALLOWED_ORIGINS is not set; using local-only defaults: ${allowedOrigins.join(', ')}`);
+}
+if (!['127.0.0.1', 'localhost', '::1'].includes(apiHost) && !API_KEY) {
+  console.warn(`WARNING: API is listening on ${apiHost} without API_KEY protection. Use this only on a trusted network.`);
 }
 
 // ========================================================================
@@ -5453,7 +5976,7 @@ if (!allowedOrigins) {
 // ========================================================================
 
 // --- BLAST DB Build ---
-app.post('/api/blast/build-db', async (req, res) => {
+route.post('/api/blast/build-db', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'blast/build-db', taskId)) {
     return;
@@ -5541,13 +6064,13 @@ app.post('/api/blast/build-db', async (req, res) => {
       finishRuntimeTask('blast/build-db', true);
     } catch (err) {
       finishRuntimeTask('blast/build-db', false);
-      jsonError(res, 'Failed to build BLAST DB', String(err));
+      jsonError(res, 'Failed to build BLAST DB', err);
     }
   });
 });
 
 // --- BLAST Search ---
-app.post('/api/blast/search', async (req, res) => {
+route.post('/api/blast/search', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'blast/search', taskId)) {
     return;
@@ -5793,13 +6316,13 @@ app.post('/api/blast/search', async (req, res) => {
       finishRuntimeTask('blast/search', true);
     } catch (err) {
       finishRuntimeTask('blast/search', false);
-      jsonError(res, 'Failed to run BLAST search', String(err));
+      jsonError(res, 'Failed to run BLAST search', err);
     }
   });
 });
 
 // --- BLAST Filter ---
-app.post('/api/blast/filter', async (req, res) => {
+route.post('/api/blast/filter', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'blast/filter', taskId)) {
     return;
@@ -5876,13 +6399,13 @@ app.post('/api/blast/filter', async (req, res) => {
       finishRuntimeTask('blast/filter', true);
     } catch (err) {
       finishRuntimeTask('blast/filter', false);
-      jsonError(res, 'Failed to filter BLAST hits', String(err));
+      jsonError(res, 'Failed to filter BLAST hits', err);
     }
   });
 });
 
 // --- BLAST Page (paginated browse) ---
-app.get('/api/blast/page', async (req, res) => {
+route.get('/api/blast/page', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
     const page = Math.max(1, Number(req.query.page || 1));
@@ -5904,12 +6427,12 @@ app.get('/api/blast/page', async (req, res) => {
       preview,
     });
   } catch (err) {
-    jsonError(res, 'Failed to load BLAST results page', String(err));
+    jsonError(res, 'Failed to load BLAST results page', err);
   }
 });
 
 // --- BLAST Annotate (NCBI taxonomy enrichment) ---
-app.post('/api/blast/annotate', async (req, res) => {
+route.post('/api/blast/annotate', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'blast/annotate', taskId)) {
     return;
@@ -6174,14 +6697,14 @@ app.post('/api/blast/annotate', async (req, res) => {
       finishRuntimeTask('blast/annotate', true);
     } catch (err) {
       finishRuntimeTask('blast/annotate', false);
-      jsonError(res, 'Failed to annotate BLAST hits', String(err));
+      jsonError(res, 'Failed to annotate BLAST hits', err);
     }
   });
 });
 
 // --- Periodic cleanup of stale runtimeStates (every 10 minutes) ---
 const RUNTIME_STATE_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
-setInterval(() => {
+const runtimeCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [taskId, state] of runtimeStates) {
     if (!state.active && state.updatedAt && now - state.updatedAt > RUNTIME_STATE_MAX_AGE_MS) {
@@ -6189,6 +6712,7 @@ setInterval(() => {
     }
   }
 }, 10 * 60 * 1000);
+runtimeCleanupTimer.unref();
 
 // ──────────────────────────────────────────────────────────
 // Compare Module — network intersection / merge endpoints
@@ -6243,7 +6767,7 @@ async function loadTaskNetworkSummary(taskId) {
   };
 }
 
-app.get('/api/compare/task-info', async (req, res) => {
+route.get('/api/compare/task-info', async (req, res) => {
   try {
     const taskA = String(req.query.taskA || '').trim();
     const taskB = String(req.query.taskB || '').trim();
@@ -6256,7 +6780,7 @@ app.get('/api/compare/task-info', async (req, res) => {
     ]);
     res.json({ ok: true, taskA: infoA, taskB: infoB });
   } catch (err) {
-    jsonError(res, 'Failed to load task info', String(err));
+    jsonError(res, 'Failed to load task info', err);
   }
 });
 
@@ -6350,7 +6874,7 @@ function matchSequences(dataA, dataB) {
   return matched;
 }
 
-app.post('/api/compare/intersect', async (req, res) => {
+route.post('/api/compare/intersect', async (req, res) => {
   try {
     const taskA = String(req.body?.taskA || '').trim();
     const taskB = String(req.body?.taskB || '').trim();
@@ -6476,11 +7000,11 @@ app.post('/api/compare/intersect', async (req, res) => {
 
     res.json(compareResultState);
   } catch (err) {
-    jsonError(res, 'Failed to intersect networks', String(err));
+    jsonError(res, 'Failed to intersect networks', err);
   }
 });
 
-app.post('/api/compare/merge', async (req, res) => {
+route.post('/api/compare/merge', async (req, res) => {
   try {
     const taskA = String(req.body?.taskA || '').trim();
     const taskB = String(req.body?.taskB || '').trim();
@@ -6591,13 +7115,44 @@ app.post('/api/compare/merge', async (req, res) => {
 
     res.json(compareResultState);
   } catch (err) {
-    jsonError(res, 'Failed to merge networks', String(err));
+    jsonError(res, 'Failed to merge networks', err);
   }
 });
 
-app.listen(apiPort, () => {
-  console.log(`EnzymeMiner backend API listening on http://0.0.0.0:${apiPort}`);
-  console.log(`pipelineRoot=${pipelineRoot}`);
-  console.log(`defaultWorkDir=${defaultWorkDir}`);
-  console.log(`tasksRoot=${tasksRoot}`);
+app.use((err, _req, res, next) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  const status = Number.isInteger(err?.status) ? err.status : 500;
+  const message = status >= 500 ? 'Internal server error' : String(err?.message || 'Bad request');
+  if (status >= 500) {
+    console.error(err);
+  }
+  res.status(status).json({
+    ok: false,
+    message,
+    ...(process.env.NODE_ENV === 'development' && status >= 500
+      ? { details: String(err?.stack || err) }
+      : {}),
+  });
 });
+
+function startServer({ host = apiHost, port = apiPort } = {}) {
+  const server = app.listen(port, host, () => {
+    const address = server.address();
+    const boundPort = typeof address === 'object' && address ? address.port : port;
+    console.log(`EnzymeMiner backend API listening on http://${host}:${boundPort}`);
+    console.log(`pipelineRoot=${pipelineRoot}`);
+    console.log(`defaultWorkDir=${defaultWorkDir}`);
+    console.log(`tasksRoot=${tasksRoot}`);
+  });
+  return server;
+}
+
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === __filename;
+if (isMainModule) {
+  startServer();
+}
+
+export { app, startServer };

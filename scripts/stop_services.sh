@@ -4,12 +4,21 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PID_DIR="$PROJECT_DIR/.pids"
 
-FRONTEND_PID_FILE="$PID_DIR/frontend.pid"
-BACKEND_PID_FILE="$PID_DIR/backend.pid"
+pid_is_expected() {
+  local pid="$1"
+  local marker="$2"
+  local cwd=""
+  local command_line=""
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  command_line="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+  [[ "$cwd" == "$PROJECT_DIR" && "$command_line" == *"$marker"* ]]
+}
 
 stop_by_pid_file() {
   local name="$1"
   local pid_file="$2"
+  local marker="$3"
 
   if [[ ! -f "$pid_file" ]]; then
     echo "[$name] pid file not found, skip"
@@ -19,17 +28,24 @@ stop_by_pid_file() {
   local pid
   pid="$(cat "$pid_file" 2>/dev/null || true)"
   if [[ -z "$pid" ]]; then
-    echo "[$name] pid file empty, remove"
     rm -f "$pid_file"
     return
   fi
 
   if kill -0 "$pid" 2>/dev/null; then
+    if ! pid_is_expected "$pid" "$marker"; then
+      echo "[$name] refusing to stop unexpected pid=$pid; removing stale pid file" >&2
+      rm -f "$pid_file"
+      return
+    fi
     echo "[$name] stopping pid=$pid"
     kill "$pid" 2>/dev/null || true
-    sleep 1
+    for _ in {1..20}; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
     if kill -0 "$pid" 2>/dev/null; then
-      echo "[$name] force kill pid=$pid"
+      echo "[$name] force killing pid=$pid"
       kill -9 "$pid" 2>/dev/null || true
     fi
   else
@@ -39,13 +55,7 @@ stop_by_pid_file() {
   rm -f "$pid_file"
 }
 
-stop_by_pid_file "frontend" "$FRONTEND_PID_FILE"
-stop_by_pid_file "backend" "$BACKEND_PID_FILE"
+stop_by_pid_file "frontend" "$PID_DIR/frontend.pid" "node_modules/vite/bin/vite.js"
+stop_by_pid_file "backend" "$PID_DIR/backend.pid" "backend/server.mjs"
 
-# fallback: kill by command signature in case pid files are stale
-# Match both dev server and preview server patterns
-pkill -f "vite.*--port=3000" 2>/dev/null || true
-pkill -f "vite.*preview.*--port=3000" 2>/dev/null || true
-pkill -f "node.*backend/server.mjs" 2>/dev/null || true
-
-echo "All stop commands issued."
+echo "All project-owned services stopped."

@@ -70,8 +70,8 @@ import {
   compareIntersect,
   compareMerge,
 } from './api';
-import type { BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, BrowserGraphNode, BrowserGraphEdge } from './api';
-import NetworkGraph from './NetworkGraph';
+import type { BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, BrowserGraphNode, BrowserGraphEdge } from './api';
+const NetworkGraph = React.lazy(() => import('./NetworkGraph'));
 
 type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'recommendation';
 type BlastView = 'dashboard' | 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'recommendation';
@@ -430,7 +430,7 @@ const WEIGHT_LABELS: { key: keyof RecommendWeights; label: string }[] = [
 
 const DEFAULT_PREDICTED_SUB_WEIGHTS: PredictedSubWeights = { kcat: 1 / 3, solubility: 1 / 3, tm: 1 / 3 };
 const PREDICTED_SUB_WEIGHT_LABELS: { key: keyof PredictedSubWeights; label: string }[] = [
-  { key: 'kcat', label: 'kcat' },
+  { key: 'kcat', label: 'kcat/Km' },
   { key: 'solubility', label: 'Solubility' },
   { key: 'tm', label: 'Tm' },
 ];
@@ -695,8 +695,8 @@ function PredictedMetricsPanel({
   const [smiles, setSmiles] = useState(() => {
     try { return localStorage.getItem('enzymeminer.smiles') || ''; } catch { return ''; }
   });
-  const [services, setServices] = useState<{ cataPro: boolean; solubility: boolean; ec: boolean } | null>(null);
-  const [predictProgress, setPredictProgress] = useState<{ current: number; total: number; done: boolean } | null>(null);
+  const [services, setServices] = useState<{ cataPro: boolean; solubility: boolean; ec: boolean; tm: boolean } | null>(null);
+  const [predictProgress, setPredictProgress] = useState<PredictionProgress | null>(null);
 
   // Persist SMILES to localStorage whenever it changes
   useEffect(() => {
@@ -711,8 +711,7 @@ function PredictedMetricsPanel({
       try {
         const data = await fetchRuntimeLogs(50);
         if (!cancelled && data.meta?.predictProgress) {
-          const pp = data.meta.predictProgress as { current: number; total: number; done?: boolean };
-          setPredictProgress({ current: pp.current, total: pp.total, done: !!pp.done });
+          setPredictProgress(data.meta.predictProgress);
         }
       } catch { /* ignore */ }
     };
@@ -742,6 +741,16 @@ function PredictedMetricsPanel({
     }
   };
 
+  const predictionPercent = predictProgress && predictProgress.total > 0
+    ? Math.min(100, Math.round((predictProgress.current / predictProgress.total) * 100))
+    : 0;
+  const predictorProgressRows = ([
+    ['cataPro', 'kcat/Km'],
+    ['solubility', 'Solubility'],
+    ['ec', 'EC'],
+    ['tm', 'Tm'],
+  ] as const).map(([key, label]) => ({ key, label, progress: predictProgress?.predictors?.[key] }));
+
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -754,6 +763,8 @@ function PredictedMetricsPanel({
             <span className={services.solubility ? 'text-green-700' : 'text-slate-400'}>Sol</span>
             <span className={`inline-block w-2 h-2 rounded-full ${services.ec ? 'bg-green-500' : 'bg-slate-300'}`} />
             <span className={services.ec ? 'text-green-700' : 'text-slate-400'}>EC</span>
+            <span className={`inline-block w-2 h-2 rounded-full ${services.tm ? 'bg-green-500' : 'bg-slate-300'}`} />
+            <span className={services.tm ? 'text-green-700' : 'text-slate-400'}>Tm</span>
           </div>
         )}
       </div>
@@ -803,24 +814,52 @@ function PredictedMetricsPanel({
         )}
       </div>
       {loading && (
-        <div className="space-y-1">
-          <div className="flex justify-between text-xs text-slate-500">
+        <div className="space-y-2 rounded-lg border border-sky-100 bg-sky-50/40 p-3">
+          <div className="flex flex-wrap justify-between gap-2 text-xs text-slate-600">
             <span>⏳ Running property predictions (kcat/Km, solubility, EC, Tm)...</span>
             {predictProgress && predictProgress.total > 0 && (
-              <span>{predictProgress.current}/{predictProgress.total}</span>
+              <span className="font-medium tabular-nums">
+                {predictProgress.current}/{predictProgress.total} ({predictionPercent}%)
+              </span>
             )}
           </div>
           <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-            <div 
-              className="h-full rounded-full bg-sky-500 progress-shimmer transition-all duration-300" 
-              style={{ 
-                width: predictProgress && predictProgress.total > 0 
-                  ? `${Math.min(100, Math.round((predictProgress.current / predictProgress.total) * 100))}%` 
-                  : '100%' 
-              }} 
+            <div
+              className="h-full rounded-full bg-sky-500 progress-shimmer transition-all duration-300"
+              style={{ width: `${predictionPercent}%` }}
             />
           </div>
-          <p className="text-[10px] text-slate-400">This may take a while for large datasets. Results are cached per task.</p>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+            <span>
+              Elapsed: {predictProgress
+                ? formatDurationMs(Math.max(predictProgress.elapsedMs, Date.now() - predictProgress.startedAt))
+                : '0s'}
+            </span>
+            <span className="font-medium text-sky-700">
+              Estimated remaining: {predictProgress && Number.isFinite(predictProgress.estimatedRemainingMs)
+                ? formatDurationMs(predictProgress.estimatedRemainingMs as number)
+                : 'estimating…'}
+            </span>
+          </div>
+          {predictProgress?.predictors && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 pt-1">
+              {predictorProgressRows.map(({ key, label, progress }) => progress && (
+                <div key={key} className="flex items-center justify-between gap-3 text-[10px] text-slate-500">
+                  <span className="font-medium text-slate-600">
+                    {label} <span className="font-normal text-slate-400">({progress.mode})</span>
+                  </span>
+                  <span className="tabular-nums text-right">
+                    {progress.current}/{progress.total}
+                    {progress.totalBatches > 0 && ` · batch ${progress.completedBatches}/${progress.totalBatches}`}
+                    {progress.status === 'done' && ' · done'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-slate-400">
+            Progress advances only when a service batch (or one Tm item) actually finishes. Results are cached per task.
+          </p>
         </div>
       )}
       {error && <div className="text-sm text-red-600">{error}</div>}
@@ -833,6 +872,7 @@ function PredictedMetricsPanel({
                 <th className="px-2 py-2 text-left">ID</th>
                 <th className="px-2 py-2 text-right">kcat (s⁻¹)</th>
                 <th className="px-2 py-2 text-right">Km (mM)</th>
+                <th className="px-2 py-2 text-right">kcat/Km</th>
                 <th className="px-2 py-2 text-right">Solubility</th>
                 <th className="px-2 py-2 text-right">EC Number</th>
                 <th className="px-2 py-2 text-right">Tm (°C)</th>
@@ -846,6 +886,7 @@ function PredictedMetricsPanel({
                   <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{r.id}</td>
                   <td className="px-2 py-1.5 text-right">{r.kcat.toFixed(3)}</td>
                   <td className="px-2 py-1.5 text-right">{r.km.toFixed(3)}</td>
+                  <td className="px-2 py-1.5 text-right">{r.catalyticEfficiency.toFixed(3)}</td>
                   <td className="px-2 py-1.5 text-right">{(r.solubility * 100).toFixed(1)}%</td>
                   <td className="px-2 py-1.5 text-right">
                     <EcTooltip r={r} />
@@ -895,7 +936,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       'reference-links'?: { current: number; total: number };
       'candidate-pairwise'?: { current: number; total: number };
     };
-    predictProgress?: { current: number; total: number; done?: boolean };
+    predictProgress?: PredictionProgress;
   }>({});
   const [runtimeLogs, setRuntimeLogs] = useState<string[]>([]);
   const [autoScrollLog, setAutoScrollLog] = useState(true);

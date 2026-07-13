@@ -1,5 +1,5 @@
 import { Component, type ReactNode } from 'react';
-import { StrictMode } from 'react';
+import { StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
@@ -63,7 +63,9 @@ class GlobalErrorBoundary extends Component<{ children: ReactNode }, { hasError:
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <GlobalErrorBoundary>
-      <App />
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>}>
+        <App />
+      </Suspense>
     </GlobalErrorBoundary>
   </StrictMode>,
 );

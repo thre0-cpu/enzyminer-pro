@@ -68,6 +68,9 @@ export function healthCheck() {
     workDir: string;
     taskId: string;
     pythonBin: string;
+    ready: boolean;
+    pythonAvailable: boolean;
+    pythonPackages: Record<string, boolean>;
     tools: Record<string, boolean>;
     predictionServices?: {
       cataPro: { url: string; online: boolean };
@@ -742,10 +745,39 @@ export type PredictedMetricsRow = {
   ec_score2: number;
   ec_top3: string;
   ec_score3: number;
+  catalyticEfficiency: number;
+  catalyticEfficiencyNorm: number;
   kcatNorm: number;
   solubilityNorm: number;
   tmNorm: number;
   predictedScore: number;
+  sources: {
+    cataPro: 'real' | 'mock';
+    solubility: 'real' | 'mock';
+    ec: 'real' | 'mock';
+    tm: 'real' | 'mock';
+  };
+};
+
+export type PredictorProgress = {
+  current: number;
+  total: number;
+  completedBatches: number;
+  totalBatches: number;
+  status: 'pending' | 'running' | 'done';
+  mode: 'real' | 'mock';
+  elapsedMs: number;
+  estimatedRemainingMs: number | null;
+};
+
+export type PredictionProgress = {
+  current: number;
+  total: number;
+  done?: boolean;
+  startedAt: number;
+  elapsedMs: number;
+  estimatedRemainingMs: number | null;
+  predictors: Partial<Record<'cataPro' | 'solubility' | 'ec' | 'tm', PredictorProgress>>;
 };
 
 export type PredictionServices = {
@@ -866,6 +898,7 @@ export function loadRuntimeLogs(limit = 200) {
       };
       blastAnnotateProgress?: number;
       blastAnnotatePhase?: string;
+      predictProgress?: PredictionProgress;
     };
     lines: string[];
   }>(`/api/runtime/logs?limit=${limit}`);

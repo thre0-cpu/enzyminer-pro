@@ -168,17 +168,32 @@ npm run dev:api
 npm run dev
 ```
 
-Vite 开发服务器运行在 `http://0.0.0.0:3000`，自动代理 `/api` 到 `http://127.0.0.1:8787`。
+Vite 开发服务器默认仅监听 `http://127.0.0.1:3000`，并自动代理 `/api` 到 `http://127.0.0.1:8787`。
 
 **可选环境变量：**
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `API_HOST` | `127.0.0.1` | 后端监听地址 |
 | `API_PORT` | `8787` | 后端端口 |
+| `FRONTEND_HOST` | `127.0.0.1` | 前端监听地址 |
+| `FRONTEND_MODE` | `dev` | `start.sh` 的前端模式；`preview` 会先重新构建，避免旧 `dist` |
 | `PIPELINE_ROOT` | 工作区根目录 | Pipeline 根目录 |
 | `PIPELINE_TASKS_ROOT` | `{PIPELINE_ROOT}/tasks` | 任务数据目录 |
-| `PIPELINE_PYTHON` | `python3` | Python 解释器路径 |
-| `API_KEY` | _(空)_ | API 认证密钥（生产环境建议设置） |
+| `PIPELINE_PYTHON` | 自动探测 `mining` 环境，否则 `python3` | Python 解释器路径 |
+| `API_KEY` | _(空)_ | 本机/受信任单用户环境的可选 API 密钥 |
+| `VITE_API_KEY` | _(空)_ | 浏览器请求使用的同一密钥；会进入前端包，不是秘密 |
+| `ALLOWED_ORIGINS` | 本机两个 3000 端口来源 | 允许访问后端的浏览器来源列表 |
+
+如需从受信任内网访问，可设置：
+
+```bash
+export API_HOST=0.0.0.0
+export FRONTEND_HOST=0.0.0.0
+export ALLOWED_ORIGINS=http://192.168.1.20:3000
+```
+
+请将示例 IP 替换为运行本项目主机的实际内网地址。`API_KEY` 只用于本机/受信任单用户场景的便利保护，不构成多用户认证体系。
 
 ## 5. WSL 外部访问（Windows 浏览器）
 
@@ -240,8 +255,8 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 | 预测指标 | 说明 | 评分逻辑 | 外部服务 |
 |----------|------|----------|----------|
 | **kcat/Km** | 催化效率 | 值越大越好（min-max 归一化） | CataPro (可选) |
-| **Solubility** | 溶解度 (%) | 值越大越好（min-max 归一化） | SolPred (可选) |
-| **EC Number** | 酶分类号（Top-3） | 基于置信度加权 | DeepEC (可选) |
+| **Solubility** | 溶解度概率 | 值越大越好（min-max 归一化） | PLM_Sol (可选) |
+| **EC Number** | 酶分类号（Top-3） | 展示预测结果与置信度 | CLEAN (可选) |
 | **Tm** | 熔解温度 (°C) | 越接近「目标温度」越好（高斯衰减） | TmPred (可选) |
 
 四个指标通过**可拖拽权重条**（默认各 1/3）实时调整占比，并计算加权综合评分（`predictedScore`）。
@@ -260,9 +275,9 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 
 **预测服务状态**：Dashboard 的健康检查面板会显示各预测服务（kcat/Km、Solubility、EC Number、Tm）的在线/离线状态及服务地址。Prediction 页面标题旁也会以绿/灰圆点显示各服务状态。
 
-**进度条**：点击预测按钮后会显示 shimmer 动画进度条，提示正在进行预测计算。结果缓存到任务目录下的 `predicted_metrics.csv`，重复打开不会重新调用 API；"Recompute All" 按钮可强制重新计算。
+**进度条与 ETA**：进度按“候选序列 × 预测器”工作单元统计。CataPro、PLM_Sol、CLEAN 每个 HTTP 批次完成后更新一次，Tm 每条完成后更新一次；界面同时显示各预测器的条目/批次数和预计剩余时间。服务在批次内部没有进度接口，因此界面不会伪造批次内部百分比。结果缓存到任务目录下的 `predicted_metrics.csv`；"Recompute All" 可强制重新计算。
 
-> **后端说明**：当前预测 API 使用确定性哈希伪随机数模拟（同一序列每次结果一致），`server.mjs` 中的预测函数带有 `TODO` 注释，等真实 API 就绪后只需替换函数体即可。外部服务地址通过环境变量 `CATAPRO_URL`、`SOLUBILITY_URL`、`EC_URL`、`TM_URL` 配置，默认分别为 `http://localhost:8001`、`http://localhost:8002`、`http://localhost:8003`、`http://localhost:8005`。
+**批量调用与回退**：CataPro、PLM_Sol、CLEAN 分别调用 `/predict/batch`，默认每个应用层批次 64 条（`PREDICTION_BATCH_SIZE`，最大 256）。单条校验失败或整个批次请求失败时，仅对应结果使用确定性 mock 回退并记录 `source=mock`，下次运行会在真实服务在线时重试。Tm 暂无批量接口，仍调用 `/predict`。外部服务地址由 `CATAPRO_URL`、`SOL_URL`、`EC_URL`、`TM_URL` 配置，默认端口分别为 8003、8004、8000、8005；单批请求超时由 `PREDICTION_REQUEST_TIMEOUT_MS` 配置，默认 600000 ms。
 
 ### Strategy 2: Comprehensive Recommendation（综合推荐）
 

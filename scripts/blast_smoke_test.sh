@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-BASE_URL="http://127.0.0.1:8787"
+BASE_URL="${BASE_URL:-http://127.0.0.1:8787}"
 TASK_NAME="blast-smoke-$(date +%m%d%H%M)"
 
+auth_args=()
+if [[ -n "${API_KEY:-}" ]]; then
+  auth_args=(-H "x-api-key: $API_KEY")
+fi
+
 post() {
-  curl -sS --max-time 600 -X POST "$BASE_URL$1" -H 'Content-Type: application/json' -d "$2"
+  curl -sS --max-time 600 -X POST "$BASE_URL$1" "${auth_args[@]}" -H 'Content-Type: application/json' -d "$2"
 }
 get() {
-  curl -sS --max-time 30 "$BASE_URL$1"
+  curl -sS --max-time 30 "$BASE_URL$1" "${auth_args[@]}"
 }
 
 echo "=== EnzymeMiner BLAST Smoke Test ==="
@@ -17,13 +22,15 @@ echo ""
 echo "[0/9] Health..."
 HEALTH=$(get "/api/health")
 echo "$HEALTH" | python3 -c "import sys,json; d=json.load(sys.stdin); print('PASS | Health' if d.get('ok') else 'FAIL | Health')" 2>/dev/null
+TASKS_ROOT=$(echo "$HEALTH" | python3 -c "import sys,json,os; d=json.load(sys.stdin); print(os.path.dirname(d.get('workDir','')))" 2>/dev/null)
+[[ -n "$TASKS_ROOT" ]] || { echo "FATAL: health response did not include workDir" >&2; exit 1; }
 
 echo "[1/9] Creating task..."
 CREATE=$(post "/api/tasks" "{\"name\":\"$TASK_NAME\",\"module\":\"blast\"}")
 TASK_ID=$(echo "$CREATE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('task',{}).get('id',''))" 2>/dev/null)
 echo "  -> Task ID: $TASK_ID"
 [ -z "$TASK_ID" ] && echo "FATAL" && exit 1
-WORK="/home/threo/aox_project/tasks/$TASK_ID"
+WORK="$TASKS_ROOT/$TASK_ID"
 
 echo "[2/9] Fetching references (P07003, P0ABI8)..."
 REF=$(post "/api/reference/fetch" "{\"taskId\":\"$TASK_ID\",\"email\":\"smoke@test.com\",\"accessionList\":[\"P07003\",\"P0ABI8\"]}")
