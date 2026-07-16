@@ -358,7 +358,6 @@ test('similarity load and normal compute reuse the exact existing CSV files with
     body: JSON.stringify({
       similarityMethod: 'smith-waterman',
       includeReferenceLinks: false,
-      sourceFasta: '/definitely/not/a/real/source.fasta',
       forceRecompute: false,
     }),
   });
@@ -371,6 +370,10 @@ test('similarity load and normal compute reuse the exact existing CSV files with
   assert.equal(await fs.readFile(path.join(taskDir, 'nodes.csv'), 'utf-8'), nodesCsv);
   assert.equal(await fs.readFile(path.join(taskDir, 'edges_similarity.csv'), 'utf-8'), edgesCsv);
   await assert.rejects(fs.access(path.join(taskDir, 'network_build_meta.json')));
+
+  const legacyStatus = await api(`/api/network/similarity-status?taskId=${taskId}&similarityMethod=smith-waterman&includeReferenceLinks=false`);
+  assert.equal(legacyStatus.response.status, 200);
+  assert.equal(legacyStatus.body.state, 'legacy');
 
   const missing = await api('/api/network/data?taskId=similarity-cache-missing');
   assert.equal(missing.response.status, 404);
@@ -441,8 +444,18 @@ test('similarity uses exactly the clustered FASTA representatives and rebuilds s
 
   const status = await api(`/api/network/similarity-status?taskId=${taskId}`);
   assert.equal(status.response.status, 200);
+  assert.equal(status.body.state, 'ready');
   assert.equal(status.body.stale, false);
   assert.equal(status.body.nodeTotal, 2);
+
+  // The signature prevents a CSV built with one method from being displayed
+  // as if it matched a different method. This remains a read-only check.
+  const staleByMethod = await api(`/api/network/similarity-status?taskId=${taskId}&sourceFasta=${encodeURIComponent(clusteredFastaPath)}&similarityMethod=smith-waterman&includeReferenceLinks=false`);
+  assert.equal(staleByMethod.response.status, 200);
+  assert.equal(staleByMethod.body.state, 'stale');
+  const blockedStaleLoad = await api(`/api/network/data?taskId=${taskId}&sourceFasta=${encodeURIComponent(clusteredFastaPath)}&similarityMethod=smith-waterman&includeReferenceLinks=false`);
+  assert.equal(blockedStaleLoad.response.status, 409);
+  assert.equal(blockedStaleLoad.body.stale, true);
   await assert.rejects(fs.access(path.join(taskDir, '.network_similarity_stale.json')));
 });
 
@@ -571,6 +584,21 @@ test('prediction uses kcat/Km, calls real Tm, and invalidates cache context', as
 
   const cached = await requestPrediction('CCO');
   assert.equal(cached.body.recomputedCount, 0);
+
+  const readyStatus = await api('/api/network/prediction-status?taskId=prediction-task&smiles=CCO');
+  assert.equal(readyStatus.response.status, 200);
+  assert.equal(readyStatus.body.state, 'ready');
+  assert.equal(readyStatus.body.cachedCount, 2);
+  const cachedRead = await api('/api/network/predicted-metrics?taskId=prediction-task&smiles=CCO&kcatWeight=1&solubilityWeight=0&tmWeight=0');
+  assert.equal(cachedRead.response.status, 200);
+  assert.equal(cachedRead.body.recomputedCount, 0);
+  assert.equal(cachedRead.body.rows.length, 2);
+
+  const staleBySmiles = await api('/api/network/prediction-status?taskId=prediction-task&smiles=CCC');
+  assert.equal(staleBySmiles.response.status, 200);
+  assert.equal(staleBySmiles.body.state, 'stale');
+  const blockedCachedRead = await api('/api/network/predicted-metrics?taskId=prediction-task&smiles=CCC');
+  assert.equal(blockedCachedRead.response.status, 409);
 
   const beforeSmilesChange = {
     cataPro: fakeStats.cataProBatches.length,

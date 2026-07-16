@@ -614,7 +614,18 @@ export function runClustering(inputFasta: string, identity: number, wordSize: nu
   });
 }
 
-export function loadNetworkData() {
+export function loadNetworkData(opts?: {
+  sourceFasta?: string;
+  referenceFasta?: string;
+  includeReferenceLinks?: boolean;
+  similarityMethod?: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
+}) {
+  const params = new URLSearchParams();
+  if (opts?.sourceFasta) params.set('sourceFasta', opts.sourceFasta);
+  if (opts?.referenceFasta) params.set('referenceFasta', opts.referenceFasta);
+  if (typeof opts?.includeReferenceLinks === 'boolean') params.set('includeReferenceLinks', String(opts.includeReferenceLinks));
+  if (opts?.similarityMethod) params.set('similarityMethod', opts.similarityMethod);
+  const query = params.toString();
   return request<{
     edges: Array<Record<string, string>>;
     nodes: Array<Record<string, string>>;
@@ -622,7 +633,7 @@ export function loadNetworkData() {
     nodeTotal?: number;
     generated: false;
     reused: true;
-  }>('/api/network/data');
+  }>(`/api/network/data${query ? `?${query}` : ''}`);
 }
 
 export function computeNetworkSimilarity(opts?: {
@@ -657,7 +668,20 @@ export function computeNetworkSimilarity(opts?: {
   });
 }
 
-export function loadNetworkSimilarityStatus() {
+export type SimilarityArtifactState = 'missing' | 'ready' | 'stale' | 'legacy';
+
+export function loadNetworkSimilarityStatus(opts?: {
+  sourceFasta?: string;
+  referenceFasta?: string;
+  includeReferenceLinks?: boolean;
+  similarityMethod?: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
+}) {
+  const params = new URLSearchParams();
+  if (opts?.sourceFasta) params.set('sourceFasta', opts.sourceFasta);
+  if (opts?.referenceFasta) params.set('referenceFasta', opts.referenceFasta);
+  if (typeof opts?.includeReferenceLinks === 'boolean') params.set('includeReferenceLinks', String(opts.includeReferenceLinks));
+  if (opts?.similarityMethod) params.set('similarityMethod', opts.similarityMethod);
+  const query = params.toString();
   return request<{
     taskId: string;
     exists: boolean;
@@ -667,9 +691,35 @@ export function loadNetworkSimilarityStatus() {
     edgeTotal: number;
     nodesCsv: string;
     edgesCsv: string;
+    state: SimilarityArtifactState;
+    reason: string;
     stale?: boolean;
     staleReason?: string | null;
-  }>('/api/network/similarity-status');
+    candidateFasta?: string | null;
+    referenceFasta?: string | null;
+    similarityMethod?: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
+    includeReferenceLinks?: boolean;
+    generatedAt?: number | null;
+  }>(`/api/network/similarity-status${query ? `?${query}` : ''}`);
+}
+
+export type PredictionArtifactState = 'missing' | 'ready' | 'stale';
+
+export function loadPredictionMetricsStatus(smiles?: string) {
+  const params = new URLSearchParams();
+  if (smiles) params.set('smiles', smiles);
+  const query = params.toString();
+  return request<{
+    taskId: string;
+    state: PredictionArtifactState;
+    reason: string;
+    candidateCount: number;
+    cachedCount: number;
+    pendingSequenceCount: number;
+    pendingPredictorUnits: number;
+    generatedAt: string | null;
+    sourceFasta: string | null;
+  }>(`/api/network/prediction-status${query ? `?${query}` : ''}`);
 }
 
 export type BrowserGraphNode = {
@@ -910,6 +960,29 @@ export type PredictionServices = {
   ec: { url: string; online: boolean };
   tm: { url: string; online: boolean };
 };
+
+export function loadCachedPredictionMetrics(opts?: {
+  subWeights?: Partial<PredictedSubWeights>;
+  tmTarget?: number;
+  smiles?: string;
+}) {
+  const params = new URLSearchParams();
+  if (opts?.smiles) params.set('smiles', opts.smiles);
+  if (typeof opts?.tmTarget === 'number') params.set('tmTarget', String(opts.tmTarget));
+  if (typeof opts?.subWeights?.kcat === 'number') params.set('kcatWeight', String(opts.subWeights.kcat));
+  if (typeof opts?.subWeights?.solubility === 'number') params.set('solubilityWeight', String(opts.subWeights.solubility));
+  if (typeof opts?.subWeights?.tm === 'number') params.set('tmWeight', String(opts.subWeights.tm));
+  const query = params.toString();
+  return request<{
+    count: number;
+    recomputedCount: number;
+    tmTarget: number;
+    subWeights: PredictedSubWeights;
+    smiles: string | null;
+    services: { cataPro: boolean; solubility: boolean; ec: boolean; tm: boolean };
+    rows: PredictedMetricsRow[];
+  }>(`/api/network/predicted-metrics${query ? `?${query}` : ''}`);
+}
 
 export function predictNetworkMetrics(opts?: {
   forceRecompute?: boolean;

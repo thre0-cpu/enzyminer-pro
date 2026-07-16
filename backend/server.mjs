@@ -1206,6 +1206,41 @@ function computePredictedNormalization(rows, subWeights, tmTarget) {
   return out;
 }
 
+function formatPredictedMetricsRows(allRows, subWeights, tmTarget) {
+  const normMap = computePredictedNormalization(allRows, subWeights, tmTarget);
+  return allRows
+    .map((row) => ({
+      id: row.id,
+      kcat: row.kcat,
+      km: row.km ?? 0,
+      solubility: row.solubility,
+      tm: row.tm,
+      ec_top1: row.ec_top1 || '',
+      ec_score1: row.ec_score1 ?? 0,
+      ec_top2: row.ec_top2 || '',
+      ec_score2: row.ec_score2 ?? 0,
+      ec_top3: row.ec_top3 || '',
+      ec_score3: row.ec_score3 ?? 0,
+      sources: {
+        cataPro: row.cataPro_source,
+        solubility: row.solubility_source,
+        tm: row.tm_source,
+        ec: row.ec_source,
+      },
+      ...normMap.get(row.id),
+    }))
+    .sort((a, b) => b.predictedScore - a.predictedScore);
+}
+
+function summarizePredictionServiceUsage(rows) {
+  return {
+    cataPro: rows.some((row) => row.cataPro_source === 'real'),
+    solubility: rows.some((row) => row.solubility_source === 'real'),
+    ec: rows.some((row) => row.ec_source === 'real'),
+    tm: rows.some((row) => row.tm_source === 'real'),
+  };
+}
+
 function normalizePredictedSubWeights(raw) {
   const kcat = Number.isFinite(Number(raw?.kcat)) ? Math.max(0, Number(raw.kcat)) : 1 / 3;
   const solubility = Number.isFinite(Number(raw?.solubility)) ? Math.max(0, Number(raw.solubility)) : 1 / 3;
@@ -1311,11 +1346,135 @@ function predictionNeedsRecompute({
   return !predictionInputContextMatches({
     predictor,
     id,
+    row,
     cachedContext,
     currentContext,
     cachedSequenceHashes,
     currentSequenceHashes,
   }) || !predictionRowHasValidValue(row, predictor);
+}
+
+async function getPredictionArtifactStatus(workDir, { smiles = '' } = {}) {
+  let nodeRows = [];
+  try {
+    ({ rows: nodeRows } = await readCsvRows(path.join(workDir, 'nodes.csv')));
+  } catch {
+    return {
+      state: 'missing',
+      reason: 'Sequence similarity results are required before property prediction.',
+      candidateCount: 0,
+      cachedCount: 0,
+      pendingSequenceCount: 0,
+      pendingPredictorUnits: 0,
+      generatedAt: null,
+      sourceFasta: null,
+    };
+  }
+
+  const candidateIds = nodeRows
+    .filter((node) => String(node.is_reference || '') !== '1')
+    .map((node) => String(node.id || '').trim())
+    .filter(Boolean);
+  if (!candidateIds.length) {
+    return {
+      state: 'missing',
+      reason: 'No candidate sequences are available in the similarity results.',
+      candidateCount: 0,
+      cachedCount: 0,
+      pendingSequenceCount: 0,
+      pendingPredictorUnits: 0,
+      generatedAt: null,
+      sourceFasta: null,
+    };
+  }
+
+  const sourceFasta = await firstExistingPath(resolveNetworkSourceFasta(workDir));
+  if (!sourceFasta) {
+    return {
+      state: 'missing',
+      reason: 'Candidate FASTA was not found for property prediction.',
+      candidateCount: candidateIds.length,
+      cachedCount: 0,
+      pendingSequenceCount: candidateIds.length,
+      pendingPredictorUnits: candidateIds.length * PREDICTION_NAMES.length,
+      generatedAt: null,
+      sourceFasta: null,
+    };
+  }
+
+  const fastaText = await fs.readFile(sourceFasta, 'utf-8');
+  const seqLookup = buildSequenceLookup(parseFastaRecords(fastaText));
+  const normalizedSmiles = String(smiles || '').trim();
+  // Availability/mode does not invalidate a completed cache: normal runs must
+  // keep using mock results until the user explicitly chooses recomputation.
+  const currentContext = buildPredictionCacheContext({
+    candidateIds,
+    seqLookup,
+    smiles: normalizedSmiles,
+    modes: { cataPro: Boolean(normalizedSmiles), solubility: false, ec: false, tm: false },
+  });
+  const [cachedMeta, existing] = await Promise.all([
+    loadPredictionCacheMeta(workDir),
+    loadPredictedMetricsMap(workDir),
+  ]);
+  const cachedSequenceHashes = sequenceHashMapFromCacheContext(cachedMeta);
+  const currentSequenceHashes = sequenceHashMapFromCacheContext(currentContext);
+  const pendingIds = new Set();
+  let pendingPredictorUnits = 0;
+  let cachedCount = 0;
+
+  for (const id of candidateIds) {
+    const sequence = seqLookup.get(id);
+    const row = existing.get(id);
+    let sequenceReady = Boolean(sequence);
+    for (const predictor of PREDICTION_NAMES) {
+      const needsRecompute = !sequence || predictionNeedsRecompute({
+        predictor,
+        id,
+        row,
+        cachedContext: cachedMeta,
+        currentContext,
+        cachedSequenceHashes,
+        currentSequenceHashes,
+        forceRecompute: false,
+      });
+      if (needsRecompute) {
+        pendingPredictorUnits += 1;
+        pendingIds.add(id);
+        sequenceReady = false;
+      }
+    }
+    if (sequenceReady) cachedCount += 1;
+  }
+
+  if (pendingPredictorUnits === 0) {
+    return {
+      state: 'ready',
+      reason: 'Cached property predictions match the current candidate sequences and SMILES.',
+      candidateCount: candidateIds.length,
+      cachedCount,
+      pendingSequenceCount: 0,
+      pendingPredictorUnits: 0,
+      generatedAt: cachedMeta?.generatedAt || null,
+      sourceFasta,
+    };
+  }
+
+  const reason = !cachedMeta
+    ? 'No verifiable property-prediction cache was found for the current candidates.'
+    : normalizedSmiles !== String(cachedMeta.smiles || '')
+      ? 'Substrate SMILES changed; kcat/Km predictions need updating.'
+      : 'Candidate sequences or cached predictor values changed.';
+  return {
+    state: existing.size ? 'stale' : 'missing',
+    reason,
+    candidateCount: candidateIds.length,
+    cachedCount,
+    pendingSequenceCount: pendingIds.size,
+    pendingPredictorUnits,
+    generatedAt: cachedMeta?.generatedAt || null,
+    sourceFasta,
+  };
 }
 
 function sanitizeFastaId(value) {
@@ -3131,11 +3290,147 @@ async function readNetworkBuildMeta(workDir) {
 
 async function writeNetworkBuildMeta(workDir, meta) {
   const payload = {
-    formatVersion: 1,
+    formatVersion: 2,
     builtAt: Date.now(),
     ...meta,
   };
   await fs.writeFile(networkBuildMetaPath(workDir), JSON.stringify(payload, null, 2), 'utf-8');
+}
+
+function resolveOptionalNetworkFastaPath(workDir, rawPath) {
+  const text = String(rawPath || '').trim();
+  if (!text) return null;
+  const resolved = path.isAbsolute(text) ? path.resolve(text) : path.resolve(workDir, text);
+  assertPathInsideDir(resolved, pipelineRoot);
+  return resolved;
+}
+
+async function resolveNetworkBuildInputPaths(workDir, opts = {}) {
+  let sourceFastaPath = resolveOptionalNetworkFastaPath(workDir, opts?.sourceFastaPath);
+  if (sourceFastaPath) {
+    try {
+      await fs.access(sourceFastaPath);
+    } catch {
+      sourceFastaPath = null;
+    }
+  }
+  if (!sourceFastaPath) {
+    sourceFastaPath = await firstExistingPath(resolveNetworkSourceFasta(workDir));
+  }
+
+  const requestedReference = resolveOptionalNetworkFastaPath(workDir, opts?.referenceFastaPath);
+  const referenceFastaPath = requestedReference || await resolveDefaultReferenceFasta(workDir);
+  return { sourceFastaPath, referenceFastaPath };
+}
+
+async function fingerprintNetworkFasta(filePath) {
+  if (!filePath) return null;
+  try {
+    const [stat, content] = await Promise.all([fs.stat(filePath), fs.readFile(filePath)]);
+    return {
+      path: filePath,
+      size: stat.size,
+      mtimeMs: Math.round(stat.mtimeMs),
+      sha256: createHash('sha256').update(content).digest('hex'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function buildNetworkArtifactContext(workDir, opts = {}) {
+  const includeReferenceLinks = opts?.includeReferenceLinks === true;
+  const similarityMethod = normalizeSimilarityMethod(opts?.similarityMethod);
+  const { sourceFastaPath, referenceFastaPath } = await resolveNetworkBuildInputPaths(workDir, opts);
+  return {
+    contextVersion: 1,
+    pairwiseThresholdPct: 0,
+    includeReferenceLinks,
+    similarityMethod,
+    sourceFastaPath: sourceFastaPath || null,
+    referenceFastaPath: referenceFastaPath || null,
+    sourceFingerprint: await fingerprintNetworkFasta(sourceFastaPath),
+    referenceFingerprint: await fingerprintNetworkFasta(referenceFastaPath),
+  };
+}
+
+function networkArtifactContextMatches(meta, current) {
+  if (!meta || Number(meta.formatVersion) < 2 || !meta.sourceFingerprint) return false;
+  return meta.pairwiseThresholdPct === current.pairwiseThresholdPct
+    && meta.includeReferenceLinks === current.includeReferenceLinks
+    && meta.similarityMethod === current.similarityMethod
+    && meta.sourceFingerprint?.sha256 === current.sourceFingerprint?.sha256
+    && meta.referenceFingerprint?.sha256 === current.referenceFingerprint?.sha256;
+}
+
+async function getNetworkSimilarityArtifactStatus(workDir, opts = {}) {
+  const nodesPath = path.join(workDir, 'nodes.csv');
+  const edgesPath = path.join(workDir, 'edges_similarity.csv');
+  const staleMeta = await readNetworkStaleMeta(workDir);
+  let nodeTotal = 0;
+  let edgeTotal = 0;
+  let nodesExists = false;
+  let edgesExists = false;
+  try {
+    const preview = await readCsvPreview(nodesPath, 1);
+    nodeTotal = Number(preview.total || 0);
+    nodesExists = true;
+  } catch { /* no nodes CSV */ }
+  try {
+    const preview = await readCsvPreview(edgesPath, 1);
+    edgeTotal = Number(preview.total || 0);
+    edgesExists = true;
+  } catch { /* no edges CSV */ }
+
+  const exists = nodesExists && edgesExists;
+  const buildMeta = exists ? await readNetworkBuildMeta(workDir) : null;
+  // A caller that omits the optional setting query parameters is asking to
+  // inspect the stored result, not to reinterpret it using today's defaults.
+  // Interactive callers always send their selected settings; preserving the
+  // recorded values here keeps direct/read-only API consumers compatible.
+  const contextOpts = { ...opts };
+  if (buildMeta && Number(buildMeta.formatVersion) >= 2) {
+    if (typeof opts?.includeReferenceLinks !== 'boolean') {
+      contextOpts.includeReferenceLinks = buildMeta.includeReferenceLinks === true;
+    }
+    if (!opts?.similarityMethod && buildMeta.similarityMethod) {
+      contextOpts.similarityMethod = buildMeta.similarityMethod;
+    }
+  }
+  const currentContext = await buildNetworkArtifactContext(workDir, contextOpts);
+  let state = 'missing';
+  let reason = 'No completed similarity CSV files were found.';
+  if (exists && staleMeta) {
+    state = 'stale';
+    reason = staleMeta.reason === 'clustering-output-changed'
+      ? 'Clustering output changed after these similarity files were generated.'
+      : 'The existing similarity files were marked as outdated.';
+  } else if (exists && (!buildMeta || Number(buildMeta.formatVersion) < 2 || !buildMeta.sourceFingerprint)) {
+    state = 'legacy';
+    reason = 'Existing CSV files have no verifiable input signature.';
+  } else if (exists && !networkArtifactContextMatches(buildMeta, currentContext)) {
+    state = 'stale';
+    reason = 'Candidate/reference FASTA content or similarity settings changed.';
+  } else if (exists) {
+    state = 'ready';
+    reason = 'Existing results match the current FASTA files and similarity settings.';
+  }
+
+  return {
+    state,
+    reason,
+    exists,
+    nodesExists,
+    edgesExists,
+    nodeTotal,
+    edgeTotal,
+    nodesPath,
+    edgesPath,
+    stale: state === 'stale',
+    staleReason: state === 'stale' ? reason : null,
+    buildMeta,
+    currentContext,
+  };
 }
 
 async function ensureNetworkFiles(workDir, opts = {}) {
@@ -3144,33 +3439,14 @@ async function ensureNetworkFiles(workDir, opts = {}) {
   const includeReferenceLinks = opts?.includeReferenceLinks === true;
   const similarityMethod = normalizeSimilarityMethod(opts?.similarityMethod);
   const forceRebuild = opts?.forceRebuild === true;
-  const resolveOptionalFastaPath = (rawPath) => {
-    const text = String(rawPath || '').trim();
-    if (!text) {
-      return null;
-    }
-    const resolved = path.isAbsolute(text) ? path.resolve(text) : path.resolve(workDir, text);
-    assertPathInsideDir(resolved, pipelineRoot);
-    return resolved;
-  };
-  const sourceFastaPath = resolveOptionalFastaPath(opts?.sourceFastaPath);
-  const referenceFastaPath = resolveOptionalFastaPath(opts?.referenceFastaPath);
 
   const buildFreshNetworkFiles = async () => {
     const clusteredFasta = path.join(workDir, 'candidates_cdhit85.fasta');
     const clusterFile = `${clusteredFasta}.clstr`;
-    const autoSourceFasta = await firstExistingPath(resolveNetworkSourceFasta(workDir));
-    let sourceFasta = sourceFastaPath;
-    if (sourceFasta) {
-      try {
-        await fs.access(sourceFasta);
-      } catch {
-        pushRuntimeLine(`[network] source FASTA not found: ${sourceFasta}; fallback to auto-detected source`);
-        sourceFasta = null;
-      }
-    }
-    if (!sourceFasta) {
-      sourceFasta = autoSourceFasta;
+    const requestedSourceFasta = resolveOptionalNetworkFastaPath(workDir, opts?.sourceFastaPath);
+    const { sourceFastaPath: sourceFasta, referenceFastaPath: referenceFasta } = await resolveNetworkBuildInputPaths(workDir, opts);
+    if (requestedSourceFasta && requestedSourceFasta !== sourceFasta) {
+      pushRuntimeLine(`[network] source FASTA not found: ${requestedSourceFasta}; fallback to auto-detected source`);
     }
     if (!sourceFasta) {
       throw new Error('No candidate FASTA found. Please set Candidate FASTA path on Similarity page.');
@@ -3192,7 +3468,6 @@ async function ensureNetworkFiles(workDir, opts = {}) {
       pushRuntimeLine('[network] cd-hit auto-clustering complete');
     }
 
-    const referenceFasta = referenceFastaPath || await resolveDefaultReferenceFasta(workDir);
     // Persist the full similarity graph once and apply threshold filtering later
     // for browser/Cytoscape views. This avoids "poisoning" task artifacts with
     // whichever threshold happened to be selected on the first load/push.
@@ -3204,13 +3479,13 @@ async function ensureNetworkFiles(workDir, opts = {}) {
       includeReferenceLinks,
       similarityMethod,
     });
-    await writeNetworkBuildMeta(workDir, {
-      pairwiseThresholdPct: buildPairwiseThresholdPct,
-      includeReferenceLinks,
-      similarityMethod,
+    const artifactContext = await buildNetworkArtifactContext(workDir, {
       sourceFastaPath: sourceFasta,
       referenceFastaPath: referenceFasta,
+      includeReferenceLinks,
+      similarityMethod,
     });
+    await writeNetworkBuildMeta(workDir, artifactContext);
     await clearNetworkArtifactsStale(workDir);
     return { nodesPath: built.nodesPath, edgesPath: built.edgesPath, generated: true };
   };
@@ -5284,34 +5559,25 @@ route.post('/api/network/compute-similarity', async (req, res) => {
       const nodesPath = path.join(workDir, 'nodes.csv');
       const edgesPath = path.join(workDir, 'edges_similarity.csv');
       const staleMeta = await readNetworkStaleMeta(workDir);
+      const effectiveSourceFasta = sourceFastaPath || String(staleMeta?.sourceFastaPath || '');
+      const artifactStatus = await getNetworkSimilarityArtifactStatus(workDir, {
+        sourceFastaPath: effectiveSourceFasta,
+        referenceFastaPath,
+        includeReferenceLinks,
+        similarityMethod,
+      });
 
-      let existingNodeTotal = 0;
-      let existingEdgeTotal = 0;
-      let existingFilesReady = false;
-      try {
-        const [nodesPreview, edgesPreview] = await Promise.all([
-          readCsvPreview(nodesPath, 1),
-          readCsvPreview(edgesPath, 1),
-        ]);
-        existingNodeTotal = Number(nodesPreview.total || 0);
-        existingEdgeTotal = Number(edgesPreview.total || 0);
-        existingFilesReady = existingNodeTotal > 0;
-      } catch {
-        existingFilesReady = false;
-      }
-
-      if (existingFilesReady && !forceRecompute && !staleMeta) {
-        const buildMeta = await readNetworkBuildMeta(workDir);
-        pushRuntimeLine(`[network] reused existing similarity artifacts: nodes=${existingNodeTotal}, edges=${existingEdgeTotal}; no alignment was run`);
+      if (artifactStatus.state === 'ready' && !forceRecompute) {
+        pushRuntimeLine(`[network] reused verified similarity artifacts: nodes=${artifactStatus.nodeTotal}, edges=${artifactStatus.edgeTotal}; no alignment was run`);
         res.json({
           ok: true,
           nodesCsv: nodesPath,
           edgesCsv: edgesPath,
-          nodes: existingNodeTotal,
-          edges: existingEdgeTotal,
-          similarityMethod: buildMeta?.similarityMethod || null,
-          includeReferenceLinks: typeof buildMeta?.includeReferenceLinks === 'boolean'
-            ? buildMeta.includeReferenceLinks
+          nodes: artifactStatus.nodeTotal,
+          edges: artifactStatus.edgeTotal,
+          similarityMethod: artifactStatus.buildMeta?.similarityMethod || null,
+          includeReferenceLinks: typeof artifactStatus.buildMeta?.includeReferenceLinks === 'boolean'
+            ? artifactStatus.buildMeta.includeReferenceLinks
             : null,
           reused: true,
           generated: false,
@@ -5321,8 +5587,31 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         return;
       }
 
-      if (staleMeta && !forceRecompute) {
-        pushRuntimeLine('[network] clustering output changed; existing similarity CSV files are stale and will be rebuilt');
+      if (artifactStatus.state === 'legacy' && !forceRecompute) {
+        // Keep older tasks usable without silently launching a calculation. The
+        // UI labels this result as unverified and loads it through the read-only
+        // endpoint; this branch preserves compatibility for direct API clients.
+        pushRuntimeLine(`[network] reused legacy similarity artifacts: nodes=${artifactStatus.nodeTotal}, edges=${artifactStatus.edgeTotal}; input signature unavailable`);
+        res.json({
+          ok: true,
+          nodesCsv: nodesPath,
+          edgesCsv: edgesPath,
+          nodes: artifactStatus.nodeTotal,
+          edges: artifactStatus.edgeTotal,
+          similarityMethod: artifactStatus.buildMeta?.similarityMethod || null,
+          includeReferenceLinks: typeof artifactStatus.buildMeta?.includeReferenceLinks === 'boolean'
+            ? artifactStatus.buildMeta.includeReferenceLinks
+            : null,
+          reused: true,
+          generated: false,
+          recomputedAt: null,
+        });
+        finishRuntimeTask('network/compute-similarity', true);
+        return;
+      }
+
+      if (artifactStatus.state === 'stale' && !forceRecompute) {
+        pushRuntimeLine(`[network] existing similarity CSV files are outdated: ${artifactStatus.reason}; rebuilding from current inputs`);
       }
 
       updateNetworkAlignProgress({
@@ -5346,7 +5635,7 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         pairwiseThresholdPct: 0,
         includeReferenceLinks,
         similarityMethod,
-        sourceFastaPath: sourceFastaPath || String(staleMeta?.sourceFastaPath || ''),
+        sourceFastaPath: effectiveSourceFasta,
         referenceFastaPath,
       });
 
@@ -5393,48 +5682,34 @@ route.post('/api/network/compute-similarity', async (req, res) => {
 route.get('/api/network/similarity-status', async (req, res) => {
   try {
     const { taskId, workDir } = await resolveWorkDirForReq(req);
-    const nodesPath = path.join(workDir, 'nodes.csv');
-    const edgesPath = path.join(workDir, 'edges_similarity.csv');
-    const staleMeta = await readNetworkStaleMeta(workDir);
-
-    let nodesExists = false;
-    let edgesExists = false;
-    try {
-      await fs.access(nodesPath);
-      nodesExists = true;
-    } catch {
-      nodesExists = false;
-    }
-    try {
-      await fs.access(edgesPath);
-      edgesExists = true;
-    } catch {
-      edgesExists = false;
-    }
-
-    let nodeTotal = 0;
-    let edgeTotal = 0;
-    if (nodesExists) {
-      const p = await readCsvPreview(nodesPath, 1);
-      nodeTotal = Number(p.total || 0);
-    }
-    if (edgesExists) {
-      const p = await readCsvPreview(edgesPath, 1);
-      edgeTotal = Number(p.total || 0);
-    }
+    const status = await getNetworkSimilarityArtifactStatus(workDir, {
+      sourceFastaPath: String(req.query?.sourceFasta || '').trim(),
+      referenceFastaPath: String(req.query?.referenceFasta || '').trim(),
+      includeReferenceLinks: Object.prototype.hasOwnProperty.call(req.query || {}, 'includeReferenceLinks')
+        ? String(req.query?.includeReferenceLinks || '') === 'true'
+        : undefined,
+      similarityMethod: req.query?.similarityMethod,
+    });
 
     res.json({
       ok: true,
       taskId,
-      exists: nodesExists && edgesExists,
-      nodesExists,
-      edgesExists,
-      nodeTotal,
-      edgeTotal,
-      nodesCsv: nodesPath,
-      edgesCsv: edgesPath,
-      stale: Boolean(staleMeta),
-      staleReason: staleMeta?.reason || null,
+      exists: status.exists,
+      nodesExists: status.nodesExists,
+      edgesExists: status.edgesExists,
+      nodeTotal: status.nodeTotal,
+      edgeTotal: status.edgeTotal,
+      nodesCsv: status.nodesPath,
+      edgesCsv: status.edgesPath,
+      state: status.state,
+      reason: status.reason,
+      stale: status.stale,
+      staleReason: status.staleReason,
+      candidateFasta: status.currentContext.sourceFastaPath,
+      referenceFasta: status.currentContext.referenceFastaPath,
+      similarityMethod: status.currentContext.similarityMethod,
+      includeReferenceLinks: status.currentContext.includeReferenceLinks,
+      generatedAt: status.buildMeta?.builtAt || null,
     });
   } catch (err) {
     jsonError(res, 'Failed to load similarity status', err);
@@ -5444,34 +5719,38 @@ route.get('/api/network/similarity-status', async (req, res) => {
 route.get('/api/network/data', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
-    const edgesPath = path.join(workDir, 'edges_similarity.csv');
-    const nodesPath = path.join(workDir, 'nodes.csv');
-    const staleMeta = await readNetworkStaleMeta(workDir);
+    const status = await getNetworkSimilarityArtifactStatus(workDir, {
+      sourceFastaPath: String(req.query?.sourceFasta || '').trim(),
+      referenceFastaPath: String(req.query?.referenceFasta || '').trim(),
+      includeReferenceLinks: Object.prototype.hasOwnProperty.call(req.query || {}, 'includeReferenceLinks')
+        ? String(req.query?.includeReferenceLinks || '') === 'true'
+        : undefined,
+      similarityMethod: req.query?.similarityMethod,
+    });
 
-    if (staleMeta) {
-      res.status(409).json({
-        ok: false,
-        stale: true,
-        message: 'Clustering results changed after these similarity files were created. Run Compute Similarity to rebuild them from the current clustered FASTA.',
-      });
-      return;
-    }
-
-    // This endpoint is intentionally read-only. "Load" must report exactly
-    // what is already stored on disk and must never trigger CD-HIT/alignment.
-    try {
-      await Promise.all([fs.access(nodesPath), fs.access(edgesPath)]);
-    } catch {
+    // This endpoint is intentionally read-only. "Use existing results" must
+    // report exactly what is already stored on disk and never start alignment.
+    // It also refuses stale artifacts so a changed FASTA or setting cannot be
+    // silently displayed as the current network.
+    if (status.state === 'missing') {
       res.status(404).json({
         ok: false,
         message: 'Existing nodes.csv / edges_similarity.csv were not found. Compute sequence similarity first.',
       });
       return;
     }
+    if (status.state === 'stale') {
+      res.status(409).json({
+        ok: false,
+        stale: true,
+        message: `${status.reason} Recompute sequence similarity before loading these results.`,
+      });
+      return;
+    }
 
     const [edgesPreview, nodesPreview] = await Promise.all([
-      readCsvPreview(edgesPath, 200),
-      readCsvPreview(nodesPath, 200),
+      readCsvPreview(status.edgesPath, 200),
+      readCsvPreview(status.nodesPath, 200),
     ]);
     const normalizedEdges = edgesPreview.rows.map((row) => ({
       ...row,
@@ -5728,6 +6007,62 @@ route.post('/api/network/push-cytoscape', async (req, res) => {
 });
 
 // ── Candidate property prediction (kcat / Km / solubility / Tm / EC) ──────
+route.get('/api/network/prediction-status', async (req, res) => {
+  try {
+    const { taskId, workDir } = await resolveWorkDirForReq(req);
+    const status = await getPredictionArtifactStatus(workDir, {
+      smiles: String(req.query?.smiles || '').trim(),
+    });
+    res.json({ ok: true, taskId, ...status });
+  } catch (err) {
+    jsonError(res, 'Failed to load property prediction status', err);
+  }
+});
+
+route.get('/api/network/predicted-metrics', async (req, res) => {
+  try {
+    const { taskId, workDir } = await resolveWorkDirForReq(req);
+    const tmTarget = Number.isFinite(Number(req.query?.tmTarget)) ? Number(req.query.tmTarget) : 60;
+    const subWeights = normalizePredictedSubWeights({
+      kcat: req.query?.kcatWeight,
+      solubility: req.query?.solubilityWeight,
+      tm: req.query?.tmWeight,
+    });
+    const smiles = String(req.query?.smiles || '').trim();
+    const status = await getPredictionArtifactStatus(workDir, { smiles });
+    if (status.state !== 'ready') {
+      res.status(409).json({
+        ok: false,
+        state: status.state,
+        message: `Cached property predictions cannot be used: ${status.reason}`,
+      });
+      return;
+    }
+
+    const { rows: nodeRows } = await readCsvRows(path.join(workDir, 'nodes.csv'));
+    const candidateIds = nodeRows
+      .filter((node) => String(node.is_reference || '') !== '1')
+      .map((node) => String(node.id || '').trim())
+      .filter(Boolean);
+    const existing = await loadPredictedMetricsMap(workDir);
+    const allRows = candidateIds.map((id) => existing.get(id)).filter(Boolean);
+    const rows = formatPredictedMetricsRows(allRows, subWeights, tmTarget);
+    res.json({
+      ok: true,
+      taskId,
+      count: rows.length,
+      recomputedCount: 0,
+      tmTarget,
+      subWeights,
+      smiles: smiles || null,
+      services: summarizePredictionServiceUsage(allRows),
+      rows,
+    });
+  } catch (err) {
+    jsonError(res, 'Failed to load cached property predictions', err);
+  }
+});
+
 route.post('/api/network/predict-metrics', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'network/predict-metrics', taskId)) return;
@@ -5895,36 +6230,8 @@ route.post('/api/network/predict-metrics', async (req, res) => {
       await writeCsvRows(resolvePredictedMetricsPath(workDir), csvHeaders, allRows);
       await writePredictionCacheMeta(workDir, cacheContext);
 
-      const normMap = computePredictedNormalization(allRows, subWeights, tmTarget);
-      const rows = allRows
-        .map((r) => ({
-          id: r.id,
-          kcat: r.kcat,
-          km: r.km ?? 0,
-          solubility: r.solubility,
-          tm: r.tm,
-          ec_top1: r.ec_top1 || '',
-          ec_score1: r.ec_score1 ?? 0,
-          ec_top2: r.ec_top2 || '',
-          ec_score2: r.ec_score2 ?? 0,
-          ec_top3: r.ec_top3 || '',
-          ec_score3: r.ec_score3 ?? 0,
-          sources: {
-            cataPro: r.cataPro_source,
-            solubility: r.solubility_source,
-            tm: r.tm_source,
-            ec: r.ec_source,
-          },
-          ...normMap.get(r.id),
-        }))
-        .sort((a, b) => b.predictedScore - a.predictedScore);
-
-      const realServiceUsage = {
-        cataPro: allRows.some((r) => r.cataPro_source === 'real'),
-        solubility: allRows.some((r) => r.solubility_source === 'real'),
-        ec: allRows.some((r) => r.ec_source === 'real'),
-        tm: allRows.some((r) => r.tm_source === 'real'),
-      };
+      const rows = formatPredictedMetricsRows(allRows, subWeights, tmTarget);
+      const realServiceUsage = summarizePredictionServiceUsage(allRows);
 
       res.json({
         ok: true,

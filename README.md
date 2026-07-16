@@ -1,12 +1,21 @@
 # EnzyMiner Pro
 
-当前版本：**V1.0.2**
+当前版本：**V1.0.3**
 
 高通量酶挖掘全栈工具平台，支持 **HMMER**、**BLAST** 和 **Compare** 三种模块，涵盖从参考序列管理到 Cytoscape 网络可视化和候选序列智能推荐的完整流水线。
 
 - **Frontend**: React + TypeScript + Vite + Tailwind CSS
 - **Backend**: Express API (`backend/server.mjs`)
 - **Pipeline scripts**: Python helpers (`scripts/`)
+
+---
+
+## V1.0.3 稳定性更新
+
+- 相似性计算与性质预测统一为“状态检查 → 使用已有结果 / 计算 / 更新”的交互，不再因进入页面或加载结果而隐式启动昂贵计算。
+- 相似性结果增加输入指纹和方法校验，可识别 `ready`、`stale`、`legacy`、`missing` 状态；强制重算收纳到 More actions 并要求确认。
+- 性质预测缓存按候选序列、SMILES、预测器地址和结果完整性校验；读取缓存使用纯 GET，不会重新调用 EC、kcat/Km、Sol、Tm 服务。
+- 保留旧版 CSV 和 mock 预测兼容性，并补充后端集成回归测试。
 
 ---
 

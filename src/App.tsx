@@ -42,6 +42,8 @@ import {
   loadNetworkData,
   computeNetworkSimilarity,
   loadNetworkSimilarityStatus,
+  loadPredictionMetricsStatus,
+  loadCachedPredictionMetrics,
   pushNetworkToCytoscape,
   fetchBrowserGraphData,
   recommendCandidates,
@@ -72,7 +74,7 @@ import {
   compareIntersect,
   compareMerge,
 } from './api';
-import type { EbiHmmDatabase, BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, BrowserGraphNode, BrowserGraphEdge } from './api';
+import type { EbiHmmDatabase, BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, SimilarityArtifactState, PredictionArtifactState, BrowserGraphNode, BrowserGraphEdge } from './api';
 import AlignmentViewer from './AlignmentViewer';
 import { ManualFilteringPanel, SystemRecommendationResults } from './RecommendationPanels';
 import { downloadButtonClass, outlinedActionButtonClass } from './uiStyles';
@@ -734,11 +736,13 @@ function EcTooltip({ r }: { r: PredictedMetricsRow }) {
 }
 
 function PredictedMetricsPanel({
+  taskId,
   subWeights,
   onSubWeightsChange,
   tmTarget,
   onTmTargetChange,
 }: {
+  taskId: string;
   subWeights: PredictedSubWeights;
   onSubWeightsChange: (w: PredictedSubWeights) => void;
   tmTarget: number;
@@ -753,11 +757,42 @@ function PredictedMetricsPanel({
   });
   const [services, setServices] = useState<{ cataPro: boolean; solubility: boolean; ec: boolean; tm: boolean } | null>(null);
   const [predictProgress, setPredictProgress] = useState<PredictionProgress | null>(null);
+  const [predictionStatus, setPredictionStatus] = useState<{
+    state: PredictionArtifactState;
+    reason: string;
+    candidateCount: number;
+    cachedCount: number;
+    pendingSequenceCount: number;
+    pendingPredictorUnits: number;
+    generatedAt: string | null;
+  } | null>(null);
+  const [checkingPredictionStatus, setCheckingPredictionStatus] = useState(true);
+
+  const refreshPredictionStatus = useCallback(async () => {
+    setCheckingPredictionStatus(true);
+    try {
+      setActiveTaskId(taskId);
+      const status = await loadPredictionMetricsStatus(smiles.trim() || undefined);
+      setPredictionStatus(status);
+    } catch (err: any) {
+      setPredictionStatus(null);
+      setError(`Unable to check cached prediction status: ${String(err?.message || err)}`);
+    } finally {
+      setCheckingPredictionStatus(false);
+    }
+  }, [taskId, smiles]);
 
   // Persist SMILES to localStorage whenever it changes
   useEffect(() => {
     try { localStorage.setItem('enzymeminer.smiles', smiles); } catch { /* ignore */ }
   }, [smiles]);
+
+  // Checking the cache is read-only. Debounce SMILES edits so typing never
+  // causes a burst of requests or a predictor run.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshPredictionStatus(); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [refreshPredictionStatus]);
 
   // Poll runtime logs for real progress while loading
   useEffect(() => {
@@ -776,6 +811,20 @@ function PredictedMetricsPanel({
     return () => { cancelled = true; clearInterval(timer); };
   }, [loading]);
 
+  const applyPredictionData = (data: {
+    rows: PredictedMetricsRow[];
+    count: number;
+    recomputedCount: number;
+    services?: { cataPro: boolean; solubility: boolean; ec: boolean; tm: boolean };
+  }) => {
+    setRows(data.rows);
+    setLastRunInfo({ count: data.count, recomputedCount: data.recomputedCount });
+    if (data.services) setServices(data.services);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('enzymeminer:predictions-updated'));
+    }
+  };
+
   const runPredict = async (forceRecompute: boolean) => {
     setLoading(true);
     setError('');
@@ -787,18 +836,62 @@ function PredictedMetricsPanel({
         tmTarget,
         smiles: smiles.trim() || undefined,
       });
-      setRows(data.rows);
-      setLastRunInfo({ count: data.count, recomputedCount: data.recomputedCount });
-      if (data.services) setServices(data.services);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('enzymeminer:predictions-updated'));
-      }
+      applyPredictionData(data);
     } catch (err: any) {
       setError(String(err?.message || err));
     } finally {
       setLoading(false);
+      void refreshPredictionStatus();
     }
   };
+
+  const loadCachedPredictions = async () => {
+    setLoading(true);
+    setError('');
+    setPredictProgress(null);
+    try {
+      const data = await loadCachedPredictionMetrics({
+        subWeights: normalizePredictedSubWeights(subWeights),
+        tmTarget,
+        smiles: smiles.trim() || undefined,
+      });
+      applyPredictionData(data);
+    } catch (err: any) {
+      setError(String(err?.message || err));
+    } finally {
+      setLoading(false);
+      void refreshPredictionStatus();
+    }
+  };
+
+  const predictionPrimaryAction = async () => {
+    if (predictionStatus?.state === 'ready') {
+      await loadCachedPredictions();
+      return;
+    }
+    await runPredict(false);
+  };
+
+  const predictionPrimaryLabel = checkingPredictionStatus
+    ? 'Checking Prediction Results...'
+    : predictionStatus?.state === 'ready'
+      ? 'Use Existing Results'
+      : predictionStatus?.state === 'stale'
+        ? 'Update Property Predictions'
+        : 'Run Property Prediction';
+  const predictionCanRun = !checkingPredictionStatus
+    && (predictionStatus ? predictionStatus.candidateCount > 0 : false);
+  const predictionStateLabel = predictionStatus?.state === 'ready'
+    ? 'Ready'
+    : predictionStatus?.state === 'stale'
+      ? 'Needs update'
+      : 'Not calculated';
+  const predictionStateClass = predictionStatus?.state === 'ready'
+    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+    : predictionStatus?.state === 'stale'
+      ? 'bg-amber-100 text-amber-800 border-amber-200'
+      : 'bg-slate-100 text-slate-700 border-slate-200';
+
 
   const predictionPercent = predictProgress && predictProgress.total > 0
     ? Math.min(100, Math.round((predictProgress.current / predictProgress.total) * 100))
@@ -855,22 +948,63 @@ function PredictedMetricsPanel({
         colors={['#0ea5e9', '#10b981', '#f59e0b']}
         defaults={DEFAULT_PREDICTED_SUB_WEIGHTS}
       />
-      <div className="flex items-center gap-3 flex-wrap">
-        <button className="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg text-sm disabled:opacity-50"
-          disabled={loading}
-          onClick={() => runPredict(false)}>
-          {loading ? 'Predicting...' : 'Run Property Prediction'}
-        </button>
-        <button className="text-xs text-slate-400 hover:text-indigo-500 underline disabled:opacity-50"
-          disabled={loading}
-          onClick={() => runPredict(true)}>
-          Recompute All
-        </button>
-        {lastRunInfo && (
-          <span className="text-xs text-slate-500">
-            {lastRunInfo.count} candidate(s) scored, {lastRunInfo.recomputedCount} newly predicted
-          </span>
-        )}
+      <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <div className="text-xs font-medium text-slate-700">Property prediction results</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-medium ${predictionStateClass}`}>
+                {checkingPredictionStatus ? 'Checking...' : predictionStateLabel}
+              </span>
+              {predictionStatus && predictionStatus.candidateCount > 0 && (
+                <span className="tabular-nums">
+                  {predictionStatus.state === 'ready'
+                    ? `${predictionStatus.cachedCount} candidate(s) cached`
+                    : `${predictionStatus.pendingSequenceCount}/${predictionStatus.candidateCount} candidate(s) need prediction`}
+                </span>
+              )}
+            </div>
+          </div>
+          {predictionStatus?.generatedAt && (
+            <span className="text-[10px] text-slate-400">Generated {new Date(predictionStatus.generatedAt).toLocaleString()}</span>
+          )}
+        </div>
+        <p className="text-xs text-slate-600">{checkingPredictionStatus ? 'Checking candidate sequences, SMILES, and cached predictor outputs…' : predictionStatus?.reason || 'Status is unavailable.'}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+            disabled={loading || !predictionCanRun}
+            onClick={() => void predictionPrimaryAction()}>
+            {loading ? 'Working...' : predictionPrimaryLabel}
+          </button>
+          {predictionStatus?.candidateCount === 0 && !checkingPredictionStatus && (
+            <span className="text-xs text-amber-700">Run sequence similarity first to obtain candidate sequences.</span>
+          )}
+          {predictionStatus?.candidateCount ? (
+            <details className="relative">
+              <summary className="cursor-pointer list-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 [&::-webkit-details-marker]:hidden">
+                More actions
+              </summary>
+              <div className="absolute right-0 z-20 mt-1 min-w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                <button
+                  className="w-full rounded px-3 py-2 text-left text-xs text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                  disabled={loading}
+                  onClick={() => {
+                    if (window.confirm('Recompute all kcat/Km, solubility, EC, and Tm values for every candidate? Existing cached predictions will be replaced only after the new run completes.')) {
+                      void runPredict(true);
+                    }
+                  }}
+                >
+                  Recompute all predictions
+                </button>
+              </div>
+            </details>
+          ) : null}
+          {lastRunInfo && (
+            <span className="text-xs text-slate-500">
+              {lastRunInfo.count} candidate(s) available, {lastRunInfo.recomputedCount} newly predicted
+            </span>
+          )}
+        </div>
       </div>
       {loading && (
         <div className="space-y-2 rounded-lg border border-sky-100 bg-sky-50/40 p-3">
@@ -958,6 +1092,166 @@ function PredictedMetricsPanel({
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+
+type SimilarityMethod = 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
+
+type SimilarityArtifactControlsProps = {
+  taskId: string;
+  sourceFasta?: string;
+  referenceFasta?: string;
+  includeReferenceLinks: boolean;
+  similarityMethod: SimilarityMethod;
+  loading: boolean;
+  onCompute: (forceRecompute: boolean) => Promise<unknown>;
+  onUseExisting: () => Promise<unknown>;
+  onStatusChange?: (status: {
+    state: SimilarityArtifactState;
+    nodeTotal: number;
+    edgeTotal: number;
+  }) => void;
+};
+
+/**
+ * A read-only result status check is deliberately separated from calculation.
+ * This keeps the three pipelines consistent: opening a page only inspects the
+ * existing CSV/signature, while the action selected by the user determines
+ * whether alignment is performed.
+ */
+function SimilarityArtifactControls({
+  taskId,
+  sourceFasta,
+  referenceFasta,
+  includeReferenceLinks,
+  similarityMethod,
+  loading,
+  onCompute,
+  onUseExisting,
+  onStatusChange,
+}: SimilarityArtifactControlsProps) {
+  const [status, setStatus] = useState<{
+    state: SimilarityArtifactState;
+    reason: string;
+    nodeTotal: number;
+    edgeTotal: number;
+    generatedAt?: number | null;
+  } | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [error, setError] = useState('');
+
+  const refreshStatus = useCallback(async () => {
+    setChecking(true);
+    setError('');
+    try {
+      setActiveTaskId(taskId);
+      const next = await loadNetworkSimilarityStatus({
+        sourceFasta: sourceFasta?.trim() || undefined,
+        referenceFasta: referenceFasta?.trim() || undefined,
+        includeReferenceLinks,
+        similarityMethod,
+      });
+      setStatus(next);
+      onStatusChange?.({
+        state: next.state,
+        nodeTotal: next.nodeTotal,
+        edgeTotal: next.edgeTotal,
+      });
+    } catch (err: any) {
+      setStatus(null);
+      setError(`Unable to check similarity result status: ${String(err?.message || err)}`);
+    } finally {
+      setChecking(false);
+    }
+  }, [taskId, sourceFasta, referenceFasta, includeReferenceLinks, similarityMethod]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshStatus(); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [refreshStatus]);
+
+  const primaryAction = async () => {
+    if (status?.state === 'ready' || status?.state === 'legacy') {
+      await onUseExisting();
+    } else {
+      await onCompute(false);
+    }
+    await refreshStatus();
+  };
+
+  const primaryLabel = checking
+    ? 'Checking Similarity Results...'
+    : status?.state === 'ready' || status?.state === 'legacy'
+      ? 'Use Existing Results'
+      : status?.state === 'stale'
+        ? 'Recompute Similarity'
+        : 'Compute Similarity';
+  const stateLabel = status?.state === 'ready'
+    ? 'Ready'
+    : status?.state === 'legacy'
+      ? 'Unverified legacy result'
+      : status?.state === 'stale'
+        ? 'Needs recomputation'
+        : 'Not calculated';
+  const stateClass = status?.state === 'ready'
+    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+    : status?.state === 'stale' || status?.state === 'legacy'
+      ? 'bg-amber-100 text-amber-800 border-amber-200'
+      : 'bg-slate-100 text-slate-700 border-slate-200';
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-xs font-medium text-slate-700">Similarity results</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 font-medium ${stateClass}`}>
+              {checking ? 'Checking...' : stateLabel}
+            </span>
+            {status && status.nodeTotal > 0 && (
+              <span className="tabular-nums">{status.nodeTotal} nodes · {status.edgeTotal} edges</span>
+            )}
+          </div>
+        </div>
+        {status?.generatedAt && (
+          <span className="text-[10px] text-slate-400">Generated {new Date(status.generatedAt).toLocaleString()}</span>
+        )}
+      </div>
+      <p className={`text-xs ${error ? 'text-red-700' : 'text-slate-600'}`}>
+        {error || (checking ? 'Checking existing CSV files, FASTA fingerprints, and similarity settings…' : status?.reason || 'Status is unavailable.')}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+          disabled={loading || checking || Boolean(error)}
+          onClick={() => void primaryAction()}
+        >
+          {loading ? 'Working...' : primaryLabel}
+        </button>
+        <details className="relative">
+          <summary className="cursor-pointer list-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 [&::-webkit-details-marker]:hidden">
+            More actions
+          </summary>
+          <div className="absolute left-0 z-20 mt-1 min-w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+            <button
+              className="w-full rounded px-3 py-2 text-left text-xs text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+              disabled={loading || checking}
+              onClick={() => {
+                if (window.confirm('Recompute similarity from scratch? Existing nodes.csv and edges_similarity.csv will be replaced only after the new calculation finishes.')) {
+                  void (async () => {
+                    await onCompute(true);
+                    await refreshStatus();
+                  })();
+                }
+              }}
+            >
+              Recompute from scratch
+            </button>
+          </div>
+        </details>
+      </div>
     </div>
   );
 }
@@ -1203,7 +1497,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [networkSimilarityMethod, setNetworkSimilarityMethod] = useState<'needleman-wunsch' | 'smith-waterman' | 'mmseqs2'>('mmseqs2');
   const [networkSourceFasta, setNetworkSourceFasta] = useState('scored_passed.fasta');
   const [networkReferenceFasta, setNetworkReferenceFasta] = useState(() => defaultTaskReferenceFasta(selectedTaskId));
-  const [similarityConfirmState, setSimilarityConfirmState] = useState({ open: false, nodeTotal: 0, edgeTotal: 0 });
   const [cytoPushInfo, setCytoPushInfo] = useState<{
     networkSuid: number | null;
     pushedNodes: number;
@@ -2547,40 +2840,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       : `Similarity calculation complete: ${candidateSummary}, ${data.edges} edges`);
   };
 
-  const runComputeOrReuseSimilarity = async () => {
-    await runAction('Compute or reuse sequence similarity', () => runComputeSimilarity(false), 'similarity');
-  };
-
-  const confirmSimilarityRecompute = async () => {
-    try {
-      const status = await loadNetworkSimilarityStatus();
-      if (status.exists) {
-        setSimilarityConfirmState({ open: true, nodeTotal: status.nodeTotal, edgeTotal: status.edgeTotal });
-        return;
-      }
-      await runAction('Compute Sequence Similarity', () => runComputeSimilarity(true), 'similarity');
-    } catch (err) {
-      setJob({ loading: false, message: '', error: `Pre-computation check failed: ${String(err)}` });
-    }
-  };
-
-  const cancelSimilarityRecompute = () => {
-    setSimilarityConfirmState((prev) => ({ ...prev, open: false }));
-    setJob({ loading: false, message: 'Recomputation cancelled, similarity results unchanged', error: '' });
-  };
-
-  const startSimilarityRecomputeFromModal = () => {
-    setSimilarityConfirmState((prev) => ({ ...prev, open: false }));
-    setActiveStep('similarity');
-    setStepState((prev) => ({ ...prev, similarity: 'running' }));
-    setRuntimeTask('network/compute-similarity');
-    setRuntimeMeta((prev) => ({
-      ...prev,
-      networkAlignProgress: { current: 0, total: 1, phase: 'prepare' },
-    }));
-    setJob({ loading: false, message: 'Confirmed, recomputing sequence similarity...', error: '' });
-    void runAction('Force recompute sequence similarity', () => runComputeSimilarity(true), 'similarity');
-  };
 
   const runPushToCytoscape = async () => {
     const sourceForSimilarity = (
@@ -4231,36 +4490,42 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     />
                     Compute similarity edges between reference and candidate sequences
                   </label>
-                  <div className="md:col-span-2 flex flex-wrap gap-2">
-                    <button
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
-                      disabled={job.loading}
-                      onClick={() => void runComputeOrReuseSimilarity()}
-                    >
-                      Compute / Reuse Similarity
-                    </button>
-                    <button
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-4 py-2 rounded-lg text-sm border border-slate-300"
-                      disabled={job.loading}
-                      onClick={() =>
-                        runAction('Load existing similarity CSV', async () => {
-                          const data = await loadNetworkData();
-                          const nodes = Number.isFinite(Number(data.nodeTotal)) ? Number(data.nodeTotal) : data.nodes.length;
-                          const edges = Number.isFinite(Number(data.edgeTotal)) ? Number(data.edgeTotal) : data.edges.length;
-                          setNetworkStats({ nodes, edges });
-                          setCompletionToast(`Loaded existing similarity CSV: ${nodes} nodes, ${edges} edges; no calculation was run`);
-                        })
-                      }
-                    >
-                      Load Existing CSV (No Calculation)
-                    </button>
-                    <button
-                      className="border border-amber-300 bg-amber-50 px-4 py-2 rounded-lg text-sm text-amber-800 hover:bg-amber-100"
-                      disabled={job.loading}
-                      onClick={() => void confirmSimilarityRecompute()}
-                    >
-                      Force Recompute
-                    </button>
+                  <div className="md:col-span-2">
+                    <SimilarityArtifactControls
+                      taskId={selectedTaskId}
+                      sourceFasta={networkSourceFasta.trim() === 'scored_passed.fasta' && candidateFasta.trim() ? candidateFasta.trim() : networkSourceFasta}
+                      referenceFasta={networkReferenceFasta}
+                      includeReferenceLinks={networkIncludeReferenceLinks}
+                      similarityMethod={networkSimilarityMethod}
+                      loading={job.loading}
+                      onCompute={(forceRecompute) => runAction(
+                        forceRecompute ? 'Recompute sequence similarity' : 'Compute sequence similarity',
+                        () => runComputeSimilarity(forceRecompute),
+                        'similarity',
+                      )}
+                      onUseExisting={() => runAction('Use existing similarity results', async () => {
+                        const sourceForSimilarity = networkSourceFasta.trim() === 'scored_passed.fasta' && candidateFasta.trim()
+                          ? candidateFasta.trim()
+                          : networkSourceFasta;
+                        const data = await loadNetworkData({
+                          sourceFasta: sourceForSimilarity || undefined,
+                          referenceFasta: networkReferenceFasta || undefined,
+                          includeReferenceLinks: networkIncludeReferenceLinks,
+                          similarityMethod: networkSimilarityMethod,
+                        });
+                        const nodes = Number.isFinite(Number(data.nodeTotal)) ? Number(data.nodeTotal) : data.nodes.length;
+                        const edges = Number.isFinite(Number(data.edgeTotal)) ? Number(data.edgeTotal) : data.edges.length;
+                        setNetworkStats({ nodes, edges });
+                        setCompletionToast(`Using existing similarity results: ${nodes} nodes, ${edges} edges; no calculation was run`);
+                      }, 'similarity')}
+                      onStatusChange={(status) => {
+                        if (status.state === 'ready' || status.state === 'legacy') {
+                          setNetworkStats({ nodes: status.nodeTotal, edges: status.edgeTotal });
+                        } else {
+                          setNetworkStats({ nodes: 0, edges: 0 });
+                        }
+                      }}
+                    />
                   </div>
                 </div>
                 {runtimeMeta?.networkAlignProgress && (
@@ -4558,6 +4823,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               <div className="space-y-4">
                 <h1 className="text-2xl font-semibold">Candidate Recommendation</h1>
                 <PredictedMetricsPanel
+                  taskId={selectedTaskId}
                   subWeights={predictedSubWeights}
                   onSubWeightsChange={setPredictedSubWeights}
                   tmTarget={predictedTmTarget}
@@ -4676,33 +4942,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         </div>
       </main>
 
-      {similarityConfirmState.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl space-y-4">
-            <div className="text-base font-semibold text-slate-900">Existing Similarity Results Detected</div>
-            <div className="text-sm text-slate-600 leading-6">
-              This task already has similarity files:
-              <div>nodes: {similarityConfirmState.nodeTotal}</div>
-              <div>edges: {similarityConfirmState.edgeTotal}</div>
-              <div className="mt-2">Recompute and overwrite these results?</div>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                className="px-3 py-1.5 rounded border border-slate-300 text-slate-700 text-sm hover:bg-slate-50"
-                onClick={cancelSimilarityRecompute}
-              >
-                Cancel
-              </button>
-              <button
-                className="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-700"
-                onClick={startSimilarityRecomputeFromModal}
-              >
-                Recompute
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -6756,23 +6995,38 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <label className="block text-sm font-medium">Reference FASTA</label>
                 <input className="w-full p-2 border rounded text-sm font-mono" value={networkReferenceFasta}
                   onChange={(e) => setNetworkReferenceFasta(e.target.value)} />
-                <div className="flex flex-wrap gap-2">
-                  <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                    onClick={() => runAction('Compute or reuse similarity', () => runComputeSimilarity(false), 'similarity')}>
-                    Compute / Reuse Similarity
-                  </button>
-                  <button
-                    className="border border-amber-300 bg-amber-50 px-4 py-2 rounded-lg text-sm text-amber-800 hover:bg-amber-100"
-                    disabled={job.loading}
-                    onClick={() => {
-                      if (window.confirm('Force recomputation will replace the existing similarity CSV files. Continue?')) {
-                        void runAction('Force recompute similarity', () => runComputeSimilarity(true), 'similarity');
-                      }
-                    }}
-                  >
-                    Force Recompute
-                  </button>
-                </div>
+                <SimilarityArtifactControls
+                  taskId={selectedTaskId}
+                  sourceFasta={networkSourceFasta}
+                  referenceFasta={networkReferenceFasta}
+                  includeReferenceLinks={networkIncludeReferenceLinks}
+                  similarityMethod={networkSimilarityMethod}
+                  loading={job.loading}
+                  onCompute={(forceRecompute) => runAction(
+                    forceRecompute ? 'Recompute sequence similarity' : 'Compute sequence similarity',
+                    () => runComputeSimilarity(forceRecompute),
+                    'similarity',
+                  )}
+                  onUseExisting={() => runAction('Use existing similarity results', async () => {
+                    const data = await loadNetworkData({
+                      sourceFasta: networkSourceFasta || undefined,
+                      referenceFasta: networkReferenceFasta || undefined,
+                      includeReferenceLinks: networkIncludeReferenceLinks,
+                      similarityMethod: networkSimilarityMethod,
+                    });
+                    const nodes = Number.isFinite(Number(data.nodeTotal)) ? Number(data.nodeTotal) : data.nodes.length;
+                    const edges = Number.isFinite(Number(data.edgeTotal)) ? Number(data.edgeTotal) : data.edges.length;
+                    setNetworkStats({ nodes, edges });
+                    setCompletionToast(`Using existing similarity results: ${nodes} nodes, ${edges} edges; no calculation was run`);
+                  }, 'similarity')}
+                  onStatusChange={(status) => {
+                    if (status.state === 'ready' || status.state === 'legacy') {
+                      setNetworkStats({ nodes: status.nodeTotal, edges: status.edgeTotal });
+                    } else {
+                      setNetworkStats({ nodes: 0, edges: 0 });
+                    }
+                  }}
+                />
               </div>
               {networkStats.nodes > 0 && (
                 <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm">
@@ -7057,6 +7311,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             <div className="space-y-4">
               <h1 className="text-2xl font-semibold">Candidate Recommendation</h1>
               <PredictedMetricsPanel
+                taskId={selectedTaskId}
                 subWeights={predictedSubWeights}
                 onSubWeightsChange={setPredictedSubWeights}
                 tmTarget={predictedTmTarget}
@@ -7828,26 +8083,38 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 Include Edges Between Reference Sequences
               </label>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-                disabled={loading}
-                onClick={() => void doComputeSimilarity(false)}
-              >
-                {loading ? 'Working...' : 'Compute / Reuse Similarity'}
-              </button>
-              <button
-                className="border border-amber-300 bg-amber-50 px-5 py-2 rounded-lg text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                disabled={loading}
-                onClick={() => {
-                  if (window.confirm('Force recomputation will replace the existing similarity CSV files. Continue?')) {
-                    void doComputeSimilarity(true);
-                  }
-                }}
-              >
-                Force Recompute
-              </button>
-            </div>
+            <SimilarityArtifactControls
+              taskId={selectedTaskId}
+              includeReferenceLinks={networkIncludeReferenceLinks}
+              similarityMethod={networkSimilarityMethod}
+              loading={loading}
+              onCompute={(forceRecompute) => doComputeSimilarity(forceRecompute)}
+              onUseExisting={async () => {
+                setLoading(true);
+                setError('');
+                try {
+                  setActiveTaskId(selectedTaskId);
+                  const data = await loadNetworkData({
+                    includeReferenceLinks: networkIncludeReferenceLinks,
+                    similarityMethod: networkSimilarityMethod,
+                  });
+                  const nodes = Number.isFinite(Number(data.nodeTotal)) ? Number(data.nodeTotal) : data.nodes.length;
+                  const edges = Number.isFinite(Number(data.edgeTotal)) ? Number(data.edgeTotal) : data.edges.length;
+                  setSimilarityStatus({ nodes, edges });
+                } catch (err: any) {
+                  setError(String(err?.message || err));
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              onStatusChange={(status) => {
+                if (status.state === 'ready' || status.state === 'legacy') {
+                  setSimilarityStatus({ nodes: status.nodeTotal, edges: status.edgeTotal });
+                } else {
+                  setSimilarityStatus(null);
+                }
+              }}
+            />
             {loading && runtimeMeta?.networkAlignProgress && (
               <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                 <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
@@ -8051,6 +8318,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
               Candidate Recommendation
             </h2>
             <PredictedMetricsPanel
+              taskId={selectedTaskId}
               subWeights={predictedSubWeights}
               onSubWeightsChange={setPredictedSubWeights}
               tmTarget={predictedTmTarget}
