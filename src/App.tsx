@@ -28,6 +28,7 @@ import {
   duplicateTask,
   deleteTask,
   fetchReferences,
+  fetchEbiHmmDatabases,
   importReferenceFasta,
   filterHitsByTargets,
   filterHits,
@@ -56,7 +57,9 @@ import {
   runScoring,
   prepareScoringAlignment,
   loadScoringAlignmentPreview,
+  downloadScoringAlignmentFasta,
   downloadScoringCsv,
+  loadScoringPage,
   previewScoringThreshold,
   savePipelineState,
   setActiveTaskId,
@@ -69,8 +72,10 @@ import {
   compareIntersect,
   compareMerge,
 } from './api';
-import type { BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, BrowserGraphNode, BrowserGraphEdge } from './api';
+import type { EbiHmmDatabase, BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, BrowserGraphNode, BrowserGraphEdge } from './api';
+import AlignmentViewer from './AlignmentViewer';
 import { ManualFilteringPanel, SystemRecommendationResults } from './RecommendationPanels';
+import { downloadButtonClass, outlinedActionButtonClass } from './uiStyles';
 const NetworkGraph = React.lazy(() => import('./NetworkGraph'));
 
 type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'recommendation';
@@ -112,6 +117,34 @@ const initialEbiSubStepState: EbiSubStepState = {
   download: 'idle',
   enrich: 'idle',
 };
+
+// Offline fallback snapshot from the EMBL-EBI HMMER database metadata endpoint,
+// verified on 2026-07-16. When available, the UI refreshes these values through
+// the backend so database releases can change without requiring a frontend build.
+const fallbackEbiHmmDatabases: EbiHmmDatabase[] = [
+  { id: 'refprot', type: 'seq', status: 'enabled', name: 'Reference Proteomes', version: '2025_01', releaseDate: '2025-01-01', sequenceCount: 89460830, sequenceCountSource: 'ebi-search-stats', order: 1 },
+  { id: 'swissprot', type: 'seq', status: 'enabled', name: 'SwissProt', version: '2025_01', releaseDate: '2025-01-01', sequenceCount: 503053, sequenceCountSource: 'ebi-search-stats', order: 2 },
+  { id: 'uniprot', type: 'seq', status: 'enabled', name: 'UniProt', version: '2025_01', releaseDate: '2025-01-01', sequenceCount: 245001337, sequenceCountSource: 'ebi-search-stats', order: 3 },
+  { id: 'pdb', type: 'seq', status: 'enabled', name: 'PDB', version: '03.25', releaseDate: '2025-01-01', sequenceCount: 170694, sequenceCountSource: 'ebi-search-stats', order: 4 },
+  { id: 'rp15', type: 'seq', status: 'enabled', name: 'RP 15', version: '2024_04', releaseDate: '2025-01-01', sequenceCount: 5866326, sequenceCountSource: 'ebi-search-stats', order: 5 },
+  { id: 'rp35', type: 'seq', status: 'enabled', name: 'RP 35', version: '2024_04', releaseDate: '2025-01-01', sequenceCount: 14873234, sequenceCountSource: 'ebi-search-stats', order: 6 },
+  { id: 'rp55', type: 'seq', status: 'enabled', name: 'RP 55', version: '2024_04', releaseDate: '2025-01-01', sequenceCount: 27065347, sequenceCountSource: 'ebi-search-stats', order: 7 },
+  { id: 'rp75', type: 'seq', status: 'enabled', name: 'RP 75', version: '2024_04', releaseDate: '2025-01-01', sequenceCount: 37698713, sequenceCountSource: 'ebi-search-stats', order: 8 },
+  { id: 'mgnify30_c2', type: 'seq', status: 'enabled', name: 'MGnify30-C2 - Non-singletons', version: '2026_07', releaseDate: '2026-07-11', sequenceCount: 128674267, sequenceCountSource: 'ebi-search-stats', order: 9 },
+  { id: 'mgnify30_c5_fl', type: 'seq', status: 'enabled', name: 'MGnify30-C5-FL - Larger non-singletons', version: '2026_07', releaseDate: '2026-07-11', sequenceCount: 20911652, sequenceCountSource: 'ebi-search-stats', order: 10 },
+  { id: 'mgnify30_c5_ppfam', type: 'seq', status: 'enabled', name: 'MGnify30-C5-PPfam - Pfam-poor non-singletons', version: '2026_07', releaseDate: '2026-07-11', sequenceCount: 18155509, sequenceCountSource: 'ebi-search-stats', order: 11 },
+];
+
+const ebiSequenceCountFormatter = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+
+function formatEbiSequenceCount(sequenceCount?: number | null) {
+  return Number.isSafeInteger(sequenceCount) && Number(sequenceCount) >= 0
+    ? ebiSequenceCountFormatter.format(Number(sequenceCount))
+    : 'size unavailable';
+}
 
 const pipelineSteps: Array<{ key: PipelineStepKey; title: string }> = [
   { key: 'reference', title: '1. Reference' },
@@ -191,6 +224,17 @@ const accessionPlaceholder = ['e.g.: ', 'AAC72747.1', 'KDQ24956.1', '9AVH_A', 'M
 
 const MAX_REFERENCE_FASTA_UPLOAD_BYTES = 20 * 1024 * 1024;
 
+function triggerBrowserDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function formatFileSize(bytes: number) {
   if (bytes >= 1024 * 1024) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -224,6 +268,15 @@ function formatRuntimeDurationLabel(startedAt: number | null | undefined, update
   const finish = active ? Date.now() : Number(updatedAt);
   const end = Number.isFinite(finish) && finish >= start ? finish : Date.now();
   return formatDurationMs(end - start);
+}
+
+function progressPercent(current: number, total: number) {
+  const safeCurrent = Math.max(0, Number(current) || 0);
+  const safeTotal = Math.max(1, Number(total) || 1);
+  if (safeCurrent >= safeTotal) {
+    return 100;
+  }
+  return Math.min(99, Math.max(0, Math.floor((safeCurrent / safeTotal) * 100)));
 }
 
 function validateReferenceFastaUpload(file: File | null) {
@@ -1018,6 +1071,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [hmmFile, setHmmFile] = useState('');
   const [searchMode, setSearchMode] = useState<'local' | 'ebi'>('local');
   const [ebiDatabase, setEbiDatabase] = useState('refprot');
+  const [ebiDatabaseOptions, setEbiDatabaseOptions] = useState<EbiHmmDatabase[]>(fallbackEbiHmmDatabases);
+  const [ebiDatabaseMetadataStatus, setEbiDatabaseMetadataStatus] = useState<'idle' | 'loading' | 'live' | 'fallback'>('idle');
   const [ebiStageJobId, setEbiStageJobId] = useState('');
   const [ebiStagePageCount, setEbiStagePageCount] = useState<number | null>(null);
   const [ebiStageFailedPages, setEbiStageFailedPages] = useState<number | null>(null);
@@ -1101,7 +1156,12 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     refIdUsed?: string | null;
   } | null>(null);
   const [alignmentPrepInfo, setAlignmentPrepInfo] = useState<{ alignment: string; records: number } | null>(null);
-  const [autoDownloadScoringCsv, setAutoDownloadScoringCsv] = useState(true);
+  const [scoringPage, setScoringPage] = useState(1);
+  const [scoringPageSize, setScoringPageSize] = useState(25);
+  const [scoringTotal, setScoringTotal] = useState(0);
+  const [scoringTotalPages, setScoringTotalPages] = useState(1);
+  const [scoringPageLoading, setScoringPageLoading] = useState(false);
+  const [scoringDownloading, setScoringDownloading] = useState(false);
   const [thresholdPreview, setThresholdPreview] = useState<{ total: number; passed: number; ratio: number; threshold: number } | null>(null);
   const [alignmentPreviewRows, setAlignmentPreviewRows] = useState<Array<{ id: string; segment: string }>>([]);
   const [alignmentPreviewStart, setAlignmentPreviewStart] = useState(1);
@@ -1110,6 +1170,11 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [alignmentPreviewLimit] = useState(25);
   const [alignmentPreviewTotalRecords, setAlignmentPreviewTotalRecords] = useState(0);
   const [alignmentPreviewLength, setAlignmentPreviewLength] = useState(0);
+  const [alignmentPreviewActualStart, setAlignmentPreviewActualStart] = useState(1);
+  const [alignmentPreviewConsensus, setAlignmentPreviewConsensus] = useState('');
+  const [alignmentPreviewConservation, setAlignmentPreviewConservation] = useState<number[]>([]);
+  const [alignmentPreviewColumnsTruncated, setAlignmentPreviewColumnsTruncated] = useState(false);
+  const [alignmentPreviewMaxColumns, setAlignmentPreviewMaxColumns] = useState(240);
 
   const [candidateFasta, setCandidateFasta] = useState('');
   const [clusterIdentity, setClusterIdentity] = useState(0.85);
@@ -1178,6 +1243,50 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number; predictedMetricsAvailable: boolean } | null>(null);
   const [predictedSubWeights, setPredictedSubWeights] = useState<PredictedSubWeights>({ ...DEFAULT_PREDICTED_SUB_WEIGHTS });
   const [predictedTmTarget, setPredictedTmTarget] = useState(60);
+
+  const selectedEbiDatabaseOption = useMemo(
+    () => ebiDatabaseOptions.find((option) => option.id === ebiDatabase) || ebiDatabaseOptions[0],
+    [ebiDatabase, ebiDatabaseOptions],
+  );
+
+  useEffect(() => {
+    if (searchMode !== 'ebi') {
+      setEbiDatabaseMetadataStatus('idle');
+      return;
+    }
+
+    let cancelled = false;
+    setEbiDatabaseMetadataStatus('loading');
+    void fetchEbiHmmDatabases()
+      .then((data) => {
+        if (cancelled) return;
+        const databases = Array.isArray(data.databases)
+          ? data.databases.filter((entry) => entry.type === 'seq' && entry.status === 'enabled' && entry.id)
+          : [];
+        if (databases.length === 0) {
+          throw new Error('No enabled EBI HMMER sequence databases returned');
+        }
+        setEbiDatabaseOptions(databases);
+        setEbiDatabase((current) => (
+          databases.some((entry) => entry.id === current)
+            ? current
+            : (databases.find((entry) => entry.id === 'refprot')?.id || databases[0].id)
+        ));
+        setEbiDatabaseMetadataStatus('live');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setEbiDatabaseOptions(fallbackEbiHmmDatabases);
+        setEbiDatabase((current) => (
+          fallbackEbiHmmDatabases.some((entry) => entry.id === current) ? current : 'refprot'
+        ));
+        setEbiDatabaseMetadataStatus('fallback');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchMode]);
 
   const getDerivedEbiSearchStepStatus = (): StepStatus => {
     const { submit, download, enrich } = ebiSubStepState;
@@ -1255,10 +1364,20 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setFilteredRows([]);
     setFilterStats(null);
     setScoringRows([]);
+    setScoringPage(1);
+    setScoringPageSize(25);
+    setScoringTotal(0);
+    setScoringTotalPages(1);
+    setScoringPageLoading(false);
+    setScoringDownloading(false);
+    setScoringRunInfo(null);
     setAlignmentPrepInfo(null);
     setAlignmentPath('');
     setAlignmentPreviewRows([]);
     setAlignmentPreviewOffset(0);
+    setAlignmentPreviewConsensus('');
+    setAlignmentPreviewConservation([]);
+    setAlignmentPreviewColumnsTruncated(false);
     setNetworkStats({ nodes: 0, edges: 0 });
     setConsistencyStats(null);
     setRuntimeTask('idle');
@@ -1302,7 +1421,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAutoScoreFromFiltered(false);
     setScoringPositionMode('pre');
     setPreAlignmentAnchor('first');
-    setAutoDownloadScoringCsv(true);
     setClusterIdentity(0.85);
     setClusterWordSize(5);
     setNetworkPairwiseThresholdPct(85);
@@ -1314,7 +1432,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setCytoLayout('force-directed');
     setCytoCategoryColumn('phylum');
     setCytoApplyStyle(true);
-    setScoringRunInfo(null);
     setThresholdPreview(null);
     setCytoPushInfo(null);
     setScoringRules([]);
@@ -1391,7 +1508,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         if (typeof state.autoScoreFromFiltered === 'boolean') setAutoScoreFromFiltered(state.autoScoreFromFiltered);
         if (typeof state.scoringPositionMode === 'string') setScoringPositionMode(state.scoringPositionMode as ScoringPositionMode);
         if (typeof state.preAlignmentAnchor === 'string') setPreAlignmentAnchor(state.preAlignmentAnchor as PreAlignmentAnchor);
-        if (typeof state.autoDownloadScoringCsv === 'boolean') setAutoDownloadScoringCsv(state.autoDownloadScoringCsv);
         if (Array.isArray(state.scoringRules)) setScoringRules(state.scoringRules);
 
         // Clustering parameters
@@ -1583,7 +1699,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         autoScoreFromFiltered,
         scoringPositionMode,
         preAlignmentAnchor,
-        autoDownloadScoringCsv,
         // Clustering parameters
         clusterIdentity,
         clusterWordSize,
@@ -1644,7 +1759,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     autoScoreFromFiltered,
     scoringPositionMode,
     preAlignmentAnchor,
-    autoDownloadScoringCsv,
     scoringRules,
     clusterIdentity,
     clusterWordSize,
@@ -1765,10 +1879,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   }, [cdhitPreview]);
 
   useEffect(() => {
-    if (!job.loading) {
-      return;
-    }
-
     let cancelled = false;
     const poll = async () => {
       try {
@@ -1782,7 +1892,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           setRuntimeLogs(data.lines);
 
           const elapsed = Date.now() - actionStartedAtRef.current;
-          if (!data.active && elapsed > 4000) {
+          if (job.loading && !data.active && elapsed > 4000) {
             const tail = Array.isArray(data.lines) && data.lines.length > 0
               ? String(data.lines[data.lines.length - 1]).toLowerCase()
               : '';
@@ -1812,6 +1922,11 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     };
 
     void poll();
+    if (!job.loading) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const timer = setInterval(poll, 250);
     return () => {
       cancelled = true;
@@ -2238,25 +2353,22 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       preAlignmentAnchor: data.preAlignmentAnchor || preAlignmentAnchor,
       refIdUsed: data.refIdUsed ?? null,
     });
-    setScoringRows(data.preview.rows);
+    try {
+      const firstPage = await loadScoringPage(1, scoringPageSize, data.csv);
+      setScoringRows(firstPage.preview.rows);
+      setScoringPage(firstPage.page);
+      setScoringTotal(firstPage.total);
+      setScoringTotalPages(firstPage.totalPages);
+    } catch {
+      setScoringRows(data.preview.rows.slice(0, scoringPageSize));
+      setScoringPage(1);
+      setScoringTotal(Number(data.total || data.preview.rows.length));
+      setScoringTotalPages(Math.max(1, Math.ceil(Number(data.total || data.preview.rows.length) / scoringPageSize)));
+    }
 
     if (data.passedFasta) {
       setCandidateFasta(data.passedFasta);
       setNetworkSourceFasta(data.passedFasta);
-    }
-
-    if (autoDownloadScoringCsv && data.csv) {
-      const { blob, fileName } = await downloadScoringCsv(data.csv);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      a.click();
-      URL.revokeObjectURL(url);
-      setScoringRulesSuccess((prev) => {
-        const note = `Scoring results downloaded automatically: ${fileName}`;
-        return prev ? `${prev} | ${note}` : note;
-      });
     }
 
     try {
@@ -2264,6 +2376,36 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       setThresholdPreview({ total: tp.total, passed: tp.passed, ratio: tp.ratio, threshold: tp.threshold });
     } catch {
       setThresholdPreview(null);
+    }
+  };
+
+  const loadScoringResultsPage = async (nextPage: number, nextPageSize = scoringPageSize) => {
+    if (!scoringRunInfo?.csv || scoringPageLoading) return;
+    setScoringPageLoading(true);
+    try {
+      const data = await loadScoringPage(nextPage, nextPageSize, scoringRunInfo.csv);
+      setScoringRows(data.preview.rows);
+      setScoringPage(data.page);
+      setScoringPageSize(data.pageSize);
+      setScoringTotal(data.total);
+      setScoringTotalPages(data.totalPages);
+    } catch (error: any) {
+      alert(`Failed to load scoring results: ${error?.message || error}`);
+    } finally {
+      setScoringPageLoading(false);
+    }
+  };
+
+  const downloadScoringResults = async () => {
+    if (!scoringRunInfo?.csv || scoringDownloading) return;
+    setScoringDownloading(true);
+    try {
+      const { blob, fileName } = await downloadScoringCsv(scoringRunInfo.csv);
+      triggerBrowserDownload(blob, fileName);
+    } catch (error: any) {
+      alert(`Download failed: ${error?.message || error}`);
+    } finally {
+      setScoringDownloading(false);
     }
   };
 
@@ -2309,8 +2451,14 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       offset: 0,
     });
     setAlignmentPreviewRows(preview.rows || []);
+    setAlignmentPreviewOffset(Number(preview.offset || 0));
     setAlignmentPreviewTotalRecords(Number(preview.totalRecords || 0));
     setAlignmentPreviewLength(Number(preview.alignmentLength || 0));
+    setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
+    setAlignmentPreviewConsensus(preview.consensus || '');
+    setAlignmentPreviewConservation(preview.conservation || []);
+    setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
+    setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
   };
 
   const loadAlignmentPreviewPage = async (nextOffset: number) => {
@@ -2325,6 +2473,20 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewOffset(Number(preview.offset || 0));
     setAlignmentPreviewTotalRecords(Number(preview.totalRecords || 0));
     setAlignmentPreviewLength(Number(preview.alignmentLength || 0));
+    setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
+    setAlignmentPreviewConsensus(preview.consensus || '');
+    setAlignmentPreviewConservation(preview.conservation || []);
+    setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
+    setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
+  };
+
+  const downloadAlignmentFasta = async () => {
+    try {
+      const { blob, fileName } = await downloadScoringAlignmentFasta();
+      triggerBrowserDownload(blob, fileName);
+    } catch (error: any) {
+      alert(`Download failed: ${error?.message || error}`);
+    }
   };
 
   const runClusteringStep = async () => {
@@ -2351,7 +2513,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setCurrentView('similarity');
   };
 
-  const runComputeSimilarity = async () => {
+  const runComputeSimilarity = async (forceRecompute = false) => {
     const sourceForSimilarity = (
       networkSourceFasta.trim() === 'scored_passed.fasta' && candidateFasta.trim()
     )
@@ -2362,19 +2524,26 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       similarityMethod: networkSimilarityMethod,
       sourceFasta: sourceForSimilarity,
       referenceFasta: networkReferenceFasta,
+      forceRecompute,
     });
     setNetworkStats({ nodes: data.nodes, edges: data.edges });
+    setCompletionToast(data.reused
+      ? `Loaded existing similarity CSV: ${data.nodes} nodes, ${data.edges} edges; no calculation was run`
+      : `Similarity calculation complete: ${data.nodes} nodes, ${data.edges} edges`);
   };
 
-  const confirmAndRunComputeSimilarity = async () => {
+  const runComputeOrReuseSimilarity = async () => {
+    await runAction('Compute or reuse sequence similarity', () => runComputeSimilarity(false), 'similarity');
+  };
+
+  const confirmSimilarityRecompute = async () => {
     try {
       const status = await loadNetworkSimilarityStatus();
       if (status.exists) {
         setSimilarityConfirmState({ open: true, nodeTotal: status.nodeTotal, edgeTotal: status.edgeTotal });
         return;
       }
-      setJob({ loading: false, message: 'Confirmed, recomputing sequence similarity...', error: '' });
-      await runAction('Compute Sequence Similarity', runComputeSimilarity, 'similarity');
+      await runAction('Compute Sequence Similarity', () => runComputeSimilarity(true), 'similarity');
     } catch (err) {
       setJob({ loading: false, message: '', error: `Pre-computation check failed: ${String(err)}` });
     }
@@ -2395,7 +2564,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       networkAlignProgress: { current: 0, total: 1, phase: 'prepare' },
     }));
     setJob({ loading: false, message: 'Confirmed, recomputing sequence similarity...', error: '' });
-    void runAction('Compute Sequence Similarity', runComputeSimilarity, 'similarity');
+    void runAction('Force recompute sequence similarity', () => runComputeSimilarity(true), 'similarity');
   };
 
   const runPushToCytoscape = async () => {
@@ -2781,7 +2950,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                     <section className="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 space-y-3">
                       <div className="flex items-center gap-3">
-                        <span className="rounded-full bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white">Method A</span>
+                        <span className="shrink-0 whitespace-nowrap rounded-full bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white">Method A</span>
                         <div>
                           <div className="text-sm font-semibold text-slate-800">Fetch online by accession</div>
                           <div className="text-xs text-slate-500">Suitable when you only have accession, protein_id, or UniProt ID</div>
@@ -2804,7 +2973,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         />
                       </div>
                       <button
-                        className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
+                        className={`${downloadButtonClass(job.loading)} w-full py-2.5`}
                         disabled={job.loading}
                         onClick={() => runAction('Download reference sequences', runReferenceStep, 'reference')}
                       >
@@ -2813,7 +2982,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     </section>
                     <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 space-y-3">
                       <div className="flex items-center gap-3">
-                        <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white">Method B</span>
+                        <span className="shrink-0 whitespace-nowrap rounded-full bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white">Method B</span>
                         <div>
                           <div className="text-sm font-semibold text-slate-800">Upload a local FASTA file</div>
                           <div className="text-xs text-slate-500">Suitable when you already have a prepared reference sequence file and want to import it directly</div>
@@ -2997,12 +3166,28 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   {searchMode === 'ebi' ? (
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">EBI Database</label>
-                      <input
-                        className="w-full p-2 border rounded text-sm"
+                      <select
+                        className="w-full p-2 border rounded bg-white text-sm"
                         value={ebiDatabase}
                         onChange={(e) => setEbiDatabase(e.target.value)}
-                        placeholder="refprot"
-                      />
+                      >
+                        {ebiDatabaseOptions.map((database) => (
+                          <option key={database.id} value={database.id}>
+                            {database.name} — version {database.version || 'unknown'} — {database.sequenceCount == null ? 'size unavailable' : `${formatEbiSequenceCount(database.sequenceCount)} sequences`} ({database.id})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {selectedEbiDatabaseOption
+                          ? `${selectedEbiDatabaseOption.name}; version ${selectedEbiDatabaseOption.version || 'unknown'}; scale: ${selectedEbiDatabaseOption.sequenceCount == null ? 'unavailable' : `${selectedEbiDatabaseOption.sequenceCount.toLocaleString('en-US')} sequences`}; API key: ${selectedEbiDatabaseOption.id}${selectedEbiDatabaseOption.releaseDate ? `; released ${selectedEbiDatabaseOption.releaseDate}` : ''}.`
+                          : 'Select an enabled sequence database from EMBL-EBI HMMER.'}
+                        {' '}
+                        {ebiDatabaseMetadataStatus === 'loading'
+                          ? 'Refreshing version metadata; scale is matched to the exact database release.'
+                          : ebiDatabaseMetadataStatus === 'fallback'
+                            ? 'Live metadata is unavailable; using the bundled release and scale snapshot.'
+                            : 'Names and versions come from EMBL-EBI metadata; scale is the release-matched HMMER nseqs value.'}
+                      </p>
                     </div>
                   ) : (
                     <div>
@@ -3146,16 +3331,16 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   )}
                 </div>
 
-                <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,1fr))_minmax(18rem,1.35fr)] gap-3 items-end">
                   <InputNum label="Min HMM Score" value={scoreMin} step={10} onChange={setScoreMin} />
                   <InputNum label="Length Min" value={lenMin} step={10} onChange={setLenMin} />
                   <InputNum label="Length Max" value={lenMax} step={10} onChange={setLenMax} />
                   <button
-                    className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm h-10"
+                    className="min-h-10 h-auto rounded-lg bg-slate-900 px-4 py-2 text-sm leading-snug text-white hover:bg-slate-800 sm:col-span-2 xl:col-span-1 xl:whitespace-nowrap"
                     disabled={job.loading}
                     onClick={() => runAction('Filter hits', runFilterStep, 'search')}
                   >
-                    {filterStats ? `Save filtered results (filtered ${filterStats.kept}/${filterStats.total}）` : 'Save filtered results'}
+                    {filterStats ? `Save filtered results (filtered ${filterStats.kept}/${filterStats.total})` : 'Save filtered results'}
                   </button>
                 </div>
 
@@ -3442,7 +3627,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
                 <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-center gap-3 flex-wrap">
                   <button
-                    className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
+                    className={outlinedActionButtonClass(job.loading || searchPage <= 1 || selectionBoxes.length > 0)}
                     disabled={job.loading || searchPage <= 1 || selectionBoxes.length > 0}
                     onClick={() =>
                       runAction('Load previous page', async () => {
@@ -3458,10 +3643,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       })
                     }
                   >
-                    Previous Page
+                    Previous
                   </button>
                   <button
-                    className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
+                    className={outlinedActionButtonClass(job.loading || selectionBoxes.length > 0)}
                     disabled={job.loading || selectionBoxes.length > 0}
                     onClick={() =>
                       runAction('Refresh current page', async () => {
@@ -3479,7 +3664,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     Refresh
                   </button>
                   <button
-                    className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
+                    className={outlinedActionButtonClass(job.loading || searchPage >= searchTotalPages || selectionBoxes.length > 0)}
                     disabled={job.loading || searchPage >= searchTotalPages || selectionBoxes.length > 0}
                     onClick={() =>
                       runAction('Load next page', async () => {
@@ -3495,7 +3680,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       })
                     }
                   >
-                    Next Page
+                    Next
                   </button>
                   <span className="text-sm text-slate-600">
                     Data source: {searchSource} | Page {searchPage} / {searchTotalPages} {selectionBoxes.length > 0 ? '| Selecting (pagination locked)' : ''}
@@ -3508,7 +3693,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             {currentView === 'alignment' && (
               <div className="space-y-4">
                 <h1 className="text-2xl font-semibold">4. Alignment (MAFFT)</h1>
-                <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 lg:grid-cols-3 gap-3 items-end">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Filter FASTA (leave blank = backend default)</label>
                     <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="e.g.: /path/to/hits_filtered.fasta" />
@@ -3522,7 +3707,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="Leave blank = automatically use the first reference sequence" />
                   </div>
                   <button
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm h-10"
+                    className="min-h-10 w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm leading-snug text-white hover:bg-indigo-700 sm:w-auto sm:whitespace-nowrap lg:col-span-3 lg:justify-self-end"
                     disabled={job.loading}
                     onClick={() => runAction('Generate alignment file', runAlignmentStep, 'alignment')}
                   >
@@ -3554,68 +3739,74 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 )}
 
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(8rem,0.7fr)_minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(15rem,auto)] xl:items-end">
                     <InputNum label="Column Start" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
                     <InputNum label="Column End" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
-                    <div className="text-xs text-slate-600 md:col-span-2">
-                      Alignment file: {alignmentPath || '(none)'}
+                    <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2 xl:col-span-1">
+                      <div className="font-medium text-slate-700">Alignment file</div>
+                      <div className="mt-1 break-all font-mono">{alignmentPath || '(none)'}</div>
                     </div>
-                    <button
-                      className="px-3 py-2 rounded border border-slate-300 text-sm"
-                      disabled={job.loading || !alignmentPath}
-                      onClick={() => runAction('Refresh alignment preview', async () => {
-                        await loadAlignmentPreviewPage(0);
-                      })}
-                    >
-                      Refresh Preview
-                    </button>
-                    <div className="text-xs text-slate-600">
-                      rows: {alignmentPreviewRows.length}/{alignmentPreviewTotalRecords} | alnLen: {alignmentPreviewLength}
+                    <div className="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
+                      <button
+                        className={`${outlinedActionButtonClass(job.loading || !alignmentPath)} whitespace-nowrap`}
+                        disabled={job.loading || !alignmentPath}
+                        onClick={() => runAction('Refresh alignment preview', async () => {
+                          await loadAlignmentPreviewPage(0);
+                        })}
+                      >
+                        Refresh Preview
+                      </button>
+                      <button
+                        className={`${downloadButtonClass(job.loading || !alignmentPath, true)} whitespace-nowrap`}
+                        disabled={job.loading || !alignmentPath}
+                        onClick={downloadAlignmentFasta}
+                      >
+                        Download MAFFT FASTA
+                      </button>
+                    </div>
+                    <div className="text-xs text-slate-500 sm:col-span-2 xl:col-span-4 xl:text-right">
+                      Rows: {alignmentPreviewRows.length} / {alignmentPreviewTotalRecords} · Alignment length: {alignmentPreviewLength}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
-                      className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
+                      className={`${outlinedActionButtonClass(job.loading || alignmentPreviewOffset <= 0 || !alignmentPath)} whitespace-nowrap`}
                       disabled={job.loading || alignmentPreviewOffset <= 0 || !alignmentPath}
                       onClick={() => runAction('Previous alignment preview page', async () => {
                         await loadAlignmentPreviewPage(Math.max(0, alignmentPreviewOffset - alignmentPreviewLimit));
                       })}
                     >
-                      Previous Page
+                      Previous
                     </button>
                     <button
-                      className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
+                      className={`${outlinedActionButtonClass(job.loading || alignmentPreviewOffset + alignmentPreviewLimit >= alignmentPreviewTotalRecords || !alignmentPath)} whitespace-nowrap`}
                       disabled={job.loading || alignmentPreviewOffset + alignmentPreviewLimit >= alignmentPreviewTotalRecords || !alignmentPath}
                       onClick={() => runAction('Next alignment preview page', async () => {
                         await loadAlignmentPreviewPage(alignmentPreviewOffset + alignmentPreviewLimit);
                       })}
                     >
-                      Next Page
+                      Next
                     </button>
                     <span className="text-xs text-slate-500">
-                      offset: {alignmentPreviewOffset}
+                      Sequences {alignmentPreviewRows.length ? alignmentPreviewOffset + 1 : 0}–{Math.min(alignmentPreviewOffset + alignmentPreviewRows.length, alignmentPreviewTotalRecords)} of {alignmentPreviewTotalRecords}
                     </span>
                   </div>
 
-                  <div className="overflow-auto border rounded">
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-50 border-b">
-                        <tr>
-                          <th className="px-2 py-2 text-left">ID</th>
-                          <th className="px-2 py-2 text-left">Alignment Segment (Interactive Window)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {alignmentPreviewRows.map((r, idx) => (
-                          <tr key={`${r.id}-${idx}`} className="border-b last:border-b-0">
-                            <td className="px-2 py-1.5 whitespace-nowrap">{r.id}</td>
-                            <td className="px-2 py-1.5 font-mono text-[11px]">{r.segment}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  {alignmentPreviewColumnsTruncated && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      To keep the browser responsive, one preview window displays at most {alignmentPreviewMaxColumns} alignment columns. Change Column Start and refresh to inspect the next region.
+                    </div>
+                  )}
+
+                  <AlignmentViewer
+                    rows={alignmentPreviewRows}
+                    start={alignmentPreviewActualStart}
+                    alignmentLength={alignmentPreviewLength}
+                    totalRecords={alignmentPreviewTotalRecords}
+                    consensus={alignmentPreviewConsensus}
+                    conservation={alignmentPreviewConservation}
+                  />
                 </div>
                 {renderTailPanels('h-28')}
               </div>
@@ -3818,16 +4009,11 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       Import Rules JSON
                     </button>
                     <button
-                      className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
+                      className={downloadButtonClass(false, true)}
                       onClick={() => {
                         const text = JSON.stringify(scoringRules, null, 2);
                         const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'scoring_rules.json';
-                        a.click();
-                        URL.revokeObjectURL(url);
+                        triggerBrowserDownload(blob, 'scoring_rules.json');
                       }}
                     >
                       Export Rules JSON
@@ -3885,14 +4071,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   </button>
 
                   <div className="pt-1 border-t border-slate-100">
-                    <label className="flex items-center gap-2 text-sm text-slate-700 pb-2">
-                      <input
-                        type="checkbox"
-                        checked={autoDownloadScoringCsv}
-                        onChange={(e) => setAutoDownloadScoringCsv(e.target.checked)}
-                      />
-                      Automatically download the full CSV after scoring succeeds
-                    </label>
                     <InputNum label="Threshold (set after scoring)" value={threshold} step={0.1} onChange={setThreshold} />
                     <div className="text-xs text-slate-500 mt-1">Recommended to run scoring first, then adjust the threshold based on results and re-run the statistics.</div>
                     {thresholdPreview && (
@@ -3909,7 +4087,19 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     </div>
                   )}
                 </div>
-                <SimpleTable rows={scoringRows} />
+                <ScoringResultsTable
+                rows={scoringRows}
+                page={scoringPage}
+                pageSize={scoringPageSize}
+                total={scoringTotal}
+                totalPages={scoringTotalPages}
+                loading={job.loading || scoringPageLoading}
+                downloading={scoringDownloading}
+                downloadEnabled={Boolean(scoringRunInfo?.csv)}
+                onPageChange={(nextPage) => void loadScoringResultsPage(nextPage)}
+                onPageSizeChange={(nextPageSize) => void loadScoringResultsPage(1, nextPageSize)}
+                onDownload={() => void downloadScoringResults()}
+              />
                 {renderTailPanels('h-28')}
               </div>
             )}
@@ -3917,27 +4107,29 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             {currentView === 'clustering' && (
               <div className="space-y-4">
                 <h1 className="text-2xl font-semibold">6. Clustering & Export</h1>
-                <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+                <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">Candidate FASTA path (leave blank = backend default)</label>
                     <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="e.g.: /path/to/hits_filtered.fasta" />
                   </div>
                   <InputNum label="Identity (-c)" value={clusterIdentity} step={0.01} onChange={setClusterIdentity} />
                   <InputNum label="Word size (-n)" value={clusterWordSize} step={1} onChange={setClusterWordSize} />
-                  <button
-                    className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm h-10"
-                    disabled={job.loading}
-                    onClick={() => runAction(`Run CD-HIT ${Math.round(clusterIdentity * 100)}%`, runClusteringStep, 'clustering')}
-                  >
-                    Run clustering
-                  </button>
-                  <button
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-4 py-2 rounded-lg text-sm h-10 border border-slate-300"
-                    disabled={job.loading}
-                    onClick={() => runAction('Skip Clustering', skipClusteringStep, 'clustering', 0, '6. Clustering skipped, no alignment performed')}
-                  >
-                    Skip Clustering, Proceed to Similarity
-                  </button>
+                  <div className="grid grid-cols-1 gap-3 md:col-span-3 sm:grid-cols-2">
+                    <button
+                      className="min-h-10 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800"
+                      disabled={job.loading}
+                      onClick={() => runAction(`Run CD-HIT ${Math.round(clusterIdentity * 100)}%`, runClusteringStep, 'clustering')}
+                    >
+                      Run clustering
+                    </button>
+                    <button
+                      className="min-h-10 rounded-lg border border-slate-300 bg-slate-100 px-4 py-2 text-sm leading-snug text-slate-800 hover:bg-slate-200 sm:whitespace-nowrap"
+                      disabled={job.loading}
+                      onClick={() => runAction('Skip Clustering', skipClusteringStep, 'clustering', 0, '6. Clustering skipped, no alignment performed')}
+                    >
+                      Skip Clustering, Proceed to Similarity
+                    </button>
+                  </div>
                 </div>
                 <div className="text-xs text-slate-500">
                   Step 6 only handles CD-HIT; if skipped, no alignment is triggered. Sequence alignment is only performed after clicking “Compute Sequence Similarity” on the Similarity page.
@@ -4025,24 +4217,31 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     <button
                       className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm"
                       disabled={job.loading}
-                      onClick={() => void confirmAndRunComputeSimilarity()}
+                      onClick={() => void runComputeOrReuseSimilarity()}
                     >
-                      Compute Sequence Similarity
+                      Compute / Reuse Similarity
                     </button>
                     <button
                       className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-4 py-2 rounded-lg text-sm border border-slate-300"
                       disabled={job.loading}
                       onClick={() =>
-                        runAction('Load network data', async () => {
+                        runAction('Load existing similarity CSV', async () => {
                           const data = await loadNetworkData();
-                          setNetworkStats({
-                            nodes: Number.isFinite(Number(data.nodeTotal)) ? Number(data.nodeTotal) : data.nodes.length,
-                            edges: Number.isFinite(Number(data.edgeTotal)) ? Number(data.edgeTotal) : data.edges.length,
-                          });
+                          const nodes = Number.isFinite(Number(data.nodeTotal)) ? Number(data.nodeTotal) : data.nodes.length;
+                          const edges = Number.isFinite(Number(data.edgeTotal)) ? Number(data.edgeTotal) : data.edges.length;
+                          setNetworkStats({ nodes, edges });
+                          setCompletionToast(`Loaded existing similarity CSV: ${nodes} nodes, ${edges} edges; no calculation was run`);
                         })
                       }
                     >
-                      Load nodes.csv / edges_similarity.csv
+                      Load Existing CSV (No Calculation)
+                    </button>
+                    <button
+                      className="border border-amber-300 bg-amber-50 px-4 py-2 rounded-lg text-sm text-amber-800 hover:bg-amber-100"
+                      disabled={job.loading}
+                      onClick={() => void confirmSimilarityRecompute()}
+                    >
+                      Force Recompute
                     </button>
                   </div>
                 </div>
@@ -4054,19 +4253,19 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                     <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                       <span>
-                        🧪 Sequence Alignment In Progress
+                        {runtimeActive ? '🧪 Sequence Alignment In Progress' : '✅ Sequence Alignment Completed'}
                         {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                         ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                       </span>
                       <span>
-                        {Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%
+                        {progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%
                       </span>
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                       <div
                         className="bg-indigo-500 h-2.5 rounded-full transition-all duration-300"
                         style={{
-                          width: `${Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%`,
+                          width: `${progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%`,
                         }}
                       />
                     </div>
@@ -4083,7 +4282,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           <div
                             className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                             style={{
-                              width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['reference-links'].current / Math.max(1, runtimeMeta.networkAlignStages['reference-links'].total)) * 100))}%`,
+                              width: `${progressPercent(runtimeMeta.networkAlignStages['reference-links'].current, runtimeMeta.networkAlignStages['reference-links'].total)}%`,
                             }}
                           />
                         </div>
@@ -4102,7 +4301,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           <div
                             className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
                             style={{
-                              width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['candidate-pairwise'].current / Math.max(1, runtimeMeta.networkAlignStages['candidate-pairwise'].total)) * 100))}%`,
+                              width: `${progressPercent(runtimeMeta.networkAlignStages['candidate-pairwise'].current, runtimeMeta.networkAlignStages['candidate-pairwise'].total)}%`,
                             }}
                           />
                         </div>
@@ -4129,7 +4328,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <span className="text-base font-semibold text-slate-800">Network Visualization</span>
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-2 xl:w-auto xl:max-w-[920px] xl:justify-end">
                       <select className="p-1.5 border rounded text-xs" value={browserGraphMode} onChange={(e) => setBrowserGraphMode(e.target.value as any)}>
                         <option value="cytoscape">Cytoscape.js (Organic CoSE)</option>
                         <option value="d3">D3 Force</option>
@@ -4144,16 +4343,23 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         <option value="species">Species</option>
                         <option value="cluster">Cluster</option>
                       </select>
-                      <input
-                        type="number"
-                        min={40}
-                        max={100}
-                        step={1}
-                        className="w-20 p-1.5 border rounded text-xs"
-                        value={browserGraphThreshold}
-                        onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
-                        title="Browser Graph Load Threshold"
-                      />
+                      <div className="inline-flex flex-none items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 dark:border-slate-700 dark:bg-slate-900">
+                        <span className="whitespace-nowrap text-xs font-medium text-slate-700 dark:text-slate-200">Load threshold (%)</span>
+                        <input
+                          type="number"
+                          min={40}
+                          max={100}
+                          step={1}
+                          className="w-20 rounded border p-1.5 text-xs"
+                          value={browserGraphThreshold}
+                          onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
+                          aria-label="Browser graph load threshold percentage"
+                          title="Minimum edge similarity loaded into the browser graph"
+                        />
+                      </div>
+                      <span className="min-w-[220px] flex-[1_1_300px] text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                        Loads only edges with similarity ≥ this value. After loading, it becomes the minimum of the in-graph slider.
+                      </span>
                       <button
                         className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded text-xs"
                         disabled={job.loading}
@@ -4174,9 +4380,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   </div>
                   <div className="text-sm text-slate-500">
                     Nodes: <b className="text-slate-700">{networkStats.nodes}</b> · Edges: <b className="text-slate-700">{networkStats.edges}</b>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    The number above is the load threshold. After clicking “Load Network”, the in-graph slider can only be adjusted within the range of the currently loaded edge set.
                   </div>
                   {browserGraphThresholdAdjusted && (
                     <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -4206,19 +4409,19 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                     <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                       <span>
-                        🧪 Sequence Alignment In Progress
+                        {runtimeActive ? '🧪 Sequence Alignment In Progress' : '✅ Sequence Alignment Completed'}
                         {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                         ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                       </span>
                       <span>
-                        {Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%
+                        {progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%
                       </span>
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                       <div
                         className="bg-indigo-500 h-2.5 rounded-full transition-all duration-300"
                         style={{
-                          width: `${Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%`,
+                          width: `${progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%`,
                         }}
                       />
                     </div>
@@ -4235,7 +4438,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           <div
                             className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
                             style={{
-                              width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['reference-links'].current / Math.max(1, runtimeMeta.networkAlignStages['reference-links'].total)) * 100))}%`,
+                              width: `${progressPercent(runtimeMeta.networkAlignStages['reference-links'].current, runtimeMeta.networkAlignStages['reference-links'].total)}%`,
                             }}
                           />
                         </div>
@@ -4254,7 +4457,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           <div
                             className="bg-indigo-500 h-2 rounded-full transition-all duration-300"
                             style={{
-                              width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['candidate-pairwise'].current / Math.max(1, runtimeMeta.networkAlignStages['candidate-pairwise'].total)) * 100))}%`,
+                              width: `${progressPercent(runtimeMeta.networkAlignStages['candidate-pairwise'].current, runtimeMeta.networkAlignStages['candidate-pairwise'].total)}%`,
                             }}
                           />
                         </div>
@@ -4262,10 +4465,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     )}
                   </div>
                 )}
-                <div className="bg-white border border-slate-200 rounded-xl p-6 text-lg">
-                  Nodes: <b>{networkStats.nodes}</b> | Edges: <b>{networkStats.edges}</b>
-                </div>
-
                 {/* ── Cytoscape Desktop Push (Secondary) ── */}
                 <details className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                   <summary className="px-4 py-3 cursor-pointer select-none text-sm font-medium text-slate-600 hover:bg-slate-50">
@@ -4520,7 +4719,7 @@ function BlastPipelineProgressPanel({
           style={{ width: `${percent}%` }}
         />
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
         {blastPipelineSteps.map((step) => {
           const status = stepState[step.key];
           const running = status === 'running';
@@ -4687,7 +4886,12 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     refIdUsed?: string | null;
   } | null>(null);
   const [alignmentPrepInfo, setAlignmentPrepInfo] = useState<{ alignment: string; records: number } | null>(null);
-  const [autoDownloadScoringCsv, setAutoDownloadScoringCsv] = useState(true);
+  const [scoringPage, setScoringPage] = useState(1);
+  const [scoringPageSize, setScoringPageSize] = useState(25);
+  const [scoringTotal, setScoringTotal] = useState(0);
+  const [scoringTotalPages, setScoringTotalPages] = useState(1);
+  const [scoringPageLoading, setScoringPageLoading] = useState(false);
+  const [scoringDownloading, setScoringDownloading] = useState(false);
   const [thresholdPreview, setThresholdPreview] = useState<{ total: number; passed: number; ratio: number; threshold: number } | null>(null);
   const [alignmentPreviewRows, setAlignmentPreviewRows] = useState<Array<{ id: string; segment: string }>>([]);
   const [alignmentPreviewStart, setAlignmentPreviewStart] = useState(1);
@@ -4696,6 +4900,11 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [alignmentPreviewLimit] = useState(25);
   const [alignmentPreviewTotalRecords, setAlignmentPreviewTotalRecords] = useState(0);
   const [alignmentPreviewLength, setAlignmentPreviewLength] = useState(0);
+  const [alignmentPreviewActualStart, setAlignmentPreviewActualStart] = useState(1);
+  const [alignmentPreviewConsensus, setAlignmentPreviewConsensus] = useState('');
+  const [alignmentPreviewConservation, setAlignmentPreviewConservation] = useState<number[]>([]);
+  const [alignmentPreviewColumnsTruncated, setAlignmentPreviewColumnsTruncated] = useState(false);
+  const [alignmentPreviewMaxColumns, setAlignmentPreviewMaxColumns] = useState(240);
 
   const [candidateFasta, setCandidateFasta] = useState('');
   const [clusterIdentity, setClusterIdentity] = useState(0.85);
@@ -4781,10 +4990,20 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setBlastSearchStats(null);
     setBlastDbInfo(null);
     setScoringRows([]);
+    setScoringPage(1);
+    setScoringPageSize(25);
+    setScoringTotal(0);
+    setScoringTotalPages(1);
+    setScoringPageLoading(false);
+    setScoringDownloading(false);
+    setScoringRunInfo(null);
     setAlignmentPrepInfo(null);
     setAlignmentPath('');
     setAlignmentPreviewRows([]);
     setAlignmentPreviewOffset(0);
+    setAlignmentPreviewConsensus('');
+    setAlignmentPreviewConservation([]);
+    setAlignmentPreviewColumnsTruncated(false);
     setNetworkStats({ nodes: 0, edges: 0 });
     setRuntimeTask('idle');
     setRuntimeMeta({});
@@ -4854,7 +5073,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         if (typeof state.autoScoreFromFiltered === 'boolean') setAutoScoreFromFiltered(state.autoScoreFromFiltered);
         if (typeof state.scoringPositionMode === 'string') setScoringPositionMode(state.scoringPositionMode as ScoringPositionMode);
         if (typeof state.preAlignmentAnchor === 'string') setPreAlignmentAnchor(state.preAlignmentAnchor as PreAlignmentAnchor);
-        if (typeof state.autoDownloadScoringCsv === 'boolean') setAutoDownloadScoringCsv(state.autoDownloadScoringCsv);
         if (typeof state.clusterIdentity === 'number') setClusterIdentity(state.clusterIdentity);
         if (typeof state.clusterWordSize === 'number') setClusterWordSize(state.clusterWordSize);
         if (state.clusteringRunInfo !== undefined) setClusteringRunInfo(state.clusteringRunInfo);
@@ -4984,7 +5202,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         autoScoreFromFiltered,
         scoringPositionMode,
         preAlignmentAnchor,
-        autoDownloadScoringCsv,
         clusterIdentity,
         clusterWordSize,
         clusteringRunInfo,
@@ -5020,7 +5237,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     blastDbSource, blastTargetFasta, blastNcbiDb, blastEvalue, blastIdentityMin, blastQueryCovMin,
     blastSubjectLenMin, blastSubjectLenMax, blastMaxTargetSeqs, blastMergeStrategy,
     blastFilterEvalueMax, blastFilterIdentityMin, blastFilterIdentityMax, blastFilterQueryCovMin, blastFilterSubjectLenMin, blastFilterSubjectLenMax,
-    threshold, autoScoreFromFiltered, scoringPositionMode, preAlignmentAnchor, autoDownloadScoringCsv,
+    threshold, autoScoreFromFiltered, scoringPositionMode, preAlignmentAnchor,
     clusterIdentity, clusterWordSize, clusteringRunInfo, networkPairwiseThresholdPct, networkIncludeReferenceLinks, networkSimilarityMethod,
     cytoBaseUrl, cytoCollection, cytoNetworkTitle, cytoLayout, cytoCategoryColumn, cytoApplyStyle,
     recommendWeights, recommendTopN, recommendMinClusterSize, recommendMinSimilarity, recommendTemperature, recommendDiversityMode, recommendResults, recommendMeta,
@@ -5037,12 +5254,14 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     }
   }, [referencePreview, refId]);
 
-  // Log polling
+  // Log polling. Run one final fetch after loading ends so the terminal
+  // progress snapshot cannot be missed between two interval ticks.
   useEffect(() => {
-    if (!job.loading) return;
-    const iv = setInterval(async () => {
+    let cancelled = false;
+    const poll = async () => {
       try {
         const data = await loadRuntimeLogs(500);
+        if (cancelled) return;
         setRuntimeActive(Boolean(data.active));
         setRuntimeStartedAt(Number.isFinite(Number(data.startedAt)) ? Number(data.startedAt) : null);
         setRuntimeUpdatedAt(Number.isFinite(Number(data.updatedAt)) ? Number(data.updatedAt) : null);
@@ -5053,8 +5272,14 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
         }
       } catch { /* ignore */ }
-    }, 1200);
-    return () => clearInterval(iv);
+    };
+
+    void poll();
+    if (!job.loading) {
+      return () => { cancelled = true; };
+    }
+    const iv = setInterval(poll, 1200);
+    return () => { cancelled = true; clearInterval(iv); };
   }, [job.loading, autoScrollLog]);
 
   useEffect(() => {
@@ -5198,6 +5423,24 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     const data = await prepareScoringAlignment({ referenceFasta: referenceFastaPath || undefined, refId: refId || undefined });
     setAlignmentPrepInfo(data);
     setAlignmentPath(data.alignment || '');
+    setAlignmentPreviewOffset(0);
+
+    const preview = await loadScoringAlignmentPreview({
+      alignment: data.alignment,
+      start: alignmentPreviewStart,
+      end: alignmentPreviewEnd,
+      limit: alignmentPreviewLimit,
+      offset: 0,
+    });
+    setAlignmentPreviewRows(preview.rows || []);
+    setAlignmentPreviewOffset(Number(preview.offset || 0));
+    setAlignmentPreviewTotalRecords(Number(preview.totalRecords || 0));
+    setAlignmentPreviewLength(Number(preview.alignmentLength || 0));
+    setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
+    setAlignmentPreviewConsensus(preview.consensus || '');
+    setAlignmentPreviewConservation(preview.conservation || []);
+    setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
+    setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
   }
 
   async function runScoringStep() {
@@ -5209,16 +5452,49 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       preAlignmentAnchor,
     });
     setScoringRunInfo(data);
-    setScoringRows(data.preview?.rows || []);
+    try {
+      const firstPage = await loadScoringPage(1, scoringPageSize, data.csv);
+      setScoringRows(firstPage.preview.rows);
+      setScoringPage(firstPage.page);
+      setScoringTotal(firstPage.total);
+      setScoringTotalPages(firstPage.totalPages);
+    } catch {
+      const fallbackRows = data.preview?.rows || [];
+      setScoringRows(fallbackRows.slice(0, scoringPageSize));
+      setScoringPage(1);
+      setScoringTotal(Number(data.total || fallbackRows.length));
+      setScoringTotalPages(Math.max(1, Math.ceil(Number(data.total || fallbackRows.length) / scoringPageSize)));
+    }
     if (data.passedFasta) setCandidateFasta(data.passedFasta);
-    if (autoDownloadScoringCsv && data.csv) {
-      try {
-        const dl = await downloadScoringCsv(data.csv);
-        const url = URL.createObjectURL(dl.blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = dl.fileName; a.click();
-        URL.revokeObjectURL(url);
-      } catch { /* ignore */ }
+  }
+
+  async function loadScoringResultsPage(nextPage: number, nextPageSize = scoringPageSize) {
+    if (!scoringRunInfo?.csv || scoringPageLoading) return;
+    setScoringPageLoading(true);
+    try {
+      const data = await loadScoringPage(nextPage, nextPageSize, scoringRunInfo.csv);
+      setScoringRows(data.preview.rows);
+      setScoringPage(data.page);
+      setScoringPageSize(data.pageSize);
+      setScoringTotal(data.total);
+      setScoringTotalPages(data.totalPages);
+    } catch (error: any) {
+      alert(`Failed to load scoring results: ${error?.message || error}`);
+    } finally {
+      setScoringPageLoading(false);
+    }
+  }
+
+  async function downloadScoringResults() {
+    if (!scoringRunInfo?.csv || scoringDownloading) return;
+    setScoringDownloading(true);
+    try {
+      const { blob, fileName } = await downloadScoringCsv(scoringRunInfo.csv);
+      triggerBrowserDownload(blob, fileName);
+    } catch (error: any) {
+      alert(`Download failed: ${error?.message || error}`);
+    } finally {
+      setScoringDownloading(false);
     }
   }
 
@@ -5238,14 +5514,18 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     });
   }
 
-  async function runComputeSimilarity() {
+  async function runComputeSimilarity(forceRecompute = false) {
     const data = await computeNetworkSimilarity({
       includeReferenceLinks: networkIncludeReferenceLinks,
       similarityMethod: networkSimilarityMethod,
       sourceFasta: networkSourceFasta || undefined,
       referenceFasta: networkReferenceFasta || undefined,
+      forceRecompute,
     });
     setNetworkStats({ nodes: data.nodes, edges: data.edges });
+    setCompletionToast(data.reused
+      ? `Loaded existing similarity CSV: ${data.nodes} nodes, ${data.edges} edges; no calculation was run`
+      : `Similarity calculation complete: ${data.nodes} nodes, ${data.edges} edges`);
   }
 
   async function runNetworkPush() {
@@ -5325,6 +5605,20 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewOffset(Number(preview.offset || 0));
     setAlignmentPreviewTotalRecords(Number(preview.totalRecords || 0));
     setAlignmentPreviewLength(Number(preview.alignmentLength || 0));
+    setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
+    setAlignmentPreviewConsensus(preview.consensus || '');
+    setAlignmentPreviewConservation(preview.conservation || []);
+    setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
+    setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
+  };
+
+  const downloadAlignmentFasta = async () => {
+    try {
+      const { blob, fileName } = await downloadScoringAlignmentFasta();
+      triggerBrowserDownload(blob, fileName);
+    } catch (error: any) {
+      alert(`Download failed: ${error?.message || error}`);
+    }
   };
 
   const clearLogs = async () => {
@@ -5527,7 +5821,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   <section className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 space-y-3">
                     <div className="flex items-center gap-3">
-                      <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">Method A</span>
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white">Method A</span>
                       <div>
                         <div className="text-sm font-semibold text-slate-800">Fetch online by accession</div>
                         <div className="text-xs text-slate-500">Suitable when you only have accession, protein_id, or UniProt ID</div>
@@ -5545,14 +5839,14 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <textarea className="h-56 w-full rounded-lg border border-slate-200 bg-white p-3 font-mono text-xs placeholder:text-slate-400"
                         value={accessions} onChange={(e) => setAccessions(e.target.value)} placeholder={accessionPlaceholder} />
                     </div>
-                    <button className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700" disabled={job.loading}
+                    <button className={`${downloadButtonClass(job.loading)} w-full py-2.5`} disabled={job.loading}
                       onClick={() => runAction('Download reference sequences', runReferenceStep, 'reference')}>
                       Fetch online and generate ref.csv / ref.fasta
                     </button>
                   </section>
                   <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 space-y-3">
                     <div className="flex items-center gap-3">
-                      <span className="rounded-full bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white">Method B</span>
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white">Method B</span>
                       <div>
                         <div className="text-sm font-semibold text-slate-800">Upload a local FASTA file</div>
                         <div className="text-xs text-slate-500">Suitable when you already have a reference sequence file and want to proceed directly to the BLAST workflow</div>
@@ -5918,14 +6212,14 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
               {/* Hits table with pagination */}
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                <div className="flex items-center gap-3 text-sm">
+                <div className="flex flex-wrap items-center gap-3 text-sm">
                   <select className="p-1.5 border rounded text-xs" value={blastSearchSource}
                     onChange={(e) => { setBlastSearchSource(e.target.value as any); setBlastSearchPage(1); }}>
                     <option value="blast_hits_all">All Hits</option>
                     <option value="blast_hits_filtered">Filtered</option>
                   </select>
                   <div className="flex gap-2">
-                    <button className="px-2 py-1 border rounded text-xs disabled:opacity-50" disabled={blastSearchPage <= 1 || job.loading}
+                    <button className={outlinedActionButtonClass(blastSearchPage <= 1 || job.loading)} disabled={blastSearchPage <= 1 || job.loading}
                       onClick={() => runAction('Load previous page', async () => {
                         const prev = Math.max(1, blastSearchPage - 1);
                         const data = await loadBlastSearchPage(prev, blastSearchPageSize, blastSearchSource);
@@ -5933,9 +6227,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         setBlastSearchTotalPages(data.totalPages);
                         if (blastSearchSource === 'blast_hits_filtered') setBlastFilteredRows(data.preview?.rows || []);
                         else setBlastHitsRows(data.preview?.rows || []);
-                      })}>Previous Page</button>
-                    <span className="text-xs text-slate-500 py-1">{blastSearchPage}/{blastSearchTotalPages}</span>
-                    <button className="px-2 py-1 border rounded text-xs disabled:opacity-50" disabled={blastSearchPage >= blastSearchTotalPages || job.loading}
+                      })}>Previous</button>
+                    <span className="text-xs text-slate-500 py-1">Page {blastSearchPage} / {blastSearchTotalPages}</span>
+                    <button className={outlinedActionButtonClass(blastSearchPage >= blastSearchTotalPages || job.loading)} disabled={blastSearchPage >= blastSearchTotalPages || job.loading}
                       onClick={() => runAction('Load next page', async () => {
                         const next = Math.min(blastSearchTotalPages, blastSearchPage + 1);
                         const data = await loadBlastSearchPage(next, blastSearchPageSize, blastSearchSource);
@@ -5943,7 +6237,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         setBlastSearchTotalPages(data.totalPages);
                         if (blastSearchSource === 'blast_hits_filtered') setBlastFilteredRows(data.preview?.rows || []);
                         else setBlastHitsRows(data.preview?.rows || []);
-                      })}>Next Page</button>
+                      })}>Next</button>
                   </div>
                 </div>
                 <SimpleTable rows={blastSearchSource === 'blast_hits_filtered' ? blastFilteredRows : blastHitsRows} />
@@ -5957,7 +6251,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           {currentView === 'alignment' && (
             <div className="space-y-4">
               <h1 className="text-2xl font-semibold">4. Alignment (MAFFT)</h1>
-              <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+              <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 lg:grid-cols-3 gap-3 items-end">
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Filter FASTA (leave blank = backend default)</label>
                   <input className="w-full p-2 border rounded text-sm" value={candidateFasta} onChange={(e) => setCandidateFasta(e.target.value)} placeholder="e.g.: /path/to/hits_filtered.fasta" />
@@ -5971,7 +6265,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <input className="w-full p-2 border rounded text-sm" value={refId} onChange={(e) => setRefId(e.target.value)} placeholder="Leave blank = automatically use the first reference sequence" />
                 </div>
                 <button
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm h-10"
+                  className="min-h-10 w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm leading-snug text-white hover:bg-indigo-700 sm:w-auto sm:whitespace-nowrap lg:col-span-3 lg:justify-self-end"
                   disabled={job.loading}
                   onClick={() => runAction('Generate alignment file', runAlignmentStep, 'alignment')}
                 >
@@ -5980,68 +6274,74 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               </div>
 
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(8rem,0.7fr)_minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(15rem,auto)] xl:items-end">
                   <InputNum label="Column Start" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
                   <InputNum label="Column End" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
-                  <div className="text-xs text-slate-600 md:col-span-2">
-                    Alignment file: {alignmentPath || '(none)'}
+                  <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2 xl:col-span-1">
+                    <div className="font-medium text-slate-700">Alignment file</div>
+                    <div className="mt-1 break-all font-mono">{alignmentPath || '(none)'}</div>
                   </div>
-                  <button
-                    className="px-3 py-2 rounded border border-slate-300 text-sm"
-                    disabled={job.loading || !alignmentPath}
-                    onClick={() => runAction('Refresh alignment preview', async () => {
-                      await loadAlignmentPreviewPage(0);
-                    })}
-                  >
-                    Refresh Preview
-                  </button>
-                  <div className="text-xs text-slate-600">
-                    rows: {alignmentPreviewRows.length}/{alignmentPreviewTotalRecords} | alnLen: {alignmentPreviewLength}
+                  <div className="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-1 xl:justify-end">
+                    <button
+                      className={`${outlinedActionButtonClass(job.loading || !alignmentPath)} whitespace-nowrap`}
+                      disabled={job.loading || !alignmentPath}
+                      onClick={() => runAction('Refresh alignment preview', async () => {
+                        await loadAlignmentPreviewPage(0);
+                      })}
+                    >
+                      Refresh Preview
+                    </button>
+                    <button
+                      className={`${downloadButtonClass(job.loading || !alignmentPath, true)} whitespace-nowrap`}
+                      disabled={job.loading || !alignmentPath}
+                      onClick={downloadAlignmentFasta}
+                    >
+                      Download MAFFT FASTA
+                    </button>
+                  </div>
+                  <div className="text-xs text-slate-500 sm:col-span-2 xl:col-span-4 xl:text-right">
+                    Rows: {alignmentPreviewRows.length} / {alignmentPreviewTotalRecords} · Alignment length: {alignmentPreviewLength}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
-                    className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
+                    className={`${outlinedActionButtonClass(job.loading || alignmentPreviewOffset <= 0 || !alignmentPath)} whitespace-nowrap`}
                     disabled={job.loading || alignmentPreviewOffset <= 0 || !alignmentPath}
                     onClick={() => runAction('Previous alignment preview page', async () => {
                       await loadAlignmentPreviewPage(Math.max(0, alignmentPreviewOffset - alignmentPreviewLimit));
                     })}
                   >
-                    Previous Page
+                    Previous
                   </button>
                   <button
-                    className="px-3 py-1.5 rounded border border-slate-300 text-sm disabled:opacity-50"
+                    className={`${outlinedActionButtonClass(job.loading || alignmentPreviewOffset + alignmentPreviewLimit >= alignmentPreviewTotalRecords || !alignmentPath)} whitespace-nowrap`}
                     disabled={job.loading || alignmentPreviewOffset + alignmentPreviewLimit >= alignmentPreviewTotalRecords || !alignmentPath}
                     onClick={() => runAction('Next alignment preview page', async () => {
                       await loadAlignmentPreviewPage(alignmentPreviewOffset + alignmentPreviewLimit);
                     })}
                   >
-                    Next Page
+                    Next
                   </button>
                   <span className="text-xs text-slate-500">
-                    offset: {alignmentPreviewOffset}
+                    Sequences {alignmentPreviewRows.length ? alignmentPreviewOffset + 1 : 0}–{Math.min(alignmentPreviewOffset + alignmentPreviewRows.length, alignmentPreviewTotalRecords)} of {alignmentPreviewTotalRecords}
                   </span>
                 </div>
 
-                <div className="overflow-auto border rounded">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50 border-b">
-                      <tr>
-                        <th className="px-2 py-2 text-left">ID</th>
-                        <th className="px-2 py-2 text-left">Alignment Segment (Interactive Window)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {alignmentPreviewRows.map((r, idx) => (
-                        <tr key={`${r.id}-${idx}`} className="border-b last:border-b-0">
-                          <td className="px-2 py-1.5 whitespace-nowrap">{r.id}</td>
-                          <td className="px-2 py-1.5 font-mono text-[11px]">{r.segment}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {alignmentPreviewColumnsTruncated && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    To keep the browser responsive, one preview window displays at most {alignmentPreviewMaxColumns} alignment columns. Change Column Start and refresh to inspect the next region.
+                  </div>
+                )}
+
+                <AlignmentViewer
+                  rows={alignmentPreviewRows}
+                  start={alignmentPreviewActualStart}
+                  alignmentLength={alignmentPreviewLength}
+                  totalRecords={alignmentPreviewTotalRecords}
+                  consensus={alignmentPreviewConsensus}
+                  conservation={alignmentPreviewConservation}
+                />
               </div>
               {renderTailPanels('h-28')}
             </div>
@@ -6244,16 +6544,11 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     Import Rules JSON
                   </button>
                   <button
-                    className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
+                    className={downloadButtonClass(false, true)}
                     onClick={() => {
                       const text = JSON.stringify(scoringRules, null, 2);
                       const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = 'scoring_rules.json';
-                      a.click();
-                      URL.revokeObjectURL(url);
+                      triggerBrowserDownload(blob, 'scoring_rules.json');
                     }}
                   >
                     Export Rules JSON
@@ -6310,14 +6605,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 </button>
 
                 <div className="pt-1 border-t border-slate-100">
-                  <label className="flex items-center gap-2 text-sm text-slate-700 pb-2">
-                    <input
-                      type="checkbox"
-                      checked={autoDownloadScoringCsv}
-                      onChange={(e) => setAutoDownloadScoringCsv(e.target.checked)}
-                    />
-                    Automatically download the full CSV after scoring succeeds
-                  </label>
                   <InputNum label="Threshold (set after scoring)" value={threshold} step={0.1} onChange={setThreshold} />
                   <div className="text-xs text-slate-500 mt-1">Recommended to run scoring first, then adjust the threshold based on results and re-run the statistics.</div>
                   {thresholdPreview && (
@@ -6334,7 +6621,19 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   </div>
                 )}
               </div>
-              <SimpleTable rows={scoringRows} />
+              <ScoringResultsTable
+                rows={scoringRows}
+                page={scoringPage}
+                pageSize={scoringPageSize}
+                total={scoringTotal}
+                totalPages={scoringTotalPages}
+                loading={job.loading || scoringPageLoading}
+                downloading={scoringDownloading}
+                downloadEnabled={Boolean(scoringRunInfo?.csv)}
+                onPageChange={(nextPage) => void loadScoringResultsPage(nextPage)}
+                onPageSizeChange={(nextPageSize) => void loadScoringResultsPage(1, nextPageSize)}
+                onDownload={() => void downloadScoringResults()}
+              />
               {renderTailPanels('h-28')}
             </div>
           )}
@@ -6420,10 +6719,23 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <label className="block text-sm font-medium">Reference FASTA</label>
                 <input className="w-full p-2 border rounded text-sm font-mono" value={networkReferenceFasta}
                   onChange={(e) => setNetworkReferenceFasta(e.target.value)} />
-                <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
-                  onClick={() => runAction('Compute similarity', runComputeSimilarity, 'similarity')}>
-                  Compute Sequence Similarity
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm" disabled={job.loading}
+                    onClick={() => runAction('Compute or reuse similarity', () => runComputeSimilarity(false), 'similarity')}>
+                    Compute / Reuse Similarity
+                  </button>
+                  <button
+                    className="border border-amber-300 bg-amber-50 px-4 py-2 rounded-lg text-sm text-amber-800 hover:bg-amber-100"
+                    disabled={job.loading}
+                    onClick={() => {
+                      if (window.confirm('Force recomputation will replace the existing similarity CSV files. Continue?')) {
+                        void runAction('Force recompute similarity', () => runComputeSimilarity(true), 'similarity');
+                      }
+                    }}
+                  >
+                    Force Recompute
+                  </button>
+                </div>
               </div>
               {networkStats.nodes > 0 && (
                 <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm">
@@ -6438,19 +6750,19 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                   <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                     <span>
-                      🧪 Sequence Alignment In Progress
+                      {runtimeActive ? '🧪 Sequence Alignment In Progress' : '✅ Sequence Alignment Completed'}
                       {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                       ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                     </span>
                     <span>
-                      {Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%
+                      {progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%
                     </span>
                   </div>
                   <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                     <div
                       className="bg-indigo-500 h-2.5 rounded-full transition-all duration-300"
                       style={{
-                        width: `${Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%`,
+                        width: `${progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%`,
                       }}
                     />
                   </div>
@@ -6467,7 +6779,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         <div
                           className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                           style={{
-                            width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['reference-links'].current / Math.max(1, runtimeMeta.networkAlignStages['reference-links'].total)) * 100))}%`,
+                            width: `${progressPercent(runtimeMeta.networkAlignStages['reference-links'].current, runtimeMeta.networkAlignStages['reference-links'].total)}%`,
                           }}
                         />
                       </div>
@@ -6486,7 +6798,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         <div
                           className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
                           style={{
-                            width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['candidate-pairwise'].current / Math.max(1, runtimeMeta.networkAlignStages['candidate-pairwise'].total)) * 100))}%`,
+                            width: `${progressPercent(runtimeMeta.networkAlignStages['candidate-pairwise'].current, runtimeMeta.networkAlignStages['candidate-pairwise'].total)}%`,
                           }}
                         />
                       </div>
@@ -6507,7 +6819,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <span className="text-base font-semibold text-slate-800">Network Visualization</span>
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-2 xl:w-auto xl:max-w-[920px] xl:justify-end">
                     <select className="p-1.5 border rounded text-xs" value={browserGraphMode} onChange={(e) => setBrowserGraphMode(e.target.value as any)}>
                       <option value="cytoscape">Cytoscape.js (Organic CoSE)</option>
                       <option value="d3">D3 Force</option>
@@ -6522,16 +6834,23 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <option value="species">Species</option>
                       <option value="cluster">Cluster</option>
                     </select>
-                    <input
-                      type="number"
-                      min={40}
-                      max={100}
-                      step={1}
-                      className="w-20 p-1.5 border rounded text-xs"
-                      value={browserGraphThreshold}
-                      onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
-                      title="Browser Graph Load Threshold"
-                    />
+                    <div className="inline-flex flex-none items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 dark:border-slate-700 dark:bg-slate-900">
+                      <span className="whitespace-nowrap text-xs font-medium text-slate-700 dark:text-slate-200">Load threshold (%)</span>
+                      <input
+                        type="number"
+                        min={40}
+                        max={100}
+                        step={1}
+                        className="w-20 rounded border p-1.5 text-xs"
+                        value={browserGraphThreshold}
+                        onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
+                        aria-label="Browser graph load threshold percentage"
+                        title="Minimum edge similarity loaded into the browser graph"
+                      />
+                    </div>
+                    <span className="min-w-[220px] flex-[1_1_300px] text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                      Loads only edges with similarity ≥ this value. After loading, it becomes the minimum of the in-graph slider.
+                    </span>
                     <button
                       className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded text-xs"
                       disabled={job.loading}
@@ -6549,9 +6868,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       Load Network
                     </button>
                   </div>
-                </div>
-                <div className="text-xs text-slate-500">
-                  The number above is the load threshold. After clicking “Load Network”, the in-graph slider can only be adjusted within the range of the currently loaded edge set.
                 </div>
                 {browserGraphThresholdAdjusted && (
                   <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -6638,19 +6954,19 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                   <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                     <span>
-                      🧪 Sequence Alignment In Progress
+                      {runtimeActive ? '🧪 Sequence Alignment In Progress' : '✅ Sequence Alignment Completed'}
                       {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                       ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                     </span>
                     <span>
-                      {Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%
+                      {progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%
                     </span>
                   </div>
                   <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                     <div
                       className="bg-indigo-500 h-2.5 rounded-full transition-all duration-300"
                       style={{
-                        width: `${Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%`,
+                        width: `${progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%`,
                       }}
                     />
                   </div>
@@ -6667,7 +6983,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         <div
                           className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                           style={{
-                            width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['reference-links'].current / Math.max(1, runtimeMeta.networkAlignStages['reference-links'].total)) * 100))}%`,
+                            width: `${progressPercent(runtimeMeta.networkAlignStages['reference-links'].current, runtimeMeta.networkAlignStages['reference-links'].total)}%`,
                           }}
                         />
                       </div>
@@ -6686,7 +7002,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         <div
                           className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
                           style={{
-                            width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['candidate-pairwise'].current / Math.max(1, runtimeMeta.networkAlignStages['candidate-pairwise'].total)) * 100))}%`,
+                            width: `${progressPercent(runtimeMeta.networkAlignStages['candidate-pairwise'].current, runtimeMeta.networkAlignStages['candidate-pairwise'].total)}%`,
                           }}
                         />
                       </div>
@@ -6901,11 +7217,9 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
   const [autoScrollLog, setAutoScrollLog] = useState(true);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // ── Effect: Poll runtime logs when loading ──
+  // ── Effect: Poll runtime logs while loading, then fetch once more after
+  // completion so the final progress values are guaranteed to reach the UI. ──
   useEffect(() => {
-    if (!loading) {
-      return;
-    }
     let cancelled = false;
     const poll = async () => {
       try {
@@ -6921,6 +7235,9 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
       } catch { /* ignore */ }
     };
     void poll();
+    if (!loading) {
+      return () => { cancelled = true; };
+    }
     const timer = setInterval(poll, 300);
     return () => { cancelled = true; clearInterval(timer); };
   }, [loading]);
@@ -7222,7 +7539,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
     }
   };
 
-  const doComputeSimilarity = async () => {
+  const doComputeSimilarity = async (forceRecompute = false) => {
     if (!selectedTaskId) return;
     setLoading(true);
     setError('');
@@ -7231,6 +7548,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
       const data = await computeNetworkSimilarity({
         includeReferenceLinks: networkIncludeReferenceLinks,
         similarityMethod: networkSimilarityMethod,
+        forceRecompute,
       });
       if (!data.ok) throw new Error(data.message || 'Similarity computation failed');
       setSimilarityStatus({ nodes: data.nodes, edges: data.edges });
@@ -7473,30 +7791,43 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 Include Edges Between Reference Sequences
               </label>
             </div>
-            <button
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
-              disabled={loading}
-              onClick={doComputeSimilarity}
-            >
-              {loading ? 'Computing...' : 'Compute Sequence Similarity'}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                disabled={loading}
+                onClick={() => void doComputeSimilarity(false)}
+              >
+                {loading ? 'Working...' : 'Compute / Reuse Similarity'}
+              </button>
+              <button
+                className="border border-amber-300 bg-amber-50 px-5 py-2 rounded-lg text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                disabled={loading}
+                onClick={() => {
+                  if (window.confirm('Force recomputation will replace the existing similarity CSV files. Continue?')) {
+                    void doComputeSimilarity(true);
+                  }
+                }}
+              >
+                Force Recompute
+              </button>
+            </div>
             {loading && runtimeMeta?.networkAlignProgress && (
               <div className="w-full bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-3">
                 <div className="flex justify-between text-xs text-slate-600 mb-2 font-medium">
                   <span>
-                    🧪 Sequence Alignment In Progress
+                    {runtimeActive ? '🧪 Sequence Alignment In Progress' : '✅ Sequence Alignment Completed'}
                     {runtimeMeta.networkAlignProgress.phase ? `（${runtimeMeta.networkAlignProgress.phase}）` : ''}
                     ：{runtimeMeta.networkAlignProgress.current} / {runtimeMeta.networkAlignProgress.total}
                   </span>
                   <span>
-                    {Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%
+                    {progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%
                   </span>
                 </div>
                 <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
                   <div
                     className="bg-indigo-500 h-2.5 rounded-full transition-all duration-300"
                     style={{
-                      width: `${Math.min(100, Math.round((runtimeMeta.networkAlignProgress.current / Math.max(1, runtimeMeta.networkAlignProgress.total)) * 100))}%`,
+                      width: `${progressPercent(runtimeMeta.networkAlignProgress.current, runtimeMeta.networkAlignProgress.total)}%`,
                     }}
                   />
                 </div>
@@ -7508,7 +7839,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                       <div className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['reference-links'].current / Math.max(1, runtimeMeta.networkAlignStages['reference-links'].total)) * 100))}%` }} />
+                        style={{ width: `${progressPercent(runtimeMeta.networkAlignStages['reference-links'].current, runtimeMeta.networkAlignStages['reference-links'].total)}%` }} />
                     </div>
                   </div>
                 )}
@@ -7520,7 +7851,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                     </div>
                     <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                       <div className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.min(100, Math.round((runtimeMeta.networkAlignStages['candidate-pairwise'].current / Math.max(1, runtimeMeta.networkAlignStages['candidate-pairwise'].total)) * 100))}%` }} />
+                        style={{ width: `${progressPercent(runtimeMeta.networkAlignStages['candidate-pairwise'].current, runtimeMeta.networkAlignStages['candidate-pairwise'].total)}%` }} />
                     </div>
                   </div>
                 )}
@@ -7545,7 +7876,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
             {/* ── Browser Graph (Primary) ── */}
             <div className="flex items-center justify-between flex-wrap gap-2">
               <span className="text-base font-semibold text-slate-800">Network Visualization</span>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-2 xl:w-auto xl:max-w-[920px] xl:justify-end">
                 <select className="p-1.5 border rounded text-xs" value={browserGraphMode} onChange={(e) => setBrowserGraphMode(e.target.value as any)}>
                   <option value="cytoscape">Cytoscape.js (Organic CoSE)</option>
                   <option value="d3">D3 Force</option>
@@ -7558,16 +7889,23 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                   <option value="cluster">Cluster</option>
                   <option value="species">Species</option>
                 </select>
-                <input
-                  type="number"
-                  min={40}
-                  max={100}
-                  step={1}
-                  className="w-20 p-1.5 border rounded text-xs"
-                  value={browserGraphThreshold}
-                  onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
-                  title="Browser Graph Load Threshold"
-                />
+                <div className="inline-flex flex-none items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 dark:border-slate-700 dark:bg-slate-900">
+                  <span className="whitespace-nowrap text-xs font-medium text-slate-700 dark:text-slate-200">Load threshold (%)</span>
+                  <input
+                    type="number"
+                    min={40}
+                    max={100}
+                    step={1}
+                    className="w-20 rounded border p-1.5 text-xs"
+                    value={browserGraphThreshold}
+                    onChange={(e) => setBrowserGraphThreshold(Math.max(40, Math.min(100, Number(e.target.value) || 40)))}
+                    aria-label="Browser graph load threshold percentage"
+                    title="Minimum edge similarity loaded into the browser graph"
+                  />
+                </div>
+                <span className="min-w-[220px] flex-[1_1_300px] text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                  Loads only edges with similarity ≥ this value. After loading, it becomes the minimum of the in-graph slider.
+                </span>
                 <button
                   className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded text-xs disabled:opacity-50"
                   disabled={loading}
@@ -7593,9 +7931,6 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                   Load Network
                 </button>
               </div>
-            </div>
-            <div className="text-xs text-slate-500">
-              The number above is the load threshold. After clicking “Load Network”, the in-graph slider can only be adjusted within the range of the currently loaded edge set.
             </div>
             {browserGraphThresholdAdjusted && (
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -8006,7 +8341,7 @@ function PipelineProgressPanel({
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
         {pipelineSteps.map((step) => {
           const status = stepState[step.key];
           const running = status === 'running';
@@ -8346,7 +8681,7 @@ function LogPanel({
         >
           Collapse repeats: {foldRepeated ? 'On' : 'Off'}
         </button>
-        <button className="px-2 py-1 border border-slate-700 rounded hover:bg-slate-900" onClick={downloadLogs}>
+        <button className={downloadButtonClass(false, true)} onClick={downloadLogs}>
           Download Log
         </button>
       </div>
@@ -8775,6 +9110,120 @@ function InputNum({
   );
 }
 
+function ScoringResultsTable({
+  rows,
+  page,
+  pageSize,
+  total,
+  totalPages,
+  loading,
+  downloading,
+  downloadEnabled,
+  onPageChange,
+  onPageSizeChange,
+  onDownload,
+}: {
+  rows: Array<Record<string, string>>;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  loading: boolean;
+  downloading: boolean;
+  downloadEnabled: boolean;
+  onPageChange: (nextPage: number) => void;
+  onPageSizeChange: (nextPageSize: number) => void;
+  onDownload: () => void;
+}) {
+  if (!rows.length && !downloadEnabled) {
+    return null;
+  }
+
+  const headers = rows.length > 0 ? Object.keys(rows[0]) : [];
+  const safeTotalPages = Math.max(1, totalPages);
+  const start = total > 0 ? (page - 1) * pageSize + 1 : 0;
+  const end = total > 0 ? Math.min(total, start + rows.length - 1) : 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3">
+        <span className="text-xs text-slate-500">
+          Scoring results {total > 0 ? `${start}–${end} of ${total}` : '(no rows)'}
+        </span>
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          Rows per page
+          <select
+            value={pageSize}
+            disabled={loading}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-slate-700 disabled:opacity-50"
+          >
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={200}>200</option>
+          </select>
+        </label>
+      </div>
+
+      {rows.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <table className="w-full whitespace-nowrap text-left text-xs">
+            <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-slate-500 uppercase">
+              <tr>
+                <th className="px-3 py-2 text-left">#</th>
+                {headers.map((header) => (
+                  <th className="px-3 py-2 text-left" key={header}>{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`${page}-${index}`} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
+                  <td className="px-3 py-1.5 text-slate-400">{(page - 1) * pageSize + index + 1}</td>
+                  {headers.map((header) => (
+                    <td className="px-3 py-1.5 text-slate-700" key={header}>{String(row[header] ?? '')}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <button
+            type="button"
+            className={outlinedActionButtonClass(page <= 1 || loading)}
+            disabled={page <= 1 || loading}
+            onClick={() => onPageChange(Math.max(1, page - 1))}
+          >
+            Previous
+          </button>
+          <span>Page {page} / {safeTotalPages}</span>
+          <button
+            type="button"
+            className={outlinedActionButtonClass(page >= safeTotalPages || loading)}
+            disabled={page >= safeTotalPages || loading}
+            onClick={() => onPageChange(Math.min(safeTotalPages, page + 1))}
+          >
+            Next
+          </button>
+        </div>
+        <button
+          type="button"
+          className={downloadButtonClass(!downloadEnabled || downloading)}
+          disabled={!downloadEnabled || downloading}
+          onClick={onDownload}
+        >
+          {downloading ? 'Downloading…' : 'Download Scoring CSV'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SimpleTable({
   rows,
   highlightValue,
@@ -8860,22 +9309,22 @@ function ReferencePreviewTable({
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-auto">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 text-xs text-slate-600">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 border-b border-slate-200 text-xs text-slate-600">
         <span>{displayTitle}: page {page}/{totalPages} ({start}-{end} / {allRows.length})</span>
         <div className="flex items-center gap-2">
           <button
-            className="px-2 py-1 border rounded disabled:opacity-50"
+            className={outlinedActionButtonClass(page <= 1)}
             disabled={page <= 1}
             onClick={() => onPageChange(Math.max(1, page - 1))}
           >
-            Previous Page
+            Previous
           </button>
           <button
-            className="px-2 py-1 border rounded disabled:opacity-50"
+            className={outlinedActionButtonClass(page >= totalPages)}
             disabled={page >= totalPages}
             onClick={() => onPageChange(Math.min(totalPages, page + 1))}
           >
-            Next Page
+            Next
           </button>
         </div>
       </div>

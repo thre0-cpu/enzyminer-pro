@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
+import { downloadButtonClass, downloadSelectClass, outlinedActionButtonClass } from './uiStyles';
+
 import {
   exportCandidateCsv,
   exportRecommendedFasta,
@@ -65,7 +67,7 @@ export function CandidateSaveControls({
     <div className="inline-flex overflow-hidden rounded-lg border border-emerald-700 shadow-sm">
       <button
         type="button"
-        className="bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className={downloadButtonClass(saving || ids.length === 0)}
         onClick={handleSave}
         disabled={saving || ids.length === 0}
       >
@@ -76,19 +78,13 @@ export function CandidateSaveControls({
         value={format}
         onChange={(event) => setFormat(event.target.value as SaveFormat)}
         disabled={saving || ids.length === 0}
-        className="border-l border-emerald-700 bg-emerald-50 px-2 py-2 text-sm font-medium text-emerald-900 outline-none disabled:opacity-50"
+        className={downloadSelectClass}
       >
         <option value="fasta">FASTA</option>
         <option value="csv">CSV</option>
       </select>
     </div>
   );
-}
-
-function selectionButtonClass(disabled = false) {
-  return `rounded-lg border px-3 py-1.5 text-xs font-medium ${disabled
-    ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400'
-    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`;
 }
 
 export function SystemRecommendationResults({
@@ -133,7 +129,7 @@ export function SystemRecommendationResults({
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            className={selectionButtonClass(pageCandidates.length === 0)}
+            className={outlinedActionButtonClass(pageCandidates.length === 0)}
             disabled={pageCandidates.length === 0}
             onClick={() => addIds(pageCandidates.map((candidate) => candidate.id))}
           >
@@ -141,7 +137,7 @@ export function SystemRecommendationResults({
           </button>
           <button
             type="button"
-            className={selectionButtonClass(candidates.length === 0)}
+            className={outlinedActionButtonClass(candidates.length === 0)}
             disabled={candidates.length === 0}
             onClick={() => setSelectedIds(new Set(candidates.map((candidate) => candidate.id)))}
           >
@@ -149,7 +145,7 @@ export function SystemRecommendationResults({
           </button>
           <button
             type="button"
-            className={selectionButtonClass(selectedIds.size === 0)}
+            className={outlinedActionButtonClass(selectedIds.size === 0)}
             disabled={selectedIds.size === 0}
             onClick={() => setSelectedIds(new Set())}
           >
@@ -236,7 +232,7 @@ export function SystemRecommendationResults({
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <button
             type="button"
-            className={selectionButtonClass(safePage <= 1)}
+            className={outlinedActionButtonClass(safePage <= 1)}
             disabled={safePage <= 1}
             onClick={() => setPage((value) => Math.max(1, value - 1))}
           >
@@ -245,7 +241,7 @@ export function SystemRecommendationResults({
           <span>Page {safePage} / {totalPages}</span>
           <button
             type="button"
-            className={selectionButtonClass(safePage >= totalPages)}
+            className={outlinedActionButtonClass(safePage >= totalPages)}
             disabled={safePage >= totalPages}
             onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
           >
@@ -588,7 +584,7 @@ export function ManualFilteringPanel({
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
           <button
             type="button"
-            className={selectionButtonClass(conditions.length >= 20)}
+            className={outlinedActionButtonClass(conditions.length >= 20)}
             disabled={conditions.length >= 20}
             onClick={() => setConditions((previous) => [...previous, createCondition('kcat')])}
           >
@@ -658,13 +654,13 @@ export function ManualFilteringPanel({
               Matched <span className="font-semibold text-slate-900">{filteredCount}</span> of {totalPredicted} predicted candidates
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className={selectionButtonClass(rows.length === 0)} disabled={rows.length === 0} onClick={() => addIds(rows.map((row) => row.id))}>
+              <button type="button" className={outlinedActionButtonClass(rows.length === 0)} disabled={rows.length === 0} onClick={() => addIds(rows.map((row) => row.id))}>
                 Select Current Page
               </button>
-              <button type="button" className={selectionButtonClass(matchingIds.length === 0)} disabled={matchingIds.length === 0} onClick={() => setSelectedIds(new Set(matchingIds))}>
+              <button type="button" className={outlinedActionButtonClass(matchingIds.length === 0)} disabled={matchingIds.length === 0} onClick={() => setSelectedIds(new Set(matchingIds))}>
                 Select All {filteredCount}
               </button>
-              <button type="button" className={selectionButtonClass(selectedIds.size === 0)} disabled={selectedIds.size === 0} onClick={() => setSelectedIds(new Set())}>
+              <button type="button" className={outlinedActionButtonClass(selectedIds.size === 0)} disabled={selectedIds.size === 0} onClick={() => setSelectedIds(new Set())}>
                 Clear Selection
               </button>
               <span className="text-xs text-slate-500">Selected {selectedIds.size}</span>
@@ -734,9 +730,9 @@ export function ManualFilteringPanel({
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-              <button type="button" className={selectionButtonClass(page <= 1 || loading)} disabled={page <= 1 || loading} onClick={() => void executeFilter(page - 1, appliedQueryRef.current)}>Previous</button>
+              <button type="button" className={outlinedActionButtonClass(page <= 1 || loading)} disabled={page <= 1 || loading} onClick={() => void executeFilter(page - 1, appliedQueryRef.current)}>Previous</button>
               <span>Page {page} / {totalPages}</span>
-              <button type="button" className={selectionButtonClass(page >= totalPages || loading)} disabled={page >= totalPages || loading} onClick={() => void executeFilter(page + 1, appliedQueryRef.current)}>Next</button>
+              <button type="button" className={outlinedActionButtonClass(page >= totalPages || loading)} disabled={page >= totalPages || loading} onClick={() => void executeFilter(page + 1, appliedQueryRef.current)}>Next</button>
               <label className="ml-2 flex items-center gap-2">
                 Rows per page
                 <select

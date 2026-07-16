@@ -1,5 +1,7 @@
 # EnzyMiner Pro
 
+当前版本：**V1.0.1**
+
 高通量酶挖掘全栈工具平台，支持 **HMMER**、**BLAST** 和 **Compare** 三种模块，涵盖从参考序列管理到 Cytoscape 网络可视化和候选序列智能推荐的完整流水线。
 
 - **Frontend**: React + TypeScript + Vite + Tailwind CSS
@@ -17,7 +19,7 @@
 | 1 | **Reference** | 从 UniProt 获取参考序列（支持手动上传/粘贴），生成 `ref.csv` + `ref.fasta` |
 | 2 | **Build DB** | 使用 `makeblastdb` 构建本地 BLAST 数据库，或选择 NCBI 远程搜索模式 |
 | 3 | **BLAST Search** | 运行 `blastp` 搜索，支持多 query 合并策略（best-evalue / union），过滤命中结果，**NCBI 分类注释**（查询 NCBI Entrez 自动填充 kingdom/phylum/class/species） |
-| 4 | **Alignment** | 使用 MAFFT 进行多序列比对，支持列范围预览 |
+| 4 | **Alignment** | 使用 MAFFT 进行多序列比对，支持轻量残基着色、共识序列、列范围预览和结果 FASTA 下载 |
 | 5 | **Scoring** | 基于比对位点的自定义打分规则，支持 JSON 导入/导出，阈值过滤 |
 | 6 | **Clustering** | CD-HIT 聚类（默认 85% identity），去冗余 |
 | 7 | **Similarity** | 全序列 pairwise 相似性计算（global/local alignment），进度条实时显示 |
@@ -31,7 +33,7 @@
 | 1 | **Reference** | 从 UniProt 获取参考序列 |
 | 2 | **HMM Build** | MAFFT 多序列比对 → `hmmbuild` 构建 HMM profile |
 | 3 | **EBI Search** | 提交 HMMER 搜索至 EBI API，下载命中结果，**UniProt 注释**（批量查询 UniProt 获取 taxonomy + 序列长度） |
-| 4 | **Alignment** | MAFFT 比对参考 + 候选序列，可视化预览 |
+| 4 | **Alignment** | MAFFT 比对参考 + 候选序列，支持轻量残基着色、共识序列、列范围预览和结果 FASTA 下载 |
 | 5 | **Scoring** | 自定义位点打分规则，支持 JSON 导入/导出 |
 | 6 | **Clustering** | CD-HIT 聚类去冗余 |
 | 7 | **Similarity** | Pairwise 相似性计算 |
@@ -236,7 +238,9 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 - `POST /api/search/ebi/uniprot-fill` — UniProt 注释
 
 ### 共享步骤
-- `POST /api/alignment/run` — MAFFT 比对
+- `POST /api/scoring/prepare-alignment` — 生成 `scoring_input_auto.mafft.fasta` MAFFT 比对文件
+- `GET /api/scoring/alignment-preview` — 分页、分列加载轻量比对预览（单个窗口最多 240 列）
+- `GET /api/scoring/alignment-download` — 下载生成的 `scoring_input_auto.mafft.fasta`
 - `POST /api/scoring/run` — 打分
 - `POST /api/clustering/run` — CD-HIT 聚类
 - `POST /api/network/compute-similarity` — 相似性计算

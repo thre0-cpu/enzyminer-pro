@@ -111,6 +111,18 @@ body {
   background: #94a3b8;
 }
 
+/* Keep the browser fullscreen top layer aligned with the active application theme.
+   The explicit backdrop prevents the user-agent's white fullscreen canvas from
+   showing through around the graph. */
+.network-graph-shell:fullscreen {
+  background-color: var(--color-science-bg);
+  color: var(--color-science-text);
+}
+
+.network-graph-shell:fullscreen::backdrop {
+  background-color: var(--color-science-bg);
+}
+
 /* ===== Dark Mode ===== */
 
 .dark {

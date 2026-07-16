@@ -101,6 +101,27 @@ const runtimeStaleMs = Number(process.env.RUNTIME_STALE_MS || 45 * 60 * 1000);
 const uniprotFillTimeoutMs = Number(process.env.UNIPROT_FILL_TIMEOUT_MS || 30 * 60 * 1000);
 const ebiSearchUrl = 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/search/hmmsearch';
 const ebiResultUrl = 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/result';
+const ebiDatabasesUrl = process.env.EBI_HMMER_DATABASES_URL || 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/search/databases';
+const ebiDatabaseCacheTtlMs = 6 * 60 * 60 * 1000;
+let ebiDatabaseCache = { fetchedAt: 0, databases: [] };
+
+// The database metadata endpoint currently omits sequence counts. These values
+// were read from result.stats.nseqs after one low-result probe search per exact
+// EMBL-EBI database release on 2026-07-16. Keying by id + version prevents a
+// future release from inheriting a stale count.
+const ebiDatabaseSequenceCountsByRelease = new Map([
+  ['refprot@2025_01', 89_460_830],
+  ['swissprot@2025_01', 503_053],
+  ['uniprot@2025_01', 245_001_337],
+  ['pdb@03.25', 170_694],
+  ['rp15@2024_04', 5_866_326],
+  ['rp35@2024_04', 14_873_234],
+  ['rp55@2024_04', 27_065_347],
+  ['rp75@2024_04', 37_698_713],
+  ['mgnify30_c2@2026_07', 128_674_267],
+  ['mgnify30_c5_fl@2026_07', 20_911_652],
+  ['mgnify30_c5_ppfam@2026_07', 18_155_509],
+]);
 
 const uniprotSeqCache = new Map();
 const runtimeContext = new AsyncLocalStorage();
@@ -407,6 +428,34 @@ function updateNetworkAlignProgress(patch, taskId = getCurrentTaskId()) {
       total: Number.isFinite(overallTotal) ? Math.max(1, overallTotal) : 1,
     },
     networkAlignStages: nextStages,
+  };
+  runtimeState.updatedAt = Date.now();
+}
+
+function completeNetworkAlignProgress(taskId = getCurrentTaskId()) {
+  const runtimeState = getRuntimeState(taskId);
+  const prevMeta = runtimeState.meta || {};
+  const prevProgress = prevMeta.networkAlignProgress;
+  const prevStages = (prevMeta.networkAlignStages && typeof prevMeta.networkAlignStages === 'object')
+    ? prevMeta.networkAlignStages
+    : {};
+  const completedStages = Object.fromEntries(
+    Object.entries(prevStages).map(([phase, value]) => {
+      const total = Math.max(1, Number(value?.total) || 1);
+      return [phase, { current: total, total }];
+    }),
+  );
+
+  runtimeState.meta = {
+    ...prevMeta,
+    networkAlignProgress: prevProgress
+      ? {
+          ...prevProgress,
+          current: Math.max(1, Number(prevProgress.total) || 1),
+          total: Math.max(1, Number(prevProgress.total) || 1),
+        }
+      : prevProgress,
+    networkAlignStages: completedStages,
   };
   runtimeState.updatedAt = Date.now();
 }
@@ -837,11 +886,15 @@ async function predictECMock(seq) {
   return [{ ec: ecs[idx], score }];
 }
 
-function createPredictionProgressTracker(items, modes) {
-  const totalItems = items.length;
+function createPredictionProgressTracker(itemsByPredictor, modes) {
+  const predictorNames = ['cataPro', 'solubility', 'ec', 'tm'];
   const startedAt = Date.now();
   const emaMsPerItem = {};
+  const itemCount = (name) => Array.isArray(itemsByPredictor?.[name])
+    ? itemsByPredictor[name].length
+    : 0;
   const batchCount = (name) => {
+    const totalItems = itemCount(name);
     if (!totalItems) return 0;
     if (!modes[name]) return 1;
     return name === 'tm'
@@ -849,20 +902,24 @@ function createPredictionProgressTracker(items, modes) {
       : Math.ceil(totalItems / PREDICTION_BATCH_SIZE);
   };
   const predictors = Object.fromEntries(
-    ['cataPro', 'solubility', 'ec', 'tm'].map((name) => [name, {
-      current: 0,
-      total: totalItems,
-      completedBatches: 0,
-      totalBatches: batchCount(name),
-      status: totalItems ? 'pending' : 'done',
-      mode: modes[name] ? 'real' : 'mock',
-      elapsedMs: 0,
-      estimatedRemainingMs: totalItems ? null : 0,
-    }]),
+    predictorNames.map((name) => {
+      const totalItems = itemCount(name);
+      return [name, {
+        current: 0,
+        total: totalItems,
+        completedBatches: 0,
+        totalBatches: batchCount(name),
+        status: totalItems ? 'pending' : 'done',
+        mode: modes[name] ? 'real' : 'mock',
+        elapsedMs: 0,
+        estimatedRemainingMs: totalItems ? null : 0,
+      }];
+    }),
   );
+  const totalItems = predictorNames.reduce((sum, name) => sum + itemCount(name), 0);
   const state = {
     current: 0,
-    total: totalItems * 4,
+    total: totalItems,
     done: totalItems === 0,
     startedAt,
     elapsedMs: 0,
@@ -1185,11 +1242,80 @@ async function loadPredictedMetricsMap(workDir) {
   }
 }
 
-function predictionRowMatchesModes(row, modes) {
-  return row?.cataPro_source === (modes.cataPro ? 'real' : 'mock')
-    && row?.solubility_source === (modes.solubility ? 'real' : 'mock')
-    && row?.tm_source === (modes.tm ? 'real' : 'mock')
-    && row?.ec_source === (modes.ec ? 'real' : 'mock');
+const PREDICTION_NAMES = ['cataPro', 'solubility', 'ec', 'tm'];
+
+function hasValidPredictionSource(value) {
+  return value === 'real' || value === 'mock';
+}
+
+function predictionRowHasValidValue(row, predictor) {
+  if (!row) return false;
+  if (predictor === 'cataPro') {
+    return hasValidPredictionSource(row.cataPro_source)
+      && Number.isFinite(Number(row.kcat))
+      && Number.isFinite(Number(row.km));
+  }
+  if (predictor === 'solubility') {
+    return hasValidPredictionSource(row.solubility_source)
+      && Number.isFinite(Number(row.solubility));
+  }
+  if (predictor === 'tm') {
+    return hasValidPredictionSource(row.tm_source)
+      && Number.isFinite(Number(row.tm));
+  }
+  if (predictor === 'ec') {
+    return hasValidPredictionSource(row.ec_source)
+      && Boolean(String(row.ec_top1 || '').trim())
+      && Number.isFinite(Number(row.ec_score1));
+  }
+  return false;
+}
+
+function sequenceHashMapFromCacheContext(context) {
+  return new Map(Array.isArray(context?.sequences) ? context.sequences : []);
+}
+
+function predictionInputContextMatches({
+  predictor,
+  id,
+  cachedContext,
+  currentContext,
+  cachedSequenceHashes,
+  currentSequenceHashes,
+}) {
+  if (!cachedContext || cachedContext.version !== currentContext.version) return false;
+
+  const currentSequenceHash = currentSequenceHashes.get(id);
+  if (!currentSequenceHash || cachedSequenceHashes.get(id) !== currentSequenceHash) return false;
+
+  if (predictor === 'cataPro' && String(cachedContext.smiles || '') !== String(currentContext.smiles || '')) {
+    return false;
+  }
+
+  const cachedUrl = String(cachedContext.predictors?.[predictor]?.url || '');
+  const currentUrl = String(currentContext.predictors?.[predictor]?.url || '');
+  return Boolean(cachedUrl && currentUrl && cachedUrl === currentUrl);
+}
+
+function predictionNeedsRecompute({
+  predictor,
+  id,
+  row,
+  cachedContext,
+  currentContext,
+  cachedSequenceHashes,
+  currentSequenceHashes,
+  forceRecompute,
+}) {
+  if (forceRecompute) return true;
+  return !predictionInputContextMatches({
+    predictor,
+    id,
+    cachedContext,
+    currentContext,
+    cachedSequenceHashes,
+    currentSequenceHashes,
+  }) || !predictionRowHasValidValue(row, predictor);
 }
 
 function sanitizeFastaId(value) {
@@ -2137,22 +2263,27 @@ async function computePairSimilarityMapMmseqs(workDir, queryEntries, targetEntri
     ? Math.max(0, completedBeforeRaw)
     : 0;
 
+  const stageTotal = Math.max(1, overallTotal);
+  const remainingStageTotal = Math.max(0, stageTotal - completedBefore);
+
   if (!queryList.length || !targetList.length) {
     updateNetworkAlignProgress({
       phase: phaseLabel,
-      stageCurrent: 0,
-      stageTotal: Math.max(1, fallbackTotal),
+      stageCurrent: Math.min(stageTotal, completedBefore),
+      stageTotal,
       overallCurrent: Math.min(overallTotal, completedBefore),
       overallTotal,
     });
     return new Map();
   }
 
-  const stageTotal = Math.max(1, fallbackTotal);
   let lastStageCurrent = -1;
   const updateMmseqsProgressByRatio = (ratio) => {
     const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
-    const stageCurrent = Math.max(0, Math.min(stageTotal, Math.round(stageTotal * clamped)));
+    const stageCurrent = Math.max(
+      0,
+      Math.min(stageTotal, completedBefore + Math.round(remainingStageTotal * clamped)),
+    );
     if (stageCurrent === lastStageCurrent && clamped < 1) {
       return;
     }
@@ -2164,7 +2295,7 @@ async function computePairSimilarityMapMmseqs(workDir, queryEntries, targetEntri
       phase: phaseLabel,
       stageCurrent,
       stageTotal,
-      overallCurrent: Math.max(0, Math.min(overallTotal, completedBefore + stageCurrent)),
+      overallCurrent: Math.max(0, Math.min(overallTotal, stageCurrent)),
       overallTotal,
     });
   };
@@ -2328,31 +2459,38 @@ async function computePairSimilarityPctBatchBiopython(workDir, pairs, method, pr
   const similarityMethod = normalizeSimilarityMethod(method);
   const scriptPath = path.join(projectRoot, 'backend', 'biopython_pairwise_similarity.py');
 
-  const overallTotal = Number.isFinite(Number(progress?.overallTotal))
-    ? Number(progress.overallTotal)
-    : safePairs.length;
-  const completedBefore = Number.isFinite(Number(progress?.completedBefore))
-    ? Number(progress.completedBefore)
-    : 0;
+  const overallTotal = Math.max(
+    1,
+    Number.isFinite(Number(progress?.overallTotal))
+      ? Number(progress.overallTotal)
+      : safePairs.length,
+  );
+  const completedBefore = Math.max(
+    0,
+    Number.isFinite(Number(progress?.completedBefore))
+      ? Number(progress.completedBefore)
+      : 0,
+  );
   const phaseLabel = String(progress?.phase || 'pairwise');
+  const stageStart = Math.min(overallTotal, completedBefore);
 
   if (safePairs.length === 0) {
     updateNetworkAlignProgress({
       phase: phaseLabel,
-      stageCurrent: 0,
-      stageTotal: 1,
-      overallCurrent: Math.min(Math.max(1, overallTotal), Math.max(0, completedBefore)),
-      overallTotal: Math.max(1, overallTotal),
+      stageCurrent: stageStart,
+      stageTotal: overallTotal,
+      overallCurrent: stageStart,
+      overallTotal,
     });
     return [];
   }
 
   updateNetworkAlignProgress({
     phase: phaseLabel,
-    stageCurrent: 0,
-    stageTotal: safePairs.length,
-    overallCurrent: Math.min(overallTotal, Math.max(0, completedBefore)),
-    overallTotal: Math.max(1, overallTotal),
+    stageCurrent: stageStart,
+    stageTotal: overallTotal,
+    overallCurrent: stageStart,
+    overallTotal,
   });
 
   const allResults = new Array(safePairs.length).fill(null);
@@ -2401,15 +2539,15 @@ async function computePairSimilarityPctBatchBiopython(workDir, pairs, method, pr
             }
             const cappedCur = Math.max(0, Math.min(subTotal, cur));
             const overallCurrent = Math.min(
-              Math.max(1, overallTotal),
+              overallTotal,
               Math.max(0, completedBefore + completedSoFar + cappedCur),
             );
             updateNetworkAlignProgress({
               phase: m[1] || phaseLabel,
-              stageCurrent: completedSoFar + cappedCur,
-              stageTotal: safePairs.length,
+              stageCurrent: overallCurrent,
+              stageTotal: overallTotal,
               overallCurrent,
-              overallTotal: Math.max(1, overallTotal),
+              overallTotal,
             });
           }
         },
@@ -2430,12 +2568,13 @@ async function computePairSimilarityPctBatchBiopython(workDir, pairs, method, pr
     }
   }
 
+  const completedCurrent = Math.max(0, Math.min(overallTotal, completedBefore + safePairs.length));
   updateNetworkAlignProgress({
     phase: phaseLabel,
-    stageCurrent: safePairs.length,
-    stageTotal: safePairs.length,
-    overallCurrent: Math.max(0, Math.min(overallTotal, completedBefore + safePairs.length)),
-    overallTotal: Math.max(1, overallTotal),
+    stageCurrent: completedCurrent,
+    stageTotal: overallTotal,
+    overallCurrent: completedCurrent,
+    overallTotal,
   });
   return allResults;
 }
@@ -3009,67 +3148,11 @@ async function ensureNetworkFiles(workDir, opts = {}) {
     return await buildFreshNetworkFiles();
   }
 
+  // Loading or pushing an existing network must never launch an expensive
+  // similarity calculation implicitly. Configuration changes are applied only
+  // through an explicit force-recompute request from the Similarity page.
   try {
-    await fs.access(nodesPath);
-    await fs.access(edgesPath);
-
-    const buildMeta = await readNetworkBuildMeta(workDir);
-    const staleReasons = [];
-    if (!buildMeta) {
-      staleReasons.push('missing build metadata');
-    } else {
-      const metaThreshold = Number(buildMeta.pairwiseThresholdPct);
-      if (!Number.isFinite(metaThreshold) || metaThreshold > 0) {
-        staleReasons.push(`edge build threshold=${String(buildMeta.pairwiseThresholdPct)}`);
-      }
-      if ((buildMeta.includeReferenceLinks === true) !== includeReferenceLinks) {
-        staleReasons.push('reference-link mode changed');
-      }
-      if (normalizeSimilarityMethod(buildMeta.similarityMethod) !== similarityMethod) {
-        staleReasons.push('similarity method changed');
-      }
-      if (sourceFastaPath && String(buildMeta.sourceFastaPath || '') !== sourceFastaPath) {
-        staleReasons.push('source FASTA changed');
-      }
-      if (referenceFastaPath && String(buildMeta.referenceFastaPath || '') !== referenceFastaPath) {
-        staleReasons.push('reference FASTA changed');
-      }
-    }
-
-    if (staleReasons.length > 0) {
-      pushRuntimeLine(`[network] existing artifacts are stale (${staleReasons.join(', ')}) — rebuilding full edge set`);
-      return await buildFreshNetworkFiles();
-    }
-
-    // Existing files may come from older logic; if references are missing, rebuild network artifacts.
-    try {
-      const referenceFasta = await resolveDefaultReferenceFasta(workDir);
-      const referenceRecords = await loadReferenceRecords(referenceFasta);
-      if (referenceRecords.length > 0) {
-        const { rows: nodeRows } = await readCsvRows(nodesPath);
-        const nodeTokenSet = new Set();
-        for (const row of nodeRows) {
-          for (const token of normalizeIdTokens(row?.id)) {
-            nodeTokenSet.add(token);
-          }
-        }
-
-        const missingReferenceNode = referenceRecords.some((rec) => {
-          const tokens = normalizeIdTokens(rec?.id || rec?.header || '');
-          if (tokens.length === 0) {
-            return false;
-          }
-          return !tokens.some((token) => nodeTokenSet.has(token));
-        });
-
-        if (missingReferenceNode) {
-          return await buildFreshNetworkFiles();
-        }
-      }
-    } catch {
-      // Keep existing files if reference check cannot be completed.
-    }
-
+    await Promise.all([fs.access(nodesPath), fs.access(edgesPath)]);
     return { nodesPath, edgesPath, generated: false };
   } catch {
     return await buildFreshNetworkFiles();
@@ -4095,6 +4178,77 @@ route.post('/api/hmm/build', async (req, res) => {
   });
 });
 
+route.get('/api/search/ebi/databases', async (_req, res) => {
+  const now = Date.now();
+  if (
+    ebiDatabaseCache.databases.length > 0
+    && now - ebiDatabaseCache.fetchedAt < ebiDatabaseCacheTtlMs
+  ) {
+    res.json({
+      ok: true,
+      databases: ebiDatabaseCache.databases,
+      source: 'cache',
+      fetchedAt: new Date(ebiDatabaseCache.fetchedAt).toISOString(),
+    });
+    return;
+  }
+
+  const payload = await fetchJsonViaCurl(ebiDatabasesUrl, {
+    headers: { Accept: 'application/json' },
+  }, {
+    retries: 1,
+    retryDelayMs: 0,
+    label: 'ebi-databases',
+    curlRetries: 0,
+    connectTimeoutSec: 5,
+    maxTimeSec: 12,
+  });
+
+  if (!Array.isArray(payload)) {
+    throw new Error('EBI HMMER database metadata response is not an array');
+  }
+
+  const databases = payload
+    .filter((entry) => entry && entry.type === 'seq' && entry.status === 'enabled')
+    .map((entry) => {
+      const id = String(entry.id || '').trim();
+      const version = String(entry.version || '').trim();
+      const reportedCount = Number(
+        entry.sequence_count ?? entry.sequenceCount ?? entry.num_sequences ?? entry.nseqs,
+      );
+      const sequenceCount = Number.isSafeInteger(reportedCount) && reportedCount >= 0
+        ? reportedCount
+        : (ebiDatabaseSequenceCountsByRelease.get(`${id}@${version}`) ?? null);
+      return {
+        id,
+        type: String(entry.type || ''),
+        status: String(entry.status || ''),
+        name: String(entry.name || entry.id || '').trim(),
+        version,
+        releaseDate: entry.release_date ? String(entry.release_date) : null,
+        sequenceCount,
+        sequenceCountSource: sequenceCount == null
+          ? null
+          : (Number.isSafeInteger(reportedCount) && reportedCount >= 0 ? 'metadata' : 'ebi-search-stats'),
+        order: Number.isFinite(Number(entry.order)) ? Number(entry.order) : 999,
+      };
+    })
+    .filter((entry) => entry.id && entry.name)
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+
+  if (databases.length === 0) {
+    throw new Error('EBI HMMER returned no enabled sequence databases');
+  }
+
+  ebiDatabaseCache = { fetchedAt: now, databases };
+  res.json({
+    ok: true,
+    databases,
+    source: 'live',
+    fetchedAt: new Date(now).toISOString(),
+  });
+});
+
 route.post('/api/search/run', async (req, res) => {
   const { taskId } = await resolveWorkDirForReq(req);
   if (!beginRuntimeTaskOrReject(res, 'search/run', taskId)) {
@@ -4762,36 +4916,146 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
       req.query?.alignment ? String(req.query.alignment) : null,
       workDir, path.join(workDir, 'scoring_input_auto.mafft.fasta'));
 
-    const start = Math.max(1, Number(req.query?.start || 1));
-    const end = Math.max(start, Number(req.query?.end || 120));
-    const limit = Math.max(1, Math.min(200, Number(req.query?.limit || 40)));
-    const offset = Math.max(0, Number(req.query?.offset || 0));
+    const startParam = Number(req.query?.start || 1);
+    const requestedStart = Number.isFinite(startParam) ? Math.max(1, Math.floor(startParam)) : 1;
+    const endParam = Number(req.query?.end || 120);
+    const requestedEnd = Number.isFinite(endParam)
+      ? Math.max(requestedStart, Math.floor(endParam))
+      : Math.max(requestedStart, 120);
+    const limitParam = Number(req.query?.limit || 40);
+    const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(200, Math.floor(limitParam))) : 40;
+    const offsetParam = Number(req.query?.offset || 0);
+    const offset = Number.isFinite(offsetParam) ? Math.max(0, Math.floor(offsetParam)) : 0;
+    const maxPreviewColumns = 240;
 
     const text = await fs.readFile(alignmentPath, 'utf-8');
     const records = parseFastaRecords(text);
     const totalRecords = records.length;
-    const alignmentLength = records.length ? records[0].seq.length : 0;
-
+    const alignmentLength = records.reduce(
+      (maxLength, record) => Math.max(maxLength, String(record?.seq || '').length),
+      0,
+    );
+    const start = alignmentLength > 0
+      ? Math.min(requestedStart, alignmentLength)
+      : requestedStart;
+    const availableEnd = Math.min(requestedEnd, alignmentLength);
+    const requestedWindowEnd = Math.min(availableEnd, start + maxPreviewColumns - 1);
     const from = start - 1;
-    const to = Math.min(end, alignmentLength);
+    const to = Math.min(requestedWindowEnd, alignmentLength);
+    const windowWidth = Math.max(0, to - from);
     const windowed = records.slice(offset, offset + limit).map((r) => ({
       id: r.id,
-      segment: String(r.seq || '').slice(from, to),
+      segment: String(r.seq || '').slice(from, to).padEnd(windowWidth, '-'),
     }));
+
+    // Consensus and conservation use all sequences, not only the visible page,
+    // while the rendered DOM remains bounded to at most 200 x 240 residues.
+    const consensus = [];
+    const conservation = [];
+    for (let column = from; column < to; column += 1) {
+      const counts = new Map();
+      for (const record of records) {
+        const residue = String(record?.seq?.[column] || '-').toUpperCase();
+        if (residue === '-' || residue === '.') continue;
+        counts.set(residue, (counts.get(residue) || 0) + 1);
+      }
+      let bestResidue = '-';
+      let bestCount = 0;
+      for (const [residue, count] of counts.entries()) {
+        if (count > bestCount) {
+          bestResidue = residue;
+          bestCount = count;
+        }
+      }
+      consensus.push(bestResidue);
+      conservation.push(totalRecords > 0 ? Number((bestCount / totalRecords).toFixed(4)) : 0);
+    }
 
     res.json({
       ok: true,
       alignment: alignmentPath,
       start,
       end: to,
+      requestedEnd,
+      maxPreviewColumns,
+      columnsTruncated: availableEnd > requestedWindowEnd,
       limit,
       offset,
       totalRecords,
       alignmentLength,
+      consensus: consensus.join(''),
+      conservation,
       rows: windowed,
     });
   } catch (err) {
     jsonError(res, 'Failed to preview alignment', err);
+  }
+});
+
+route.get('/api/scoring/alignment-download', async (req, res) => {
+  try {
+    const { workDir } = await resolveWorkDirForReq(req);
+    const alignmentPath = resolveTaskArtifactPath(
+      req.query?.alignment ? String(req.query.alignment) : null,
+      workDir,
+      'scoring_input_auto.mafft.fasta',
+      ['scoring_input_auto.mafft.fasta'],
+    );
+    const fasta = await fs.readFile(alignmentPath);
+    const fileName = path.basename(alignmentPath) || 'scoring_input_auto.mafft.fasta';
+    res.setHeader('Content-Type', 'text/x-fasta; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(fasta);
+  } catch (err) {
+    jsonError(res, 'Failed to download scoring alignment FASTA', err);
+  }
+});
+
+route.get('/api/scoring/page', async (req, res) => {
+  try {
+    const { workDir } = await resolveWorkDirForReq(req);
+    const requestedPage = Number(req.query.page || 1);
+    const requestedPageSize = Number(req.query.pageSize || 25);
+    const page = Number.isFinite(requestedPage) ? Math.max(1, Math.floor(requestedPage)) : 1;
+    const pageSize = Number.isFinite(requestedPageSize)
+      ? Math.max(1, Math.min(500, Math.floor(requestedPageSize)))
+      : 25;
+    const csvPath = resolveTaskArtifactPath(
+      req.query?.csv ? String(req.query.csv) : null,
+      workDir,
+      'scored_results.csv',
+      ['scored_results.csv'],
+    );
+    const offset = (page - 1) * pageSize;
+    const preview = await readCsvPreview(csvPath, pageSize, offset);
+    const total = Number(preview.total || 0);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(page, totalPages);
+
+    if (safePage !== page) {
+      const safePreview = await readCsvPreview(csvPath, pageSize, (safePage - 1) * pageSize);
+      return res.json({
+        ok: true,
+        csv: csvPath,
+        page: safePage,
+        pageSize,
+        total,
+        totalPages,
+        preview: safePreview,
+      });
+    }
+
+    res.json({
+      ok: true,
+      csv: csvPath,
+      page,
+      pageSize,
+      total,
+      totalPages,
+      preview,
+    });
+  } catch (err) {
+    jsonError(res, 'Failed to load paginated scoring results', err);
   }
 });
 
@@ -4910,6 +5174,51 @@ route.post('/api/network/compute-similarity', async (req, res) => {
     try {
       const { workDir } = await resolveWorkDirForReq(req);
       setRuntimeMeta({ taskId });
+
+      const includeReferenceLinks = req.body?.includeReferenceLinks === true;
+      const similarityMethod = normalizeSimilarityMethod(req.body?.similarityMethod);
+      const sourceFastaPath = String(req.body?.sourceFasta || '').trim();
+      const referenceFastaPath = String(req.body?.referenceFasta || '').trim();
+      const forceRecompute = req.body?.forceRecompute === true;
+      const nodesPath = path.join(workDir, 'nodes.csv');
+      const edgesPath = path.join(workDir, 'edges_similarity.csv');
+
+      let existingNodeTotal = 0;
+      let existingEdgeTotal = 0;
+      let existingFilesReady = false;
+      try {
+        const [nodesPreview, edgesPreview] = await Promise.all([
+          readCsvPreview(nodesPath, 1),
+          readCsvPreview(edgesPath, 1),
+        ]);
+        existingNodeTotal = Number(nodesPreview.total || 0);
+        existingEdgeTotal = Number(edgesPreview.total || 0);
+        existingFilesReady = existingNodeTotal > 0;
+      } catch {
+        existingFilesReady = false;
+      }
+
+      if (existingFilesReady && !forceRecompute) {
+        const buildMeta = await readNetworkBuildMeta(workDir);
+        pushRuntimeLine(`[network] reused existing similarity artifacts: nodes=${existingNodeTotal}, edges=${existingEdgeTotal}; no alignment was run`);
+        res.json({
+          ok: true,
+          nodesCsv: nodesPath,
+          edgesCsv: edgesPath,
+          nodes: existingNodeTotal,
+          edges: existingEdgeTotal,
+          similarityMethod: buildMeta?.similarityMethod || null,
+          includeReferenceLinks: typeof buildMeta?.includeReferenceLinks === 'boolean'
+            ? buildMeta.includeReferenceLinks
+            : null,
+          reused: true,
+          generated: false,
+          recomputedAt: null,
+        });
+        finishRuntimeTask('network/compute-similarity', true);
+        return;
+      }
+
       updateNetworkAlignProgress({
         phase: 'prepare',
         stageCurrent: 0,
@@ -4918,25 +5227,13 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         overallTotal: 1,
       }, taskId);
 
-      const includeReferenceLinks = req.body?.includeReferenceLinks === true;
-      const similarityMethod = normalizeSimilarityMethod(req.body?.similarityMethod);
-      const sourceFastaPath = String(req.body?.sourceFasta || '').trim();
-      const referenceFastaPath = String(req.body?.referenceFasta || '').trim();
-
-      // Force recomputation on every button click: remove previous artifacts first.
-      const nodesPath = path.join(workDir, 'nodes.csv');
-      const edgesPath = path.join(workDir, 'edges_similarity.csv');
-      const buildMetaPath = networkBuildMetaPath(workDir);
-      // Preserve taxonomy from existing nodes.csv before deleting (used by buildNetworkFilesFromClusters)
+      // Keep the previous files in place until replacement data is ready. The
+      // metadata copy preserves taxonomy fields during an explicit rebuild.
       const taxonomyCachePath = path.join(workDir, '.nodes_meta_cache.csv');
       try {
-        await fs.access(nodesPath);
         await fs.copyFile(nodesPath, taxonomyCachePath);
       } catch { /* no existing nodes.csv */ }
-      await fs.rm(nodesPath, { force: true }).catch(() => {});
-      await fs.rm(edgesPath, { force: true }).catch(() => {});
-      await fs.rm(buildMetaPath, { force: true }).catch(() => {});
-      pushRuntimeLine('[network] compute-similarity requested: previous nodes/edges removed, full recompute started');
+      pushRuntimeLine(`[network] ${forceRecompute ? 'explicit force-recompute' : 'no reusable artifacts found'}; full similarity calculation started`);
 
       const rebuilt = await ensureNetworkFiles(workDir, {
         forceRebuild: true,
@@ -4949,7 +5246,6 @@ route.post('/api/network/compute-similarity', async (req, res) => {
 
       const outNodesPath = rebuilt.nodesPath;
       const outEdgesPath = rebuilt.edgesPath;
-
       const { rows: nodeRows } = await readCsvRows(outNodesPath);
       const { rows: edgeRows } = await readCsvRows(outEdgesPath);
 
@@ -4960,6 +5256,10 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         throw new Error('Similarity computed but no edges were generated. Please verify sequence count or algorithm settings.');
       }
 
+      // The HTTP request may finish between two frontend polling ticks. Persist an
+      // explicit terminal snapshot so the final poll always sees fully completed bars.
+      completeNetworkAlignProgress(taskId);
+
       res.json({
         ok: true,
         nodesCsv: outNodesPath,
@@ -4968,6 +5268,8 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         edges: edgeRows.length,
         similarityMethod,
         includeReferenceLinks,
+        reused: false,
+        generated: true,
         recomputedAt: Date.now(),
       });
       finishRuntimeTask('network/compute-similarity', true);
@@ -5027,47 +5329,44 @@ route.get('/api/network/similarity-status', async (req, res) => {
 });
 
 route.get('/api/network/data', async (req, res) => {
-  const { taskId } = await resolveWorkDirForReq(req);
-  if (!beginRuntimeTaskOrReject(res, 'network/data', taskId)) {
-    return;
-  }
+  try {
+    const { workDir } = await resolveWorkDirForReq(req);
+    const edgesPath = path.join(workDir, 'edges_similarity.csv');
+    const nodesPath = path.join(workDir, 'nodes.csv');
 
-  await runInTaskContext(taskId, async () => {
+    // This endpoint is intentionally read-only. "Load" must report exactly
+    // what is already stored on disk and must never trigger CD-HIT/alignment.
     try {
-      const { workDir } = await resolveWorkDirForReq(req);
-      setRuntimeMeta({ taskId });
-
-      const forceRebuild = String(req.query?.forceRebuild || '').toLowerCase() === 'true';
-      const pairwiseThresholdPct = Number(req.query?.pairwiseThresholdPct);
-      const includeReferenceLinks = String(req.query?.includeReferenceLinks || '').toLowerCase() === 'true';
-      const similarityMethod = normalizeSimilarityMethod(req.query?.similarityMethod);
-      const { edgesPath, nodesPath, generated } = await ensureNetworkFiles(workDir, {
-        forceRebuild,
-        pairwiseThresholdPct,
-        includeReferenceLinks,
-        similarityMethod,
+      await Promise.all([fs.access(nodesPath), fs.access(edgesPath)]);
+    } catch {
+      res.status(404).json({
+        ok: false,
+        message: 'Existing nodes.csv / edges_similarity.csv were not found. Compute sequence similarity first.',
       });
-      const edgesPreview = await readCsvPreview(edgesPath, 200);
-      const nodesPreview = await readCsvPreview(nodesPath, 200);
-      const normalizedEdges = edgesPreview.rows.map((row) => ({
-        ...row,
-        weight: toFiniteNumber(row.weight, null),
-        similarity: toFiniteNumber(row.similarity, null),
-      }));
-      res.json({
-        ok: true,
-        edges: normalizedEdges,
-        nodes: nodesPreview.rows,
-        edgeTotal: Number(edgesPreview.total || 0),
-        nodeTotal: Number(nodesPreview.total || 0),
-        generated,
-      });
-      finishRuntimeTask('network/data', true);
-    } catch (err) {
-      finishRuntimeTask('network/data', false);
-      jsonError(res, 'Failed to read network files', err);
+      return;
     }
-  });
+
+    const [edgesPreview, nodesPreview] = await Promise.all([
+      readCsvPreview(edgesPath, 200),
+      readCsvPreview(nodesPath, 200),
+    ]);
+    const normalizedEdges = edgesPreview.rows.map((row) => ({
+      ...row,
+      weight: toFiniteNumber(row.weight, null),
+      similarity: toFiniteNumber(row.similarity, null),
+    }));
+    res.json({
+      ok: true,
+      edges: normalizedEdges,
+      nodes: nodesPreview.rows,
+      edgeTotal: Number(edgesPreview.total || 0),
+      nodeTotal: Number(nodesPreview.total || 0),
+      generated: false,
+      reused: true,
+    });
+  } catch (err) {
+    jsonError(res, 'Failed to read existing network files', err);
+  }
 });
 
 // ── Browser Graph Data (full nodes + filtered edges for in-browser visualization) ──
@@ -5135,20 +5434,33 @@ route.post('/api/network/push-cytoscape', async (req, res) => {
       const forceRebuild = req.body?.forceRebuild === true;
       const sourceFastaPath = String(req.body?.sourceFasta || '').trim();
       const referenceFastaPath = String(req.body?.referenceFasta || '').trim();
-      // When NOT rebuilding, omit similarity/source/reference params so
-      // ensureNetworkFiles won't trigger a full recalculation just because
-      // the UI defaults differ from what was used to build the cached files.
-      const ensureOpts = {
-        forceRebuild,
-        pairwiseThresholdPct: forceRebuild ? 0 : undefined,
-      };
+      let nodesPath = path.join(workDir, 'nodes.csv');
+      let edgesPath = path.join(workDir, 'edges_similarity.csv');
+      let generated = false;
       if (forceRebuild) {
-        ensureOpts.includeReferenceLinks = includeReferenceLinks;
-        ensureOpts.similarityMethod = similarityMethod;
-        ensureOpts.sourceFastaPath = sourceFastaPath;
-        ensureOpts.referenceFastaPath = referenceFastaPath;
+        const rebuilt = await ensureNetworkFiles(workDir, {
+          forceRebuild: true,
+          pairwiseThresholdPct: 0,
+          includeReferenceLinks,
+          similarityMethod,
+          sourceFastaPath,
+          referenceFastaPath,
+        });
+        nodesPath = rebuilt.nodesPath;
+        edgesPath = rebuilt.edgesPath;
+        generated = true;
+      } else {
+        try {
+          await Promise.all([fs.access(nodesPath), fs.access(edgesPath)]);
+        } catch {
+          res.status(404).json({
+            ok: false,
+            message: 'Existing similarity files were not found. Compute sequence similarity before loading or pushing the network.',
+          });
+          finishRuntimeTask('network/push-cytoscape', false);
+          return;
+        }
       }
-      const { nodesPath, edgesPath, generated } = await ensureNetworkFiles(workDir, ensureOpts);
       const { rows: nodesRows } = await readCsvRows(nodesPath);
       const { rows: edgesRows } = await readCsvRows(edgesPath);
       const filteredEdgesRows = filterEdgesByThresholdPct(edgesRows, pairwiseThresholdPct);
@@ -5316,70 +5628,109 @@ route.post('/api/network/predict-metrics', async (req, res) => {
 
       const cacheContext = buildPredictionCacheContext({ candidateIds, seqLookup, smiles, modes });
       const cachedMeta = forceRecompute ? null : await loadPredictionCacheMeta(workDir);
-      const cacheValid = !forceRecompute && cachedMeta?.fingerprint === cacheContext.fingerprint;
-      const existing = cacheValid ? await loadPredictedMetricsMap(workDir) : new Map();
+      const existing = forceRecompute ? new Map() : await loadPredictedMetricsMap(workDir);
       if (forceRecompute) {
         pushRuntimeLine('[predict-metrics] cache bypassed by forceRecompute');
-      } else if (!cacheValid) {
-        pushRuntimeLine('[predict-metrics] cache invalidated because sequences, SMILES, predictor mode, URL, or schema changed');
+      } else if (!cachedMeta) {
+        pushRuntimeLine('[predict-metrics] no prediction cache metadata found; predictors will run as needed');
+      } else if (cachedMeta.fingerprint !== cacheContext.fingerprint) {
+        pushRuntimeLine('[predict-metrics] prediction context changed; validating each cached predictor independently');
       }
 
-      // Rows that fell back to mocks while a real service was preferred are
-      // retried on the next run instead of being treated as a valid real cache.
-      const missingIds = candidateIds.filter((id) => {
-        const row = existing.get(id);
-        return !row || !predictionRowMatchesModes(row, modes);
-      });
+      // Cache each predictor independently. A cached mock is a completed result,
+      // not a failed cache entry: a normal Run must reuse it even if the service
+      // health check later reports online. Recompute All remains the explicit way
+      // to refresh predictions. Sequence changes invalidate all predictors for
+      // that sequence, while a SMILES change invalidates only CataPro.
+      const itemsByPredictor = Object.fromEntries(PREDICTION_NAMES.map((name) => [name, []]));
+      const recomputeById = new Map();
+      const cachedSequenceHashes = sequenceHashMapFromCacheContext(cachedMeta);
+      const currentSequenceHashes = sequenceHashMapFromCacheContext(cacheContext);
+      for (const id of candidateIds) {
+        const sequence = seqLookup.get(id);
+        if (!sequence) {
+          existing.delete(id);
+          pushRuntimeLine(`[predict-metrics] skipped ${id}: sequence not found in candidate FASTA`);
+          continue;
+        }
 
-      let recomputedCount = 0;
-      if (missingIds.length) {
-        const predictionItems = [];
-        for (const id of missingIds) {
-          const sequence = seqLookup.get(id);
-          if (sequence) {
-            predictionItems.push({ id, sequence });
-          } else {
-            pushRuntimeLine(`[predict-metrics] skipped ${id}: sequence not found in candidate FASTA`);
+        const row = existing.get(id);
+        for (const predictor of PREDICTION_NAMES) {
+          if (predictionNeedsRecompute({
+            predictor,
+            id,
+            row,
+            cachedContext: cachedMeta,
+            currentContext: cacheContext,
+            cachedSequenceHashes,
+            currentSequenceHashes,
+            forceRecompute,
+          })) {
+            itemsByPredictor[predictor].push({ id, sequence });
+            if (!recomputeById.has(id)) recomputeById.set(id, new Set());
+            recomputeById.get(id).add(predictor);
           }
         }
+      }
 
-        pushRuntimeLine(`[predict-metrics] running predictors for ${predictionItems.length} sequence(s), application batch size=${PREDICTION_BATCH_SIZE}`);
-        const progress = createPredictionProgressTracker(predictionItems, modes);
+      const recomputedCount = recomputeById.size;
+      const predictorCounts = Object.fromEntries(
+        PREDICTION_NAMES.map((name) => [name, itemsByPredictor[name].length]),
+      );
+      const predictorUnitCount = Object.values(predictorCounts).reduce((sum, count) => sum + count, 0);
+      if (predictorUnitCount > 0) {
+        pushRuntimeLine(`[predict-metrics] running ${predictorUnitCount} predictor unit(s) for ${recomputedCount} sequence(s), application batch size=${PREDICTION_BATCH_SIZE}: kcat/Km=${predictorCounts.cataPro}, sol=${predictorCounts.solubility}, EC=${predictorCounts.ec}, Tm=${predictorCounts.tm}`);
+        const progress = createPredictionProgressTracker(itemsByPredictor, modes);
         const [cataProResults, solubilityResults, ecResults, tmResults] = await Promise.all([
-          runCataProPredictions(predictionItems, smiles, modes.cataPro, progress),
-          runSolubilityPredictions(predictionItems, modes.solubility, progress),
-          runECPredictions(predictionItems, modes.ec, progress),
-          runTmPredictions(predictionItems, modes.tm, progress),
+          itemsByPredictor.cataPro.length
+            ? runCataProPredictions(itemsByPredictor.cataPro, smiles, modes.cataPro, progress)
+            : Promise.resolve(new Map()),
+          itemsByPredictor.solubility.length
+            ? runSolubilityPredictions(itemsByPredictor.solubility, modes.solubility, progress)
+            : Promise.resolve(new Map()),
+          itemsByPredictor.ec.length
+            ? runECPredictions(itemsByPredictor.ec, modes.ec, progress)
+            : Promise.resolve(new Map()),
+          itemsByPredictor.tm.length
+            ? runTmPredictions(itemsByPredictor.tm, modes.tm, progress)
+            : Promise.resolve(new Map()),
         ]);
 
-        for (const item of predictionItems) {
-          const cataPro = cataProResults.get(item.id);
-          const solubility = solubilityResults.get(item.id);
-          const ec = ecResults.get(item.id);
-          const tm = tmResults.get(item.id);
-          const ecEntries = ec?.entries || [];
-          existing.set(item.id, {
-            id: item.id,
-            kcat: cataPro?.kcat ?? 0,
-            km: cataPro?.km ?? 0,
-            solubility: solubility?.score ?? 0,
-            tm: tm?.value ?? 0,
-            ec_top1: ecEntries[0]?.ec || '',
-            ec_score1: ecEntries[0]?.score || 0,
-            ec_top2: ecEntries[1]?.ec || '',
-            ec_score2: ecEntries[1]?.score || 0,
-            ec_top3: ecEntries[2]?.ec || '',
-            ec_score3: ecEntries[2]?.score || 0,
-            cataPro_source: cataPro?.source || 'mock',
-            solubility_source: solubility?.source || 'mock',
-            tm_source: tm?.source || 'mock',
-            ec_source: ec?.source || 'mock',
-          });
-          recomputedCount++;
+        for (const [id, predictors] of recomputeById) {
+          const row = { ...(existing.get(id) || {}), id };
+          if (predictors.has('cataPro')) {
+            const result = cataProResults.get(id);
+            row.kcat = result?.kcat ?? 0;
+            row.km = result?.km ?? 0;
+            row.cataPro_source = result?.source || 'mock';
+          }
+          if (predictors.has('solubility')) {
+            const result = solubilityResults.get(id);
+            row.solubility = result?.score ?? 0;
+            row.solubility_source = result?.source || 'mock';
+          }
+          if (predictors.has('ec')) {
+            const result = ecResults.get(id);
+            const entries = result?.entries || [];
+            row.ec_top1 = entries[0]?.ec || '';
+            row.ec_score1 = entries[0]?.score || 0;
+            row.ec_top2 = entries[1]?.ec || '';
+            row.ec_score2 = entries[1]?.score || 0;
+            row.ec_top3 = entries[2]?.ec || '';
+            row.ec_score3 = entries[2]?.score || 0;
+            row.ec_source = result?.source || 'mock';
+          }
+          if (predictors.has('tm')) {
+            const result = tmResults.get(id);
+            row.tm = result?.value ?? 0;
+            row.tm_source = result?.source || 'mock';
+          }
+          existing.set(id, row);
         }
         const finalProgress = progress.snapshot();
-        pushRuntimeLine(`[predict-metrics] finished ${recomputedCount}/${missingIds.length} new prediction(s); ${finalProgress.current}/${finalProgress.total} predictor units complete`);
+        pushRuntimeLine(`[predict-metrics] finished ${recomputedCount} updated sequence(s); ${finalProgress.current}/${finalProgress.total} predictor units complete`);
       } else {
+        pushRuntimeLine(`[predict-metrics] loaded all ${candidateIds.length} candidate prediction(s) from cache`);
         setRuntimeMeta({
           predictProgress: {
             current: 0,

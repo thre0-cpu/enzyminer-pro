@@ -14,6 +14,18 @@ export type ScoringRule = {
 export type ScoringPositionMode = 'pre' | 'aligned';
 export type PreAlignmentAnchor = 'first' | 'refid';
 
+export type EbiHmmDatabase = {
+  id: string;
+  type: 'seq' | 'hmm' | string;
+  status: string;
+  name: string;
+  version: string;
+  releaseDate?: string | null;
+  sequenceCount?: number | null;
+  sequenceCountSource?: string | null;
+  order: number;
+};
+
 let activeTaskId = 'default';
 
 function withTaskId(url: string) {
@@ -211,6 +223,14 @@ export function buildHmm(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ identity, wordSize, refFasta, coverageLong: opts?.coverageLong, coverageShort: opts?.coverageShort, identityLowerBound: opts?.identityLowerBound }),
   });
+}
+
+export function fetchEbiHmmDatabases() {
+  return request<{
+    databases: EbiHmmDatabase[];
+    source: string;
+    fetchedAt: string;
+  }>('/api/search/ebi/databases');
 }
 
 export function runHmmSearch(
@@ -444,6 +464,23 @@ export function runScoring(
   });
 }
 
+export function loadScoringPage(page = 1, pageSize = 25, csvPath?: string) {
+  const params = new URLSearchParams();
+  params.set('page', String(page));
+  params.set('pageSize', String(pageSize));
+  if (csvPath) {
+    params.set('csv', csvPath);
+  }
+  return request<{
+    csv: string;
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+    preview: { headers: string[]; rows: Array<Record<string, string>>; total: number };
+  }>(`/api/scoring/page?${params.toString()}`);
+}
+
 export async function downloadScoringCsv(csvPath?: string) {
   const params = new URLSearchParams();
   params.set('taskId', activeTaskId);
@@ -519,12 +556,40 @@ export function loadScoringAlignmentPreview(opts?: {
     alignment: string;
     start: number;
     end: number;
+    requestedEnd: number;
+    maxPreviewColumns: number;
+    columnsTruncated: boolean;
     limit: number;
     offset: number;
     totalRecords: number;
     alignmentLength: number;
+    consensus: string;
+    conservation: number[];
     rows: Array<{ id: string; segment: string }>;
   }>(`/api/scoring/alignment-preview?${params.toString()}`);
+}
+
+export async function downloadScoringAlignmentFasta(alignmentPath?: string) {
+  const params = new URLSearchParams();
+  params.set('taskId', activeTaskId);
+  if (alignmentPath) {
+    params.set('alignment', alignmentPath);
+  }
+  const response = await fetch(`/api/scoring/alignment-download?${params.toString()}`);
+  if (!response.ok) {
+    let details = '';
+    try {
+      details = await response.text();
+    } catch {
+      details = '';
+    }
+    throw new Error(details || `Request failed: ${response.status}`);
+  }
+  const blob = await response.blob();
+  const cd = response.headers.get('content-disposition') || '';
+  const match = cd.match(/filename="?([^";]+)"?/i);
+  const fileName = match?.[1] || 'scoring_input_auto.mafft.fasta';
+  return { blob, fileName };
 }
 
 export function runClustering(inputFasta: string, identity: number, wordSize: number) {
@@ -542,28 +607,15 @@ export function runClustering(inputFasta: string, identity: number, wordSize: nu
   });
 }
 
-export function loadNetworkData(opts?: {
-  forceRebuild?: boolean;
-  includeReferenceLinks?: boolean;
-  similarityMethod?: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
-}) {
-  const qp = new URLSearchParams();
-  if (opts?.forceRebuild) {
-    qp.set('forceRebuild', 'true');
-  }
-  if (opts?.includeReferenceLinks) {
-    qp.set('includeReferenceLinks', 'true');
-  }
-  if (opts?.similarityMethod) {
-    qp.set('similarityMethod', String(opts.similarityMethod));
-  }
-  const url = qp.toString() ? `/api/network/data?${qp.toString()}` : '/api/network/data';
+export function loadNetworkData() {
   return request<{
     edges: Array<Record<string, string>>;
     nodes: Array<Record<string, string>>;
     edgeTotal?: number;
     nodeTotal?: number;
-  }>(url);
+    generated: false;
+    reused: true;
+  }>('/api/network/data');
 }
 
 export function computeNetworkSimilarity(opts?: {
@@ -571,14 +623,18 @@ export function computeNetworkSimilarity(opts?: {
   similarityMethod?: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
   sourceFasta?: string;
   referenceFasta?: string;
+  forceRecompute?: boolean;
 }) {
   return request<{
     nodesCsv: string;
     edgesCsv: string;
     nodes: number;
     edges: number;
-    similarityMethod: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2';
-    includeReferenceLinks: boolean;
+    similarityMethod: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2' | null;
+    includeReferenceLinks: boolean | null;
+    reused: boolean;
+    generated: boolean;
+    recomputedAt: number | null;
   }>('/api/network/compute-similarity', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -587,6 +643,7 @@ export function computeNetworkSimilarity(opts?: {
       similarityMethod: opts?.similarityMethod,
       sourceFasta: opts?.sourceFasta,
       referenceFasta: opts?.referenceFasta,
+      forceRecompute: opts?.forceRecompute === true,
     }),
   });
 }

@@ -13,6 +13,7 @@ import { zoom as d3zoom, zoomIdentity } from 'd3-zoom';
 import { drag as d3drag } from 'd3-drag';
 import { scaleOrdinal, scaleLinear } from 'd3-scale';
 import type { BrowserGraphNode, BrowserGraphEdge } from './api';
+import { downloadButtonClass, downloadSelectClass } from './uiStyles';
 
 // --- shared palette (same 18 colors as server buildCategoryColorMap) ---
 const PALETTE = [
@@ -471,7 +472,7 @@ function D3Renderer({ nodes, edges, categoryColumn, thresholdRef, hideSingletons
   }, [nodes, edges, categoryColumn, highlightIds, onSelectNode, height]);
 
   return (
-    <div className="relative w-full border rounded-lg overflow-hidden bg-white">
+    <div className="relative w-full overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
       <svg ref={svgRef} width="100%" height={height || 600} style={{ display: 'block' }} />
       {tooltip && (
         <div
@@ -782,7 +783,7 @@ function CytoscapeRenderer({ nodes, edges, categoryColumn, thresholdRef, hideSin
   }, [nodes, edges, categoryColumn, highlightIds, onSelectNode, height]);
 
   return (
-    <div className="relative w-full border rounded-lg overflow-hidden bg-white">
+    <div className="relative w-full overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
       <div ref={containerRef} style={{ width: '100%', height: height || 600 }} />
       {tooltip && (
         <div
@@ -818,7 +819,7 @@ function GraphLegend({ nodes, categoryColumn }: { nodes: BrowserGraphNode[]; cat
           {c}
         </span>
       ))}
-      <span className="inline-flex items-center gap-1 ml-2 border-l pl-2 border-slate-300">
+      <span className="ml-2 inline-flex items-center gap-1 border-l border-slate-300 pl-2 dark:border-slate-600">
         <span className="inline-block w-3 h-3 rounded-full border-2 border-red-500 bg-white" />
         Reference
       </span>
@@ -957,16 +958,24 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
   const graphHeight = isFullscreen ? Math.max(720, viewportHeight - 170) : (height || 600);
 
   return (
-    <div ref={wrapperRef} className={`space-y-2 bg-white ${isFullscreen ? 'h-full w-full overflow-auto p-4' : ''}`}>
-      <div className={`${isFullscreen ? 'sticky top-0 z-20 space-y-2 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur' : 'space-y-2'}`}>
+    <div
+      ref={wrapperRef}
+      className={`network-graph-shell space-y-2 bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100 ${isFullscreen ? 'h-full w-full overflow-auto p-4' : ''}`}
+    >
+      <div className={`${isFullscreen ? 'sticky top-0 z-20 space-y-2 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur dark:border-slate-700 dark:bg-slate-900/95' : 'space-y-2'}`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <GraphLegend nodes={nodes} categoryColumn={categoryColumn} />
-          {isFullscreen && <span className="text-xs text-slate-500">Press Esc or the button in the top right to exit fullscreen</span>}
+          {isFullscreen && <span className="text-xs text-slate-500 dark:text-slate-400">Press Esc or the button in the top right to exit fullscreen</span>}
         </div>
         <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-[320px] flex-1 flex-col gap-3">
-          <div className="flex items-center gap-3">
-            <label className="text-xs text-slate-600 whitespace-nowrap">In-graph Visibility Threshold</label>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <label
+              className="whitespace-nowrap text-xs text-slate-600 dark:text-slate-300"
+              title="The minimum is fixed by the load threshold used when the network was loaded."
+            >
+              In-graph visibility threshold ({minThreshold.toFixed(1)}–100)
+            </label>
             <input
               ref={sliderRef}
               type="range" min={minThreshold} max={100} step={0.1}
@@ -974,58 +983,58 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
               onChange={handleSlider}
               className="flex-1 h-2 accent-sky-600"
             />
-            <span ref={labelRef} className="text-xs font-mono text-slate-700 w-12 text-right">{initialThreshold.toFixed(1)}</span>
-            <span ref={countRef} className="text-xs text-slate-500">
+            <span ref={labelRef} className="w-12 text-right font-mono text-xs text-slate-700 dark:text-slate-200">{initialThreshold.toFixed(1)}</span>
+            <span ref={countRef} className="text-xs text-slate-500 dark:text-slate-400">
               ({initSummary.visibleEdgeCount} / {edges.length} edges)
             </span>
           </div>
-          <div className="text-xs text-slate-500">
-            This graph only loaded edges with similarity no lower than {minThreshold.toFixed(1)}, so the slider can only go as low as {minThreshold.toFixed(1)}. To view a lower threshold, go back to the “Load Threshold” above and reload.
-          </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs dark:border-slate-700 dark:bg-slate-950">
               <button
                 type="button"
-                className={`rounded-md px-3 py-1.5 transition-colors ${!hideSingletons ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`rounded-md px-3 py-1.5 transition-colors ${!hideSingletons ? 'bg-white text-slate-800 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
                 onClick={() => handleSingletonToggle(false)}
               >
                 Show All
               </button>
               <button
                 type="button"
-                className={`rounded-md px-3 py-1.5 transition-colors ${hideSingletons ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`rounded-md px-3 py-1.5 transition-colors ${hideSingletons ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
                 onClick={() => handleSingletonToggle(true)}
               >
                 Hide Singletons
               </button>
             </div>
-            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
               <span ref={visibleNodesRef}>Visible {initSummary.visibleNodeCount} / {nodes.length} nodes</span>
               <span ref={singletonRef}>Hideable {initSummary.hiddenSingletonCount} non-reference singleton(s)</span>
             </div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            aria-label="Graph download format"
-            value={exportFormat}
-            onChange={(event) => setExportFormat(event.target.value as GraphExportFormat)}
-            className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700"
-          >
-            <option value="png">PNG</option>
-            <option value="svg">SVG</option>
-          </select>
+          <div className="inline-flex overflow-hidden rounded-lg border border-emerald-700 shadow-sm">
+            <button
+              type="button"
+              className={downloadButtonClass(exporting)}
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              {exporting ? 'Exporting…' : 'Download Image'}
+            </button>
+            <select
+              aria-label="Graph download format"
+              value={exportFormat}
+              onChange={(event) => setExportFormat(event.target.value as GraphExportFormat)}
+              disabled={exporting}
+              className={downloadSelectClass}
+            >
+              <option value="png">PNG</option>
+              <option value="svg">SVG</option>
+            </select>
+          </div>
           <button
             type="button"
-            className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-medium text-white hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            {exporting ? 'Exporting…' : 'Download Image'}
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
             onClick={handleFullscreenToggle}
           >
             {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
@@ -1060,7 +1069,7 @@ export default function NetworkGraph({ nodes, edges, mode, categoryColumn, initi
           height={graphHeight}
         />
       )}
-      <div className="text-xs text-slate-400">
+      <div className="text-xs text-slate-400 dark:text-slate-500">
         {nodes.length} nodes · {edges.length} edges · Renderer: {mode === 'd3' ? 'D3 Force' : 'Cytoscape.js (Organic CoSE)'}
       </div>
     </div>

@@ -9,12 +9,33 @@ const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'enzymeminer-test-'));
 const tasksRoot = path.join(tempRoot, 'tasks');
 await fs.mkdir(tasksRoot, { recursive: true });
 
+// Deterministic stand-in for the Biopython pairwise worker. The final short
+// batch pauses long enough for the test to inspect live progress metadata.
+const fakePythonPath = path.join(tempRoot, 'fake-pairwise-python.mjs');
+await fs.writeFile(fakePythonPath, `#!/usr/bin/env node
+import fs from 'node:fs/promises';
+
+const [scriptPath, inputPath, outputPath] = process.argv.slice(2);
+if (!scriptPath || scriptPath === '-c' || !inputPath || !outputPath) {
+  process.exit(1);
+}
+const payload = JSON.parse(await fs.readFile(inputPath, 'utf-8'));
+const count = Array.isArray(payload?.pairs) ? payload.pairs.length : 0;
+const phase = String(payload?.phase || 'pairwise');
+console.log('PROGRESS|' + phase + '|0|' + count);
+await new Promise((resolve) => setTimeout(resolve, count < 5000 ? 350 : 20));
+console.log('PROGRESS|' + phase + '|' + count + '|' + count);
+await fs.writeFile(outputPath, JSON.stringify({ results: new Array(count).fill(90) }), 'utf-8');
+`);
+await fs.chmod(fakePythonPath, 0o755);
+
 const fakeStats = {
   cataProBatches: [],
   solubilityBatches: [],
   ecBatches: [],
   tmItems: 0,
   legacyPredictCalls: 0,
+  ebiDatabaseRequests: 0,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -23,6 +44,18 @@ const fakePredictor = http.createServer(async (req, res) => {
   if (req.url?.endsWith('/docs')) {
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end('ok');
+    return;
+  }
+
+  if (req.url === '/ebi/databases' && req.method === 'GET') {
+    fakeStats.ebiDatabaseRequests++;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify([
+      { id: 'pfam', type: 'hmm', status: 'enabled', name: 'Pfam', version: '37.2', release_date: '2025-01-01', order: 1 },
+      { id: 'refprot', type: 'seq', status: 'enabled', name: 'Reference Proteomes', version: '2025_01', release_date: '2025-01-01', order: 1 },
+      { id: 'swissprot', type: 'seq', status: 'enabled', name: 'SwissProt', version: '2025_01', release_date: '2025-01-01', order: 2 },
+      { id: 'disabled-db', type: 'seq', status: 'disabled', name: 'Disabled', version: 'old', release_date: null, order: 3 },
+    ]));
     return;
   }
 
@@ -76,16 +109,18 @@ const fakePredictor = http.createServer(async (req, res) => {
   if (req.url === '/ec/predict/batch' && req.method === 'POST') {
     fakeStats.ecBatches.push(payload.map((item) => item.name));
     await sleep(80);
-    const results = payload.map((item, index) => ({
-      index,
-      enzyme_name: item.name,
-      status: 'success',
-      results: [{ ec: `1.1.1.${index + 1}`, score: 0.9 - index * 0.01 }],
-    }));
+    const results = payload.map((item, index) => String(item.sequence).startsWith('Z')
+      ? { index, enzyme_name: item.name, status: 'error', message: 'simulated EC item failure' }
+      : {
+          index,
+          enzyme_name: item.name,
+          status: 'success',
+          results: [{ ec: `1.1.1.${index + 1}`, score: 0.9 - index * 0.01 }],
+        });
     res.end(JSON.stringify({
       batch_size: payload.length,
-      success_count: results.length,
-      error_count: 0,
+      success_count: results.filter((item) => item.status === 'success').length,
+      error_count: results.filter((item) => item.status === 'error').length,
       execution_time: 0.08,
       results,
     }));
@@ -120,10 +155,12 @@ process.env.CATAPRO_URL = `${fakeUrl}/catapro`;
 process.env.SOL_URL = `${fakeUrl}/sol`;
 process.env.EC_URL = `${fakeUrl}/ec`;
 process.env.TM_URL = `${fakeUrl}/tm`;
+process.env.EBI_HMMER_DATABASES_URL = `${fakeUrl}/ebi/databases`;
 process.env.PREDICTION_BATCH_SIZE = '2';
 process.env.PREDICTION_REQUEST_TIMEOUT_MS = '5000';
 process.env.API_KEY = '';
 process.env.ALLOWED_ORIGINS = '';
+process.env.PIPELINE_PYTHON = fakePythonPath;
 
 const { startServer } = await import('../backend/server.mjs');
 let backend;
@@ -179,6 +216,208 @@ test('invalid async task ids return 400 without terminating the server', async (
   assert.equal(blockedOrigin.headers.get('access-control-allow-origin'), null);
 });
 
+test('EBI database metadata exposes only enabled sequence databases and uses its cache', async () => {
+  const first = await api('/api/search/ebi/databases');
+  assert.equal(first.response.status, 200);
+  assert.equal(first.body.source, 'live');
+  assert.deepEqual(first.body.databases.map((item) => item.id), ['refprot', 'swissprot']);
+  assert.equal(first.body.databases[0].version, '2025_01');
+  assert.equal(first.body.databases[0].releaseDate, '2025-01-01');
+  assert.equal(first.body.databases[0].sequenceCount, 89_460_830);
+  assert.equal(first.body.databases[0].sequenceCountSource, 'ebi-search-stats');
+
+  const cached = await api('/api/search/ebi/databases');
+  assert.equal(cached.response.status, 200);
+  assert.equal(cached.body.source, 'cache');
+  assert.equal(fakeStats.ebiDatabaseRequests, 1);
+});
+
+test('scoring results support server-side pagination', async () => {
+  const taskDir = path.join(tasksRoot, 'scoring-page-task');
+  await fs.mkdir(taskDir, { recursive: true });
+  const rows = Array.from({ length: 61 }, (_, index) => `candidate_${index + 1},${index + 1}`);
+  await fs.writeFile(path.join(taskDir, 'scored_results.csv'), `id,score\n${rows.join('\n')}\n`);
+
+  const secondPage = await api('/api/scoring/page?taskId=scoring-page-task&page=2&pageSize=25');
+  assert.equal(secondPage.response.status, 200);
+  assert.equal(secondPage.body.page, 2);
+  assert.equal(secondPage.body.pageSize, 25);
+  assert.equal(secondPage.body.total, 61);
+  assert.equal(secondPage.body.totalPages, 3);
+  assert.equal(secondPage.body.preview.rows.length, 25);
+  assert.equal(secondPage.body.preview.rows[0].id, 'candidate_26');
+
+  const clampedPage = await api('/api/scoring/page?taskId=scoring-page-task&page=99&pageSize=25');
+  assert.equal(clampedPage.response.status, 200);
+  assert.equal(clampedPage.body.page, 3);
+  assert.equal(clampedPage.body.preview.rows.length, 11);
+  assert.equal(clampedPage.body.preview.rows[0].id, 'candidate_51');
+});
+
+test('alignment preview stays bounded and the generated MAFFT FASTA can be downloaded', async () => {
+  const taskId = 'alignment-preview-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  const fasta = [
+    '>seq1',
+    'A'.repeat(300),
+    '>seq2',
+    `${'A'.repeat(250)}${'C'.repeat(50)}`,
+    '>seq3',
+    `${'A'.repeat(240)}${'G'.repeat(60)}`,
+    '',
+  ].join('\n');
+  await fs.writeFile(path.join(taskDir, 'scoring_input_auto.mafft.fasta'), fasta);
+
+  const preview = await api(`/api/scoring/alignment-preview?taskId=${taskId}&start=1&end=999&limit=2`);
+  assert.equal(preview.response.status, 200);
+  assert.equal(preview.body.alignmentLength, 300);
+  assert.equal(preview.body.totalRecords, 3);
+  assert.equal(preview.body.rows.length, 2);
+  assert.equal(preview.body.rows[0].segment.length, 240);
+  assert.equal(preview.body.consensus, 'A'.repeat(240));
+  assert.equal(preview.body.conservation.length, 240);
+  assert.ok(preview.body.conservation.every((value) => value === 1));
+  assert.equal(preview.body.maxPreviewColumns, 240);
+  assert.equal(preview.body.columnsTruncated, true);
+
+  const finalWindow = await api(`/api/scoring/alignment-preview?taskId=${taskId}&start=241&end=999`);
+  assert.equal(finalWindow.response.status, 200);
+  assert.equal(finalWindow.body.start, 241);
+  assert.equal(finalWindow.body.end, 300);
+  assert.equal(finalWindow.body.rows[0].segment.length, 60);
+  assert.equal(finalWindow.body.columnsTruncated, false);
+  assert.equal(finalWindow.body.consensus[0], 'A');
+  assert.equal(finalWindow.body.conservation[0], 0.6667);
+
+  const download = await api(`/api/scoring/alignment-download?taskId=${taskId}`);
+  assert.equal(download.response.status, 200);
+  assert.match(download.response.headers.get('content-type') || '', /^text\/x-fasta/);
+  assert.match(
+    download.response.headers.get('content-disposition') || '',
+    /filename="scoring_input_auto\.mafft\.fasta"/,
+  );
+  assert.equal(download.body, fasta);
+
+  const unsupported = await api(`/api/scoring/alignment-download?taskId=${taskId}&alignment=other.fasta`);
+  assert.equal(unsupported.response.status, 400);
+});
+
+test('similarity load and normal compute reuse the exact existing CSV files without recalculation', async () => {
+  const taskId = 'similarity-cache-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  const nodesCsv = [
+    'id,cluster,cluster_size,is_reference',
+    'candidate_1,Cluster_0,2,0',
+    'candidate_2,Cluster_0,2,0',
+    'reference_1,Reference,1,1',
+  ].join('\n') + '\n';
+  const edgesCsv = [
+    'source,target,similarity,weight,cluster',
+    'candidate_1,candidate_2,91.5,0.915,Cluster_0',
+    'reference_1,candidate_1,72.0,0.72,Reference',
+  ].join('\n') + '\n';
+  await fs.writeFile(path.join(taskDir, 'nodes.csv'), nodesCsv);
+  await fs.writeFile(path.join(taskDir, 'edges_similarity.csv'), edgesCsv);
+
+  // Even legacy query flags must not turn the read-only Load endpoint into a computation.
+  const loaded = await api(`/api/network/data?taskId=${taskId}&forceRebuild=true&similarityMethod=smith-waterman&includeReferenceLinks=false`);
+  assert.equal(loaded.response.status, 200);
+  assert.equal(loaded.body.generated, false);
+  assert.equal(loaded.body.reused, true);
+  assert.equal(loaded.body.nodeTotal, 3);
+  assert.equal(loaded.body.edgeTotal, 2);
+
+  // A normal Compute click also reuses the files. Only forceRecompute=true may replace them.
+  const reused = await api(`/api/network/compute-similarity?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      similarityMethod: 'smith-waterman',
+      includeReferenceLinks: false,
+      sourceFasta: '/definitely/not/a/real/source.fasta',
+      forceRecompute: false,
+    }),
+  });
+  assert.equal(reused.response.status, 200);
+  assert.equal(reused.body.reused, true);
+  assert.equal(reused.body.generated, false);
+  assert.equal(reused.body.nodes, 3);
+  assert.equal(reused.body.edges, 2);
+  assert.equal(reused.body.recomputedAt, null);
+  assert.equal(await fs.readFile(path.join(taskDir, 'nodes.csv'), 'utf-8'), nodesCsv);
+  assert.equal(await fs.readFile(path.join(taskDir, 'edges_similarity.csv'), 'utf-8'), edgesCsv);
+  await assert.rejects(fs.access(path.join(taskDir, 'network_build_meta.json')));
+
+  const missing = await api('/api/network/data?taskId=similarity-cache-missing');
+  assert.equal(missing.response.status, 404);
+  assert.match(String(missing.body.message || ''), /Compute sequence similarity first/i);
+});
+
+test('candidate pairwise progress remains global across the final 5000-pair batch boundary', async () => {
+  const taskId = 'similarity-progress-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+
+  const candidates = Array.from({ length: 102 }, (_, index) => ({
+    id: `candidate_${index + 1}`,
+    sequence: `M${'A'.repeat(20)}${index % 10}`,
+  }));
+  const fasta = candidates.map((item) => `>${item.id}\n${item.sequence}`).join('\n') + '\n';
+  const cluster = [
+    '>Cluster 0',
+    ...candidates.map((item, index) => `${index}\t22aa, >${item.id}... ${index === 0 ? '*' : 'at 90%'}`),
+  ].join('\n') + '\n';
+
+  await fs.writeFile(path.join(taskDir, 'candidates.fasta'), fasta);
+  await fs.writeFile(path.join(taskDir, 'candidates_cdhit85.fasta'), fasta);
+  await fs.writeFile(path.join(taskDir, 'candidates_cdhit85.fasta.clstr'), cluster);
+
+  const computePromise = api(`/api/network/compute-similarity?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      forceRecompute: true,
+      similarityMethod: 'needleman-wunsch',
+      includeReferenceLinks: false,
+      sourceFasta: 'candidates.fasta',
+    }),
+  });
+
+  const expectedPairs = (102 * 101) / 2;
+  let liveProgress = null;
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const runtime = await api(`/api/runtime/logs?taskId=${taskId}&limit=50`);
+    const stage = runtime.body?.meta?.networkAlignStages?.['candidate-pairwise'];
+    if (runtime.body?.active && stage?.total === expectedPairs && stage.current >= 5000 && stage.current < expectedPairs) {
+      liveProgress = runtime.body.meta;
+      break;
+    }
+    await sleep(15);
+  }
+
+  assert.ok(liveProgress, 'expected to observe the final partial batch while the task was active');
+  assert.equal(liveProgress.networkAlignProgress.current, 5000);
+  assert.equal(liveProgress.networkAlignProgress.total, expectedPairs);
+  assert.equal(liveProgress.networkAlignStages['candidate-pairwise'].current, 5000);
+  assert.equal(liveProgress.networkAlignStages['candidate-pairwise'].total, expectedPairs);
+
+  const computed = await computePromise;
+  assert.equal(computed.response.status, 200);
+  assert.equal(computed.body.generated, true);
+  assert.equal(computed.body.nodes, 102);
+  assert.equal(computed.body.edges, expectedPairs);
+
+  const completed = await api(`/api/runtime/logs?taskId=${taskId}&limit=50`);
+  assert.equal(completed.body.active, false);
+  assert.equal(completed.body.meta.networkAlignProgress.current, expectedPairs);
+  assert.equal(completed.body.meta.networkAlignProgress.total, expectedPairs);
+  assert.equal(completed.body.meta.networkAlignStages['candidate-pairwise'].current, expectedPairs);
+  assert.equal(completed.body.meta.networkAlignStages['candidate-pairwise'].total, expectedPairs);
+});
+
 test('artifact, compare-task, and HMM prefix traversal attempts are rejected', async () => {
   const taskDir = path.join(tasksRoot, 'security-task');
   await fs.mkdir(taskDir, { recursive: true });
@@ -189,6 +428,10 @@ test('artifact, compare-task, and HMM prefix traversal attempts are rejected', a
   const blockedDownload = await api(`/api/scoring/download?taskId=security-task&csv=${encodeURIComponent(secretPath)}`);
   assert.equal(blockedDownload.response.status, 400);
   assert.doesNotMatch(JSON.stringify(blockedDownload.body), /should-not-be-readable/);
+
+  const blockedPage = await api(`/api/scoring/page?taskId=security-task&csv=${encodeURIComponent(secretPath)}`);
+  assert.equal(blockedPage.response.status, 400);
+  assert.doesNotMatch(JSON.stringify(blockedPage.body), /should-not-be-readable/);
 
   const validDownload = await api('/api/scoring/download?taskId=security-task');
   assert.equal(validDownload.response.status, 200);
@@ -238,12 +481,32 @@ test('prediction uses kcat/Km, calls real Tm, and invalidates cache context', as
   const cached = await requestPrediction('CCO');
   assert.equal(cached.body.recomputedCount, 0);
 
+  const beforeSmilesChange = {
+    cataPro: fakeStats.cataProBatches.length,
+    solubility: fakeStats.solubilityBatches.length,
+    ec: fakeStats.ecBatches.length,
+    tm: fakeStats.tmItems,
+  };
   const changedSmiles = await requestPrediction('CCC');
   assert.equal(changedSmiles.body.recomputedCount, 2);
+  assert.equal(fakeStats.cataProBatches.length, beforeSmilesChange.cataPro + 1);
+  assert.equal(fakeStats.solubilityBatches.length, beforeSmilesChange.solubility);
+  assert.equal(fakeStats.ecBatches.length, beforeSmilesChange.ec);
+  assert.equal(fakeStats.tmItems, beforeSmilesChange.tm);
 
   await fs.writeFile(path.join(taskDir, 'candidates.fasta'), '>candA\nAAAAAAAAAAA\n>candB\nCCCCCCCCCC\n');
+  const beforeSequenceChange = {
+    cataPro: fakeStats.cataProBatches.length,
+    solubility: fakeStats.solubilityBatches.length,
+    ec: fakeStats.ecBatches.length,
+    tm: fakeStats.tmItems,
+  };
   const changedSequence = await requestPrediction('CCC');
-  assert.equal(changedSequence.body.recomputedCount, 2);
+  assert.equal(changedSequence.body.recomputedCount, 1);
+  assert.equal(fakeStats.cataProBatches.length, beforeSequenceChange.cataPro + 1);
+  assert.equal(fakeStats.solubilityBatches.length, beforeSequenceChange.solubility + 1);
+  assert.equal(fakeStats.ecBatches.length, beforeSequenceChange.ec + 1);
+  assert.equal(fakeStats.tmItems, beforeSequenceChange.tm + 1);
 
   const meta = JSON.parse(await fs.readFile(path.join(taskDir, 'predicted_metrics.meta.json'), 'utf-8'));
   assert.equal(meta.version, 2);
@@ -251,6 +514,57 @@ test('prediction uses kcat/Km, calls real Tm, and invalidates cache context', as
   assert.equal(meta.predictors.tm.mode, 'real');
   assert.equal(fakeStats.legacyPredictCalls, 0);
   assert.match(meta.fingerprint, /^[a-f0-9]{64}$/);
+});
+
+
+test('normal Run reuses a cached EC mock fallback instead of retrying EC', async () => {
+  const taskId = 'ec-mock-cache-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  await fs.writeFile(path.join(taskDir, 'nodes.csv'), 'id,is_reference\necFallback,0\n');
+  await fs.writeFile(path.join(taskDir, 'candidates.fasta'), '>ecFallback\nZZZZZZZZZZ\n');
+
+  const requestPrediction = (forceRecompute = false) => api(`/api/network/predict-metrics?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ smiles: 'CCO', forceRecompute }),
+  });
+  const counts = () => ({
+    cataPro: fakeStats.cataProBatches.length,
+    solubility: fakeStats.solubilityBatches.length,
+    ec: fakeStats.ecBatches.length,
+    tm: fakeStats.tmItems,
+  });
+
+  const beforeFirst = counts();
+  const first = await requestPrediction();
+  assert.equal(first.response.status, 200);
+  assert.equal(first.body.recomputedCount, 1);
+  assert.equal(first.body.rows[0].sources.ec, 'mock');
+  assert.deepEqual(counts(), {
+    cataPro: beforeFirst.cataPro + 1,
+    solubility: beforeFirst.solubility + 1,
+    ec: beforeFirst.ec + 1,
+    tm: beforeFirst.tm + 1,
+  });
+
+  const afterFirst = counts();
+  const cached = await requestPrediction();
+  assert.equal(cached.response.status, 200);
+  assert.equal(cached.body.recomputedCount, 0);
+  assert.equal(cached.body.rows[0].sources.ec, 'mock');
+  assert.equal(cached.body.rows[0].ec_top1, first.body.rows[0].ec_top1);
+  assert.deepEqual(counts(), afterFirst, 'ordinary Run must not call any predictor when cache inputs match');
+
+  const forced = await requestPrediction(true);
+  assert.equal(forced.response.status, 200);
+  assert.equal(forced.body.recomputedCount, 1);
+  assert.deepEqual(counts(), {
+    cataPro: afterFirst.cataPro + 1,
+    solubility: afterFirst.solubility + 1,
+    ec: afterFirst.ec + 1,
+    tm: afterFirst.tm + 1,
+  });
 });
 
 test('prediction batches requests, reports real progress and ETA, and falls back per invalid item', async () => {
