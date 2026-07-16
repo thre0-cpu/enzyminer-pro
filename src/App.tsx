@@ -1163,7 +1163,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [scoringPageLoading, setScoringPageLoading] = useState(false);
   const [scoringDownloading, setScoringDownloading] = useState(false);
   const [thresholdPreview, setThresholdPreview] = useState<{ total: number; passed: number; ratio: number; threshold: number } | null>(null);
-  const [alignmentPreviewRows, setAlignmentPreviewRows] = useState<Array<{ id: string; segment: string }>>([]);
+  const [alignmentPreviewRows, setAlignmentPreviewRows] = useState<Array<{ id: string; segment: string; isReference?: boolean }>>([]);
   const [alignmentPreviewStart, setAlignmentPreviewStart] = useState(1);
   const [alignmentPreviewEnd, setAlignmentPreviewEnd] = useState(120);
   const [alignmentPreviewOffset, setAlignmentPreviewOffset] = useState(0);
@@ -1173,6 +1173,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [alignmentPreviewActualStart, setAlignmentPreviewActualStart] = useState(1);
   const [alignmentPreviewConsensus, setAlignmentPreviewConsensus] = useState('');
   const [alignmentPreviewConservation, setAlignmentPreviewConservation] = useState<number[]>([]);
+  const [alignmentPreviewReferenceId, setAlignmentPreviewReferenceId] = useState('');
+  const [alignmentPreviewReferenceSegment, setAlignmentPreviewReferenceSegment] = useState('');
   const [alignmentPreviewColumnsTruncated, setAlignmentPreviewColumnsTruncated] = useState(false);
   const [alignmentPreviewMaxColumns, setAlignmentPreviewMaxColumns] = useState(240);
 
@@ -1377,6 +1379,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewOffset(0);
     setAlignmentPreviewConsensus('');
     setAlignmentPreviewConservation([]);
+    setAlignmentPreviewReferenceId('');
+    setAlignmentPreviewReferenceSegment('');
     setAlignmentPreviewColumnsTruncated(false);
     setNetworkStats({ nodes: 0, edges: 0 });
     setConsistencyStats(null);
@@ -2441,6 +2445,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     });
     setAlignmentPath(data.alignment);
     setAlignmentPrepInfo({ alignment: data.alignment, records: Number(data.records || 0) });
+    if (!refId && data.referenceId) setRefId(data.referenceId);
     setAlignmentPreviewOffset(0);
 
     const preview = await loadScoringAlignmentPreview({
@@ -2449,6 +2454,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       end: alignmentPreviewEnd,
       limit: alignmentPreviewLimit,
       offset: 0,
+      referenceId: data.referenceId || refId || undefined,
     });
     setAlignmentPreviewRows(preview.rows || []);
     setAlignmentPreviewOffset(Number(preview.offset || 0));
@@ -2457,6 +2463,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
     setAlignmentPreviewConsensus(preview.consensus || '');
     setAlignmentPreviewConservation(preview.conservation || []);
+    setAlignmentPreviewReferenceId(preview.referenceId || '');
+    setAlignmentPreviewReferenceSegment(preview.referenceSegment || '');
     setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
     setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
   };
@@ -2468,6 +2476,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       end: alignmentPreviewEnd,
       limit: alignmentPreviewLimit,
       offset: Math.max(0, nextOffset),
+      referenceId: alignmentPreviewReferenceId || refId || undefined,
     });
     setAlignmentPreviewRows(preview.rows || []);
     setAlignmentPreviewOffset(Number(preview.offset || 0));
@@ -2476,6 +2485,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
     setAlignmentPreviewConsensus(preview.consensus || '');
     setAlignmentPreviewConservation(preview.conservation || []);
+    setAlignmentPreviewReferenceId(preview.referenceId || '');
+    setAlignmentPreviewReferenceSegment(preview.referenceSegment || '');
     setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
     setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
   };
@@ -2497,6 +2508,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       setCandidateFasta(data.outputFasta);
       setNetworkSourceFasta(data.outputFasta);
     }
+    setNetworkStats({ nodes: 0, edges: 0 });
     setClusteringRunInfo({
       inputFasta: preferredInput,
       outputFasta: data.outputFasta,
@@ -2527,9 +2539,12 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       forceRecompute,
     });
     setNetworkStats({ nodes: data.nodes, edges: data.edges });
+    const candidateSummary = Number.isFinite(data.candidateNodes)
+      ? `${data.candidateNodes} candidate sequences${Number(data.referenceNodes || 0) > 0 ? ` + ${data.referenceNodes} reference sequences` : ''}`
+      : `${data.nodes} nodes`;
     setCompletionToast(data.reused
-      ? `Loaded existing similarity CSV: ${data.nodes} nodes, ${data.edges} edges; no calculation was run`
-      : `Similarity calculation complete: ${data.nodes} nodes, ${data.edges} edges`);
+      ? `Loaded existing similarity CSV: ${candidateSummary}, ${data.edges} edges; no calculation was run`
+      : `Similarity calculation complete: ${candidateSummary}, ${data.edges} edges`);
   };
 
   const runComputeOrReuseSimilarity = async () => {
@@ -3800,10 +3815,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   )}
 
                   <AlignmentViewer
+                    key={`hmmer-alignment-${selectedTaskId}-${alignmentPath}`}
                     rows={alignmentPreviewRows}
                     start={alignmentPreviewActualStart}
                     alignmentLength={alignmentPreviewLength}
                     totalRecords={alignmentPreviewTotalRecords}
+                    referenceId={alignmentPreviewReferenceId}
+                    referenceSegment={alignmentPreviewReferenceSegment}
                     consensus={alignmentPreviewConsensus}
                     conservation={alignmentPreviewConservation}
                   />
@@ -4893,7 +4911,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [scoringPageLoading, setScoringPageLoading] = useState(false);
   const [scoringDownloading, setScoringDownloading] = useState(false);
   const [thresholdPreview, setThresholdPreview] = useState<{ total: number; passed: number; ratio: number; threshold: number } | null>(null);
-  const [alignmentPreviewRows, setAlignmentPreviewRows] = useState<Array<{ id: string; segment: string }>>([]);
+  const [alignmentPreviewRows, setAlignmentPreviewRows] = useState<Array<{ id: string; segment: string; isReference?: boolean }>>([]);
   const [alignmentPreviewStart, setAlignmentPreviewStart] = useState(1);
   const [alignmentPreviewEnd, setAlignmentPreviewEnd] = useState(120);
   const [alignmentPreviewOffset, setAlignmentPreviewOffset] = useState(0);
@@ -4903,6 +4921,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [alignmentPreviewActualStart, setAlignmentPreviewActualStart] = useState(1);
   const [alignmentPreviewConsensus, setAlignmentPreviewConsensus] = useState('');
   const [alignmentPreviewConservation, setAlignmentPreviewConservation] = useState<number[]>([]);
+  const [alignmentPreviewReferenceId, setAlignmentPreviewReferenceId] = useState('');
+  const [alignmentPreviewReferenceSegment, setAlignmentPreviewReferenceSegment] = useState('');
   const [alignmentPreviewColumnsTruncated, setAlignmentPreviewColumnsTruncated] = useState(false);
   const [alignmentPreviewMaxColumns, setAlignmentPreviewMaxColumns] = useState(240);
 
@@ -5003,6 +5023,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewOffset(0);
     setAlignmentPreviewConsensus('');
     setAlignmentPreviewConservation([]);
+    setAlignmentPreviewReferenceId('');
+    setAlignmentPreviewReferenceSegment('');
     setAlignmentPreviewColumnsTruncated(false);
     setNetworkStats({ nodes: 0, edges: 0 });
     setRuntimeTask('idle');
@@ -5423,6 +5445,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     const data = await prepareScoringAlignment({ referenceFasta: referenceFastaPath || undefined, refId: refId || undefined });
     setAlignmentPrepInfo(data);
     setAlignmentPath(data.alignment || '');
+    if (!refId && data.referenceId) setRefId(data.referenceId);
     setAlignmentPreviewOffset(0);
 
     const preview = await loadScoringAlignmentPreview({
@@ -5431,6 +5454,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       end: alignmentPreviewEnd,
       limit: alignmentPreviewLimit,
       offset: 0,
+      referenceId: data.referenceId || refId || undefined,
     });
     setAlignmentPreviewRows(preview.rows || []);
     setAlignmentPreviewOffset(Number(preview.offset || 0));
@@ -5439,6 +5463,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
     setAlignmentPreviewConsensus(preview.consensus || '');
     setAlignmentPreviewConservation(preview.conservation || []);
+    setAlignmentPreviewReferenceId(preview.referenceId || '');
+    setAlignmentPreviewReferenceSegment(preview.referenceSegment || '');
     setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
     setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
   }
@@ -5503,6 +5529,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setClusteringRunInfo(null);
     const data = await runClustering(input, clusterIdentity, clusterWordSize);
     setCandidateFasta(data.outputFasta);
+    setNetworkSourceFasta(data.outputFasta);
+    setNetworkStats({ nodes: 0, edges: 0 });
     setClusteringRunInfo({
       inputFasta: input,
       outputFasta: data.outputFasta,
@@ -5523,9 +5551,12 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       forceRecompute,
     });
     setNetworkStats({ nodes: data.nodes, edges: data.edges });
+    const candidateSummary = Number.isFinite(data.candidateNodes)
+      ? `${data.candidateNodes} candidate sequences${Number(data.referenceNodes || 0) > 0 ? ` + ${data.referenceNodes} reference sequences` : ''}`
+      : `${data.nodes} nodes`;
     setCompletionToast(data.reused
-      ? `Loaded existing similarity CSV: ${data.nodes} nodes, ${data.edges} edges; no calculation was run`
-      : `Similarity calculation complete: ${data.nodes} nodes, ${data.edges} edges`);
+      ? `Loaded existing similarity CSV: ${candidateSummary}, ${data.edges} edges; no calculation was run`
+      : `Similarity calculation complete: ${candidateSummary}, ${data.edges} edges`);
   }
 
   async function runNetworkPush() {
@@ -5600,6 +5631,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       end: alignmentPreviewEnd,
       limit: alignmentPreviewLimit,
       offset: Math.max(0, nextOffset),
+      referenceId: alignmentPreviewReferenceId || refId || undefined,
     });
     setAlignmentPreviewRows(preview.rows || []);
     setAlignmentPreviewOffset(Number(preview.offset || 0));
@@ -5608,6 +5640,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
     setAlignmentPreviewConsensus(preview.consensus || '');
     setAlignmentPreviewConservation(preview.conservation || []);
+    setAlignmentPreviewReferenceId(preview.referenceId || '');
+    setAlignmentPreviewReferenceSegment(preview.referenceSegment || '');
     setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
     setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
   };
@@ -6335,10 +6369,13 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 )}
 
                 <AlignmentViewer
+                  key={`blast-alignment-${selectedTaskId}-${alignmentPath}`}
                   rows={alignmentPreviewRows}
                   start={alignmentPreviewActualStart}
                   alignmentLength={alignmentPreviewLength}
                   totalRecords={alignmentPreviewTotalRecords}
+                  referenceId={alignmentPreviewReferenceId}
+                  referenceSegment={alignmentPreviewReferenceSegment}
                   consensus={alignmentPreviewConsensus}
                   conservation={alignmentPreviewConservation}
                 />

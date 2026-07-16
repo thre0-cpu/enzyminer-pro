@@ -528,6 +528,7 @@ export function prepareScoringAlignment(opts?: {
     inputFasta: string;
     alignment: string;
     records: number;
+    referenceId: string;
   }>('/api/scoring/prepare-alignment', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -545,6 +546,7 @@ export function loadScoringAlignmentPreview(opts?: {
   end?: number;
   limit?: number;
   offset?: number;
+  referenceId?: string;
 }) {
   const params = new URLSearchParams();
   if (opts?.alignment) params.set('alignment', opts.alignment);
@@ -552,6 +554,7 @@ export function loadScoringAlignmentPreview(opts?: {
   params.set('end', String(opts?.end ?? 120));
   params.set('limit', String(opts?.limit ?? 40));
   params.set('offset', String(opts?.offset ?? 0));
+  if (opts?.referenceId) params.set('referenceId', opts.referenceId);
   return request<{
     alignment: string;
     start: number;
@@ -563,9 +566,12 @@ export function loadScoringAlignmentPreview(opts?: {
     offset: number;
     totalRecords: number;
     alignmentLength: number;
+    referenceId: string;
+    referenceMatched: boolean;
+    referenceSegment: string;
     consensus: string;
     conservation: number[];
-    rows: Array<{ id: string; segment: string }>;
+    rows: Array<{ id: string; segment: string; isReference: boolean }>;
   }>(`/api/scoring/alignment-preview?${params.toString()}`);
 }
 
@@ -600,6 +606,7 @@ export function runClustering(inputFasta: string, identity: number, wordSize: nu
     outputCount: number;
     deduplicatedCount: number;
     clusters: number;
+    similarityInvalidated: boolean;
   }>('/api/clustering/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -629,6 +636,8 @@ export function computeNetworkSimilarity(opts?: {
     nodesCsv: string;
     edgesCsv: string;
     nodes: number;
+    candidateNodes?: number;
+    referenceNodes?: number;
     edges: number;
     similarityMethod: 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2' | null;
     includeReferenceLinks: boolean | null;
@@ -658,6 +667,8 @@ export function loadNetworkSimilarityStatus() {
     edgeTotal: number;
     nodesCsv: string;
     edgesCsv: string;
+    stale?: boolean;
+    staleReason?: string | null;
   }>('/api/network/similarity-status');
 }
 

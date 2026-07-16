@@ -262,7 +262,7 @@ test('alignment preview stays bounded and the generated MAFFT FASTA can be downl
     '>seq1',
     'A'.repeat(300),
     '>seq2',
-    `${'A'.repeat(250)}${'C'.repeat(50)}`,
+    `${'A'.repeat(5)}--${'A'.repeat(243)}${'C'.repeat(50)}`,
     '>seq3',
     `${'A'.repeat(240)}${'G'.repeat(60)}`,
     '',
@@ -277,9 +277,31 @@ test('alignment preview stays bounded and the generated MAFFT FASTA can be downl
   assert.equal(preview.body.rows[0].segment.length, 240);
   assert.equal(preview.body.consensus, 'A'.repeat(240));
   assert.equal(preview.body.conservation.length, 240);
-  assert.ok(preview.body.conservation.every((value) => value === 1));
+  assert.equal(preview.body.conservation[0], 1);
+  assert.equal(preview.body.conservation[5], 0.6667);
+  assert.equal(preview.body.conservation[6], 0.6667);
+  assert.equal(preview.body.conservation[7], 1);
   assert.equal(preview.body.maxPreviewColumns, 240);
   assert.equal(preview.body.columnsTruncated, true);
+
+  const referencePreview = await api(
+    `/api/scoring/alignment-preview?taskId=${taskId}&start=1&end=120&limit=2&referenceId=seq2`,
+  );
+  assert.equal(referencePreview.response.status, 200);
+  assert.equal(referencePreview.body.referenceId, 'seq2');
+  assert.equal(referencePreview.body.referenceMatched, true);
+  assert.equal(referencePreview.body.referenceSegment.slice(5, 7), '--');
+  assert.equal(referencePreview.body.rows[0].id, 'seq2');
+  assert.equal(referencePreview.body.rows[0].isReference, true);
+  assert.equal(referencePreview.body.rows[1].id, 'seq1');
+
+  const pagedReferencePreview = await api(
+    `/api/scoring/alignment-preview?taskId=${taskId}&start=1&end=120&limit=1&offset=2&referenceId=seq2`,
+  );
+  assert.equal(pagedReferencePreview.response.status, 200);
+  assert.equal(pagedReferencePreview.body.rows[0].id, 'seq3');
+  assert.equal(pagedReferencePreview.body.rows[0].isReference, false);
+  assert.equal(pagedReferencePreview.body.referenceSegment.slice(5, 7), '--');
 
   const finalWindow = await api(`/api/scoring/alignment-preview?taskId=${taskId}&start=241&end=999`);
   assert.equal(finalWindow.response.status, 200);
@@ -353,6 +375,75 @@ test('similarity load and normal compute reuse the exact existing CSV files with
   const missing = await api('/api/network/data?taskId=similarity-cache-missing');
   assert.equal(missing.response.status, 404);
   assert.match(String(missing.body.message || ''), /Compute sequence similarity first/i);
+});
+
+test('similarity uses exactly the clustered FASTA representatives and rebuilds stale artifacts', async () => {
+  const taskId = 'clustered-similarity-input-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+
+  const clusteredFastaPath = path.join(taskDir, 'candidates_cdhit85.fasta');
+  await fs.writeFile(clusteredFastaPath, [
+    '>candidate_A',
+    'AAAAAAAAAA',
+    '>candidate_C',
+    'CCCCCCCCCC',
+    '',
+  ].join('\n'));
+  await fs.writeFile(`${clusteredFastaPath}.clstr`, [
+    '>Cluster 0',
+    '0 10aa, >candidate_A... *',
+    '1 10aa, >candidate_B... at 90.00%',
+    '>Cluster 1',
+    '0 10aa, >candidate_C... *',
+    '',
+  ].join('\n'));
+
+  // Simulate similarity CSVs created before a new clustering run. The stale
+  // marker must prevent a normal Compute click from reusing these entries.
+  await fs.writeFile(path.join(taskDir, 'nodes.csv'), 'id,is_reference\nobsolete_candidate,0\n');
+  await fs.writeFile(
+    path.join(taskDir, 'edges_similarity.csv'),
+    'source,target,similarity,weight,cluster\nobsolete_candidate,old_peer,90,0.9,Old\n',
+  );
+  await fs.writeFile(path.join(taskDir, '.network_similarity_stale.json'), JSON.stringify({
+    reason: 'clustering-output-changed',
+    sourceFastaPath: clusteredFastaPath,
+  }));
+
+  const staleLoad = await api(`/api/network/data?taskId=${taskId}`);
+  assert.equal(staleLoad.response.status, 409);
+  assert.equal(staleLoad.body.stale, true);
+
+  const computed = await api(`/api/network/compute-similarity?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      similarityMethod: 'needleman-wunsch',
+      includeReferenceLinks: false,
+      sourceFasta: clusteredFastaPath,
+      forceRecompute: false,
+    }),
+  });
+  assert.equal(computed.response.status, 200);
+  assert.equal(computed.body.reused, false);
+  assert.equal(computed.body.generated, true);
+  assert.equal(computed.body.candidateNodes, 2);
+  assert.equal(computed.body.referenceNodes, 0);
+  assert.equal(computed.body.nodes, 2);
+  assert.equal(computed.body.edges, 1);
+
+  const loaded = await api(`/api/network/data?taskId=${taskId}`);
+  assert.equal(loaded.response.status, 200);
+  assert.deepEqual(loaded.body.nodes.map((row) => row.id), ['candidate_A', 'candidate_C']);
+  assert.ok(!loaded.body.nodes.some((row) => row.id === 'candidate_B'));
+  assert.ok(!loaded.body.nodes.some((row) => row.id === 'obsolete_candidate'));
+
+  const status = await api(`/api/network/similarity-status?taskId=${taskId}`);
+  assert.equal(status.response.status, 200);
+  assert.equal(status.body.stale, false);
+  assert.equal(status.body.nodeTotal, 2);
+  await assert.rejects(fs.access(path.join(taskDir, '.network_similarity_stale.json')));
 });
 
 test('candidate pairwise progress remains global across the final 5000-pair batch boundary', async () => {

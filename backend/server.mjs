@@ -1992,6 +1992,21 @@ async function buildScoringPassedFasta(scoreCsvPath, alignmentPath, outputFastaP
   };
 }
 
+function fastaRecordMatchesIdentifier(record, identifier) {
+  const needle = String(identifier || '').trim();
+  if (!needle) return false;
+
+  const recordId = String(record?.id || '').trim();
+  const recordHeader = String(record?.header || '').trim();
+  if (recordId === needle || recordHeader === needle) return true;
+
+  const needleTokens = new Set(normalizeIdTokens(needle).map((token) => token.toLowerCase()));
+  if (!needleTokens.size) needleTokens.add(needle.toLowerCase());
+  return [recordId, recordHeader]
+    .flatMap((value) => normalizeIdTokens(value))
+    .some((token) => needleTokens.has(token.toLowerCase()));
+}
+
 async function prepareScoringAutoAlignment({ filteredFasta, referenceFasta, refId, outInputFasta, outAlignment }) {
   const totalSteps = 5;
 
@@ -2009,13 +2024,22 @@ async function prepareScoringAutoAlignment({ filteredFasta, referenceFasta, refI
     throw new Error(`No reference sequences found in ${referenceFasta}`);
   }
   const token = String(refId || '').trim();
-  const refRecord = refRecords.find((r) => r.id.includes(token) || r.header.includes(token)) || refRecords[0];
-  if (!token || !(refRecord.id.includes(token) || refRecord.header.includes(token))) {
+  const matchedRefRecord = token
+    ? refRecords.find((record) => fastaRecordMatchesIdentifier(record, token))
+    : null;
+  const refRecord = matchedRefRecord || refRecords[0];
+  const referenceId = String(refRecord?.id || refRecord?.header || '').trim();
+  if (!matchedRefRecord) {
     pushRuntimeLine(`[scoring] reference id ${token || '(empty)'} not found, fallback to ${refRecord.id}`);
   }
 
-  const hasRefInFiltered = filteredRecords.some((r) => r.id.includes(token) || r.header.includes(token));
-  const combined = hasRefInFiltered ? filteredRecords : [refRecord, ...filteredRecords];
+  // Keep the designated reference first and avoid duplicating it if the
+  // filtered candidate FASTA already contains the same sequence identifier.
+  const filteredWithoutReference = filteredRecords.filter((record) => (
+    !fastaRecordMatchesIdentifier(record, referenceId)
+    && (!token || !fastaRecordMatchesIdentifier(record, token))
+  ));
+  const combined = [refRecord, ...filteredWithoutReference];
 
   updateAlignmentProgress({ current: 3, total: totalSteps, phase: '组装输入 FASTA' });
   const outLines = combined.flatMap((r) => [`>${r.header || r.id}`, String(r.seq || '').replace(/\s+/g, '').toUpperCase()]);
@@ -2026,6 +2050,7 @@ async function prepareScoringAutoAlignment({ filteredFasta, referenceFasta, refI
 
   updateAlignmentProgress({ current: 5, total: totalSteps, phase: '写出对齐结果' });
   await fs.writeFile(outAlignment, mafftOut.stdout, 'utf-8');
+  return { referenceId };
 }
 
 async function resolveDefaultReferenceFasta(workDir) {
@@ -2581,14 +2606,17 @@ async function computePairSimilarityPctBatchBiopython(workDir, pairs, method, pr
 
 function resolveNetworkSourceFasta(workDir) {
   return [
+    // After step 6, the CD-HIT representatives are the canonical input for
+    // similarity calculation. Keep this ahead of the pre-clustering FASTA so
+    // automatic resolution cannot silently bring removed sequences back.
+    path.join(workDir, 'candidates_cdhit85.fasta'),
     path.join(workDir, 'scored_passed.fasta'),
     path.join(workDir, 'candidates.fasta'),
     path.join(workDir, 'hits_filtered.fasta'),
     path.join(workDir, 'merged_sequences.fasta'),
-    path.join(workDir, 'candidates_cdhit85.fasta'),
     // Legacy fallbacks for old tasks:
-    path.join(workDir, 'AOX_candidates_from_hits_len650_700_200.fasta'),
     path.join(workDir, 'AOX_candidates_cdhit85.fasta'),
+    path.join(workDir, 'AOX_candidates_from_hits_len650_700_200.fasta'),
   ];
 }
 
@@ -2787,36 +2815,58 @@ async function buildNetworkFilesFromClusters(workDir, clusterFilePath, fallbackF
     return tokens.some((token) => seenNodeToken.has(token));
   };
 
-  for (const c of clusters) {
-    const members = Array.isArray(c.members) ? c.members : [];
-    if (!members.length) {
-      continue;
-    }
-    const size = members.length;
-
-    for (const m of members) {
-      if (hasSeenNode(m.id)) {
-        continue;
+  // The .clstr file contains every pre-deduplication member, while the FASTA
+  // selected on the Similarity page may contain only CD-HIT representatives.
+  // Nodes and pairwise jobs must both be driven by that exact FASTA. Use the
+  // cluster file only as metadata; otherwise removed members reappear as
+  // disconnected nodes and the step-6/step-7 sequence counts diverge.
+  const clusterInfoByToken = new Map();
+  for (const cluster of clusters) {
+    const members = Array.isArray(cluster.members) ? cluster.members : [];
+    for (const member of members) {
+      const info = {
+        name: cluster.name || 'Unclustered',
+        size: Math.max(1, members.length),
+        representative: member.representative === true,
+      };
+      for (const token of normalizeIdTokens(member.id)) {
+        if (!clusterInfoByToken.has(token)) clusterInfoByToken.set(token, info);
       }
-      markSeenNode(m.id);
-      const meta = lookupMeta(m.id);
-      nodes.push({
-        id: m.id,
-        cluster: c.name,
-        cluster_size: size,
-        representative: m.representative ? '1' : '0',
-        is_reference: isReferenceNode(m.id, referenceIdSet) ? '1' : '0',
-        kingdom: meta.kingdom,
-        phylum: meta.phylum,
-        class: meta.class,
-        order: meta.order,
-        family: meta.family,
-        genus: meta.genus,
-        species: meta.species,
-      });
-
     }
+  }
 
+  const lookupClusterInfo = (record) => {
+    const tokens = new Set([
+      ...normalizeIdTokens(record?.id),
+      ...normalizeIdTokens(record?.header),
+    ]);
+    for (const token of tokens) {
+      const info = clusterInfoByToken.get(token);
+      if (info) return info;
+    }
+    return null;
+  };
+
+  for (const record of sourceRecords) {
+    const nodeId = String(record?.id || '').trim();
+    if (!nodeId || hasSeenNode(nodeId)) continue;
+    markSeenNode(nodeId);
+    const clusterInfo = lookupClusterInfo(record);
+    const meta = lookupMeta(nodeId);
+    nodes.push({
+      id: nodeId,
+      cluster: clusterInfo?.name || 'Unclustered',
+      cluster_size: clusterInfo?.size || 1,
+      representative: clusterInfo ? (clusterInfo.representative ? '1' : '0') : '1',
+      is_reference: isReferenceNode(nodeId, referenceIdSet) ? '1' : '0',
+      kingdom: meta.kingdom,
+      phylum: meta.phylum,
+      class: meta.class,
+      order: meta.order,
+      family: meta.family,
+      genus: meta.genus,
+      species: meta.species,
+    });
   }
 
   // Force all reference sequences into nodes, even if they are absent in clustered candidates.
@@ -2948,16 +2998,10 @@ async function buildNetworkFilesFromClusters(workDir, clusterFilePath, fallbackF
 
   // Candidate sequences are pairwise compared (all-vs-all) with the selected alignment method.
   // Pairs are generated and processed in batches to avoid memory exhaustion.
-  const candidateIds = [];
-  const seenCandidateId = new Set();
-  for (const rec of sourceRecords) {
-    const id = String(rec?.id || '').trim();
-    if (!id || !hasSeenNode(id) || seenCandidateId.has(id)) {
-      continue;
-    }
-    seenCandidateId.add(id);
-    candidateIds.push(id);
-  }
+  const candidateIds = nodes
+    .filter((node) => String(node.is_reference || '') !== '1')
+    .map((node) => String(node.id || '').trim())
+    .filter(Boolean);
 
   // Pre-calculate total pair count for progress tracking.
   const n = candidateIds.length;
@@ -3047,6 +3091,32 @@ async function buildNetworkFilesFromClusters(workDir, clusterFilePath, fallbackF
 
 function networkBuildMetaPath(workDir) {
   return path.join(workDir, 'network_build_meta.json');
+}
+
+function networkStaleMetaPath(workDir) {
+  return path.join(workDir, '.network_similarity_stale.json');
+}
+
+async function readNetworkStaleMeta(workDir) {
+  try {
+    const raw = await fs.readFile(networkStaleMetaPath(workDir), 'utf-8');
+    const meta = JSON.parse(raw);
+    return meta && typeof meta === 'object' ? meta : null;
+  } catch {
+    return null;
+  }
+}
+
+async function markNetworkArtifactsStale(workDir, meta = {}) {
+  await fs.writeFile(networkStaleMetaPath(workDir), JSON.stringify({
+    markedAt: Date.now(),
+    reason: 'clustering-output-changed',
+    ...meta,
+  }, null, 2), 'utf-8');
+}
+
+async function clearNetworkArtifactsStale(workDir) {
+  await fs.rm(networkStaleMetaPath(workDir), { force: true }).catch(() => {});
 }
 
 async function readNetworkBuildMeta(workDir) {
@@ -3141,6 +3211,7 @@ async function ensureNetworkFiles(workDir, opts = {}) {
       sourceFastaPath: sourceFasta,
       referenceFastaPath: referenceFasta,
     });
+    await clearNetworkArtifactsStale(workDir);
     return { nodesPath: built.nodesPath, edgesPath: built.edgesPath, generated: true };
   };
 
@@ -4884,7 +4955,7 @@ route.post('/api/scoring/prepare-alignment', async (req, res) => {
       const scoringInputFasta = path.join(workDir, 'scoring_input_auto.fasta');
       const scoringAlignment = path.join(workDir, 'scoring_input_auto.mafft.fasta');
 
-      await prepareScoringAutoAlignment({
+      const alignmentInfo = await prepareScoringAutoAlignment({
         filteredFasta,
         referenceFasta,
         refId,
@@ -4899,6 +4970,7 @@ route.post('/api/scoring/prepare-alignment', async (req, res) => {
         inputFasta: scoringInputFasta,
         alignment: scoringAlignment,
         records: records.length,
+        referenceId: alignmentInfo.referenceId,
       });
       updateAlignmentProgress({ current: 5, total: 5, phase: '完成' });
       finishRuntimeTask('scoring/prepare-alignment', true);
@@ -4931,6 +5003,17 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
     const text = await fs.readFile(alignmentPath, 'utf-8');
     const records = parseFastaRecords(text);
     const totalRecords = records.length;
+    const requestedReferenceId = String(req.query?.referenceId || '').trim();
+    const fallbackReferenceId = requestedReferenceId || await resolveDefaultRefId(workDir);
+    let referenceIndex = fallbackReferenceId
+      ? records.findIndex((record) => fastaRecordMatchesIdentifier(record, fallbackReferenceId))
+      : -1;
+    const referenceMatched = referenceIndex >= 0;
+    if (referenceIndex < 0 && records.length > 0) referenceIndex = 0;
+    const referenceRecord = referenceIndex >= 0 ? records[referenceIndex] : null;
+    const orderedRecords = referenceIndex > 0
+      ? [referenceRecord, ...records.slice(0, referenceIndex), ...records.slice(referenceIndex + 1)]
+      : records;
     const alignmentLength = records.reduce(
       (maxLength, record) => Math.max(maxLength, String(record?.seq || '').length),
       0,
@@ -4943,10 +5026,14 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
     const from = start - 1;
     const to = Math.min(requestedWindowEnd, alignmentLength);
     const windowWidth = Math.max(0, to - from);
-    const windowed = records.slice(offset, offset + limit).map((r) => ({
+    const windowed = orderedRecords.slice(offset, offset + limit).map((r) => ({
       id: r.id,
       segment: String(r.seq || '').slice(from, to).padEnd(windowWidth, '-'),
+      isReference: r === referenceRecord,
     }));
+    const referenceSegment = referenceRecord
+      ? String(referenceRecord.seq || '').slice(from, to).padEnd(windowWidth, '-')
+      : '';
 
     // Consensus and conservation use all sequences, not only the visible page,
     // while the rendered DOM remains bounded to at most 200 x 240 residues.
@@ -4983,6 +5070,9 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
       offset,
       totalRecords,
       alignmentLength,
+      referenceId: String(referenceRecord?.id || referenceRecord?.header || ''),
+      referenceMatched,
+      referenceSegment,
       consensus: consensus.join(''),
       conservation,
       rows: windowed,
@@ -5147,6 +5237,16 @@ route.post('/api/clustering/run', async (req, res) => {
       clusters = outputText.split(/\r?\n/).filter((x) => x.startsWith('>')).length;
     }
 
+    // Existing nodes/edges describe the previous candidate set. Preserve the
+    // files for failure recovery, but mark them stale so a normal Compute on
+    // step 7 rebuilds them instead of silently reusing mismatched entries.
+    await markNetworkArtifactsStale(workDir, {
+      sourceFastaPath: outputFasta,
+      clusterFilePath: clusterFile,
+      inputCount,
+      outputCount,
+    });
+
     res.json({
       ok: true,
       outputFasta,
@@ -5155,6 +5255,7 @@ route.post('/api/clustering/run', async (req, res) => {
       outputCount,
       deduplicatedCount: Math.max(0, inputCount - outputCount),
       clusters,
+      similarityInvalidated: true,
     });
     finishRuntimeTask('clustering/run', true);
     } catch (err) {
@@ -5182,6 +5283,7 @@ route.post('/api/network/compute-similarity', async (req, res) => {
       const forceRecompute = req.body?.forceRecompute === true;
       const nodesPath = path.join(workDir, 'nodes.csv');
       const edgesPath = path.join(workDir, 'edges_similarity.csv');
+      const staleMeta = await readNetworkStaleMeta(workDir);
 
       let existingNodeTotal = 0;
       let existingEdgeTotal = 0;
@@ -5198,7 +5300,7 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         existingFilesReady = false;
       }
 
-      if (existingFilesReady && !forceRecompute) {
+      if (existingFilesReady && !forceRecompute && !staleMeta) {
         const buildMeta = await readNetworkBuildMeta(workDir);
         pushRuntimeLine(`[network] reused existing similarity artifacts: nodes=${existingNodeTotal}, edges=${existingEdgeTotal}; no alignment was run`);
         res.json({
@@ -5217,6 +5319,10 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         });
         finishRuntimeTask('network/compute-similarity', true);
         return;
+      }
+
+      if (staleMeta && !forceRecompute) {
+        pushRuntimeLine('[network] clustering output changed; existing similarity CSV files are stale and will be rebuilt');
       }
 
       updateNetworkAlignProgress({
@@ -5240,7 +5346,7 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         pairwiseThresholdPct: 0,
         includeReferenceLinks,
         similarityMethod,
-        sourceFastaPath,
+        sourceFastaPath: sourceFastaPath || String(staleMeta?.sourceFastaPath || ''),
         referenceFastaPath,
       });
 
@@ -5248,6 +5354,8 @@ route.post('/api/network/compute-similarity', async (req, res) => {
       const outEdgesPath = rebuilt.edgesPath;
       const { rows: nodeRows } = await readCsvRows(outNodesPath);
       const { rows: edgeRows } = await readCsvRows(outEdgesPath);
+      const candidateNodes = nodeRows.filter((row) => String(row.is_reference || '') !== '1').length;
+      const referenceNodes = nodeRows.length - candidateNodes;
 
       if (!nodeRows.length) {
         throw new Error('Similarity computed but nodes.csv is empty. Please verify input FASTA contains sequences.');
@@ -5265,6 +5373,8 @@ route.post('/api/network/compute-similarity', async (req, res) => {
         nodesCsv: outNodesPath,
         edgesCsv: outEdgesPath,
         nodes: nodeRows.length,
+        candidateNodes,
+        referenceNodes,
         edges: edgeRows.length,
         similarityMethod,
         includeReferenceLinks,
@@ -5285,6 +5395,7 @@ route.get('/api/network/similarity-status', async (req, res) => {
     const { taskId, workDir } = await resolveWorkDirForReq(req);
     const nodesPath = path.join(workDir, 'nodes.csv');
     const edgesPath = path.join(workDir, 'edges_similarity.csv');
+    const staleMeta = await readNetworkStaleMeta(workDir);
 
     let nodesExists = false;
     let edgesExists = false;
@@ -5322,6 +5433,8 @@ route.get('/api/network/similarity-status', async (req, res) => {
       edgeTotal,
       nodesCsv: nodesPath,
       edgesCsv: edgesPath,
+      stale: Boolean(staleMeta),
+      staleReason: staleMeta?.reason || null,
     });
   } catch (err) {
     jsonError(res, 'Failed to load similarity status', err);
@@ -5333,6 +5446,16 @@ route.get('/api/network/data', async (req, res) => {
     const { workDir } = await resolveWorkDirForReq(req);
     const edgesPath = path.join(workDir, 'edges_similarity.csv');
     const nodesPath = path.join(workDir, 'nodes.csv');
+    const staleMeta = await readNetworkStaleMeta(workDir);
+
+    if (staleMeta) {
+      res.status(409).json({
+        ok: false,
+        stale: true,
+        message: 'Clustering results changed after these similarity files were created. Run Compute Similarity to rebuild them from the current clustered FASTA.',
+      });
+      return;
+    }
 
     // This endpoint is intentionally read-only. "Load" must report exactly
     // what is already stored on disk and must never trigger CD-HIT/alignment.
@@ -5373,6 +5496,15 @@ route.get('/api/network/data', async (req, res) => {
 route.post('/api/network/browser-graph', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
+    const staleMeta = await readNetworkStaleMeta(workDir);
+    if (staleMeta) {
+      res.status(409).json({
+        ok: false,
+        stale: true,
+        message: 'Clustering results changed. Recompute sequence similarity before loading the network.',
+      });
+      return;
+    }
     const pairwiseThresholdPct = Number(req.body?.pairwiseThresholdPct);
     const maxEdges = Number(req.body?.maxEdges);
     const nodesPath = path.join(workDir, 'nodes.csv');
@@ -5450,6 +5582,16 @@ route.post('/api/network/push-cytoscape', async (req, res) => {
         edgesPath = rebuilt.edgesPath;
         generated = true;
       } else {
+        const staleMeta = await readNetworkStaleMeta(workDir);
+        if (staleMeta) {
+          res.status(409).json({
+            ok: false,
+            stale: true,
+            message: 'Clustering results changed. Recompute sequence similarity before pushing the network.',
+          });
+          finishRuntimeTask('network/push-cytoscape', false);
+          return;
+        }
         try {
           await Promise.all([fs.access(nodesPath), fs.access(edgesPath)]);
         } catch {
