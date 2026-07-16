@@ -18,6 +18,12 @@ import type {
 
 type SaveFormat = 'fasta' | 'csv';
 
+export type AppliedCandidateFilter = {
+  conditions: ManualFilterCondition[];
+  filteredCount: number;
+  totalCandidates: number;
+};
+
 type CandidateSaveControlsProps = {
   ids: string[];
   candidates?: RecommendCandidate[];
@@ -356,6 +362,30 @@ function normalizeStoredConditions(value: unknown): UiFilterCondition[] {
   return rows.length ? rows : [createCondition()];
 }
 
+function activeManualFilterConditions(conditions: UiFilterCondition[]): ManualFilterCondition[] {
+  const active: ManualFilterCondition[] = [];
+  for (const { key: _key, ...condition } of conditions) {
+    const rawValue = condition.value;
+    if (TEXT_FIELDS.has(condition.field)) {
+      const value = String(rawValue ?? '').trim();
+      if (value) active.push({ ...condition, value });
+      continue;
+    }
+    if (rawValue === '' || rawValue === null || rawValue === undefined) continue;
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) continue;
+    if (condition.operator === 'between') {
+      if (condition.value2 === '' || condition.value2 === null || condition.value2 === undefined) continue;
+      const value2 = Number(condition.value2);
+      if (!Number.isFinite(value2)) continue;
+      active.push({ ...condition, value, value2 });
+      continue;
+    }
+    active.push({ ...condition, value, value2: undefined });
+  }
+  return active;
+}
+
 function formatMetric(value: number | null, digits = 4) {
   if (value === null || !Number.isFinite(value)) return '—';
   if (value !== 0 && (Math.abs(value) < 0.001 || Math.abs(value) >= 100000)) return value.toExponential(3);
@@ -366,10 +396,12 @@ export function ManualFilteringPanel({
   taskId,
   subWeights,
   tmTarget,
+  onAppliedFilterChange,
 }: {
   taskId: string;
   subWeights: PredictedSubWeights;
   tmTarget: number;
+  onAppliedFilterChange?: (state: AppliedCandidateFilter) => void;
 }) {
   const storageKey = `enzymeminer:manual-filter:${taskId || 'default'}`;
   const savedState = useMemo(() => {
@@ -404,7 +436,9 @@ export function ManualFilteringPanel({
   const appliedQueryRef = useRef({ conditions, sort, pageSize });
   const loadingRef = useRef(false);
   const predictionOptionsRef = useRef({ subWeights, tmTarget });
+  const appliedFilterChangeRef = useRef(onAppliedFilterChange);
   predictionOptionsRef.current = { subWeights, tmTarget };
+  appliedFilterChangeRef.current = onAppliedFilterChange;
 
   useEffect(() => {
     if (typeof window === 'undefined' || !taskId) return;
@@ -430,8 +464,9 @@ export function ManualFilteringPanel({
     setError('');
     try {
       setActiveTaskId(taskId);
+      const appliedConditions = activeManualFilterConditions(query.conditions);
       const data = await filterPredictedCandidates({
-        conditions: query.conditions.map(({ key: _key, ...condition }) => condition),
+        conditions: appliedConditions,
         logic: 'and',
         page: requestedPage,
         pageSize: query.pageSize,
@@ -445,6 +480,11 @@ export function ManualFilteringPanel({
       setMatchingIds(data.matchingIds || []);
       setTotalPredicted(data.totalPredicted);
       setFilteredCount(data.filteredCount);
+      appliedFilterChangeRef.current?.({
+        conditions: appliedConditions,
+        filteredCount: data.filteredCount,
+        totalCandidates: data.totalPredicted,
+      });
       setPage(data.page);
       setTotalPages(data.totalPages);
       const validIds = new Set(data.matchingIds || []);
@@ -455,6 +495,7 @@ export function ManualFilteringPanel({
       setMatchingIds([]);
       setTotalPredicted(0);
       setFilteredCount(0);
+      appliedFilterChangeRef.current?.({ conditions: [], filteredCount: 0, totalCandidates: 0 });
       setTotalPages(1);
       setSelectedIds(new Set());
     } finally {
@@ -502,9 +543,10 @@ export function ManualFilteringPanel({
   return (
     <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div>
-        <h3 className="text-sm font-semibold text-slate-800">Manual Filtering</h3>
-        <p className="mt-1 text-xs text-slate-500">
-          Apply hard filters to all candidates with completed property predictions. Conditions are combined with AND.
+        <h3 className="text-sm font-semibold text-slate-800">2.1 Optional Candidate Pool Filters</h3>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+          Apply hard filters to candidates with completed property predictions. Conditions are combined with AND.
+          With no active condition, Recommendation uses every candidate. Applied conditions define the automatic recommendation pool; table checkboxes only control export.
         </p>
       </div>
 
@@ -643,7 +685,7 @@ export function ManualFilteringPanel({
 
       {!error && totalPredicted === 0 && !loading && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          No completed property predictions were found. Run Strategy 1 property prediction first.
+          No completed property predictions were found. Property-based filters need prediction results, but Recommendation can still run on all candidates when no filter is active.
         </div>
       )}
 

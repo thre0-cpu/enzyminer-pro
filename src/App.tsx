@@ -3,6 +3,8 @@ import {
   Activity,
   AlertCircle,
   ArrowRight,
+  BookOpen,
+  Box,
   CheckCircle2,
   ChevronRight,
   Database,
@@ -33,6 +35,7 @@ import {
   filterHitsByTargets,
   filterHits,
   healthCheck,
+  loadBundledExample,
   listTasks,
   loadReferencePreview,
   loadCdhitPreview,
@@ -74,9 +77,11 @@ import {
   compareIntersect,
   compareMerge,
 } from './api';
-import type { EbiHmmDatabase, BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, SimilarityArtifactState, PredictionArtifactState, BrowserGraphNode, BrowserGraphEdge } from './api';
+import type { EbiHmmDatabase, BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, SimilarityArtifactState, PredictionArtifactState, BrowserGraphNode, BrowserGraphEdge, ManualFilterCondition } from './api';
 import AlignmentViewer from './AlignmentViewer';
+import HelpAbout from './HelpAbout';
 import { ManualFilteringPanel, SystemRecommendationResults } from './RecommendationPanels';
+import type { AppliedCandidateFilter } from './RecommendationPanels';
 import { downloadButtonClass, outlinedActionButtonClass } from './uiStyles';
 const NetworkGraph = React.lazy(() => import('./NetworkGraph'));
 
@@ -113,6 +118,45 @@ type TaskBrief = {
 };
 
 type EbiSubStepState = Record<EbiSubStepKey, StepStatus>;
+
+type RecommendationMeta = {
+  totalCandidates: number;
+  candidatePoolCount: number;
+  recommendedCandidates: number;
+  filteredByManual: number;
+  filterConditions: ManualFilterCondition[];
+  totalReferences: number;
+  filteredByClusterSize: number;
+  filteredBySimilarity: number;
+  predictedMetricsAvailable: boolean;
+};
+
+const EMPTY_APPLIED_FILTER: AppliedCandidateFilter = {
+  conditions: [],
+  filteredCount: 0,
+  totalCandidates: 0,
+};
+
+function normalizeAppliedCandidateFilter(value: unknown): AppliedCandidateFilter {
+  if (!value || typeof value !== 'object') return { ...EMPTY_APPLIED_FILTER, conditions: [] };
+  const raw = value as Partial<AppliedCandidateFilter>;
+  const conditions = Array.isArray(raw.conditions)
+    ? raw.conditions.filter((condition): condition is ManualFilterCondition => Boolean(condition && typeof condition === 'object'))
+    : [];
+  const filteredCount = Number(raw.filteredCount);
+  const totalCandidates = Number(raw.totalCandidates);
+  return {
+    conditions,
+    filteredCount: Number.isFinite(filteredCount) ? Math.max(0, filteredCount) : 0,
+    totalCandidates: Number.isFinite(totalCandidates) ? Math.max(0, totalCandidates) : 0,
+  };
+}
+
+function appliedCandidateFilterKey(filter: AppliedCandidateFilter): string {
+  const normalized = normalizeAppliedCandidateFilter(filter);
+  if (!normalized.conditions.length) return 'all-candidates';
+  return JSON.stringify(normalized);
+}
 
 const initialEbiSubStepState: EbiSubStepState = {
   submit: 'idle',
@@ -576,7 +620,7 @@ function normalizePredictedSubWeights(weights: unknown): PredictedSubWeights {
   ) as PredictedSubWeights;
 }
 
-// Generic N-segment draggable weight bar. Works for both the 6-way recommendation
+// Generic N-segment draggable weight bar. Works for both the 5-way recommendation
 // weights and the 3-way predicted-metric sub-weights.
 function WeightBar<K extends string>({
   weights,
@@ -692,12 +736,73 @@ function WeightBar<K extends string>({
   );
 }
 
-// ── Strategy 1: property-prediction based scoring (kcat / solubility / Tm) ──
+function RecommendationSettingsControls({
+  minClusterSize,
+  onMinClusterSizeChange,
+  topN,
+  onTopNChange,
+  diversityMode,
+  onDiversityModeChange,
+  connectivityThreshold,
+  onConnectivityThresholdChange,
+  temperature,
+  onTemperatureChange,
+}: {
+  minClusterSize: number;
+  onMinClusterSizeChange: (value: number) => void;
+  topN: number;
+  onTopNChange: (value: number) => void;
+  diversityMode: 'proportional' | 'round-robin';
+  onDiversityModeChange: (value: 'proportional' | 'round-robin') => void;
+  connectivityThreshold: number;
+  onConnectivityThresholdChange: (value: number) => void;
+  temperature: number;
+  onTemperatureChange: (value: number) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
+      <div>
+        <label className="mb-1 block text-xs text-slate-500">Minimum Cluster Size</label>
+        <input type="number" min={1} max={100} step={1} className="w-full rounded border p-2 text-sm"
+          value={minClusterSize}
+          onChange={(event) => onMinClusterSizeChange(Math.max(1, Number(event.target.value) || 2))} />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-slate-500">Top N</label>
+        <input type="number" min={1} max={5000} step={10} className="w-full rounded border p-2 text-sm"
+          value={topN}
+          onChange={(event) => onTopNChange(Math.max(1, Math.min(5000, Number(event.target.value) || 50)))} />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-slate-500">Selection Strategy</label>
+        <select className="w-full rounded border p-2 text-sm" value={diversityMode}
+          onChange={(event) => onDiversityModeChange(event.target.value as 'proportional' | 'round-robin')}>
+          <option value="proportional">Proportional</option>
+          <option value="round-robin">Round-robin</option>
+        </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-slate-500">Connectivity Threshold: {connectivityThreshold}%</label>
+        <input type="range" min={0} max={100} step={1} className="w-full cursor-pointer accent-indigo-500"
+          draggable={false} style={{ touchAction: 'none' }} value={connectivityThreshold}
+          onChange={(event) => onConnectivityThresholdChange(Number(event.target.value))} />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-slate-500">Randomness (Temperature): {temperature.toFixed(2)}</label>
+        <input type="range" min={0} max={1} step={0.05} className="w-full cursor-pointer accent-indigo-500"
+          draggable={false} style={{ touchAction: 'none' }} value={temperature}
+          onChange={(event) => onTemperatureChange(Number(event.target.value))} />
+      </div>
+    </div>
+  );
+}
+
+// ── Property Prediction: cached kcat/Km, solubility, Tm, and EC results ──
 // Self-contained panel: fetches (and caches) raw predictions from the backend,
 // then normalizes + weights them client-side into a single "Predicted Score"
 // per candidate. The sub-weights and Tm target are lifted to the parent view
-// so the same values can be reused as the 6th weight in the comprehensive
-// recommendation strategy below.
+// so the same values can be reused as the predicted-score component in the
+// recommendation module below.
 function EcTooltip({ r }: { r: PredictedMetricsRow }) {
   const [hover, setHover] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -906,7 +1011,7 @@ function PredictedMetricsPanel({
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-slate-900">Strategy 1: Property Prediction Score</h2>
+        <h2 className="text-base font-semibold text-slate-900">1. Property Prediction</h2>
         {services && (
           <div className="flex items-center gap-2 text-[10px]">
             <span className={`inline-block w-2 h-2 rounded-full ${services.cataPro ? 'bg-green-500' : 'bg-slate-300'}`} />
@@ -1535,7 +1640,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [recommendMinSimilarity, setRecommendMinSimilarity] = useState(0);
   const [recommendTemperature, setRecommendTemperature] = useState(0);
   const [recommendDiversityMode, setRecommendDiversityMode] = useState<'proportional' | 'round-robin'>('proportional');
-  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number; predictedMetricsAvailable: boolean } | null>(null);
+  const [recommendMeta, setRecommendMeta] = useState<RecommendationMeta | null>(null);
+  const [recommendFilter, setRecommendFilter] = useState<AppliedCandidateFilter>({ ...EMPTY_APPLIED_FILTER });
   const [predictedSubWeights, setPredictedSubWeights] = useState<PredictedSubWeights>({ ...DEFAULT_PREDICTED_SUB_WEIGHTS });
   const [predictedTmTarget, setPredictedTmTarget] = useState(60);
 
@@ -1831,8 +1937,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         if (typeof state.recommendTemperature === 'number') setRecommendTemperature(state.recommendTemperature);
         if (state.recommendDiversityMode === 'proportional' || state.recommendDiversityMode === 'round-robin') setRecommendDiversityMode(state.recommendDiversityMode);
         if (typeof state.recommendNetworkConnectivityThreshold === 'number' && Number.isFinite(state.recommendNetworkConnectivityThreshold)) setRecommendNetworkConnectivityThreshold(state.recommendNetworkConnectivityThreshold);
+        if (state.recommendFilter && typeof state.recommendFilter === 'object') setRecommendFilter(normalizeAppliedCandidateFilter(state.recommendFilter));
 
-        // Predicted metrics (Strategy 1) parameters
+        // Property Prediction scoring parameters
         if (state.predictedSubWeights && typeof state.predictedSubWeights === 'object') setPredictedSubWeights(normalizePredictedSubWeights(state.predictedSubWeights));
         if (typeof state.predictedTmTarget === 'number' && Number.isFinite(state.predictedTmTarget)) setPredictedTmTarget(state.predictedTmTarget);
         const normalizedRecommend = normalizeSavedRecommendResults(state.recommendResults, state.recommendTopN);
@@ -2019,8 +2126,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         recommendDiversityMode,
         recommendResults,
         recommendMeta,
+        recommendFilter,
         recommendNetworkConnectivityThreshold,
-        // Predicted metrics (Strategy 1) parameters
+        // Property Prediction scoring parameters
         predictedSubWeights,
         predictedTmTarget,
       };
@@ -2077,6 +2185,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     recommendDiversityMode,
     recommendResults,
     recommendMeta,
+    recommendFilter,
     recommendNetworkConnectivityThreshold,
     predictedSubWeights,
     predictedTmTarget,
@@ -2882,9 +2991,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   };
 
   const runRecommendation = async () => {
-    const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget });
+    const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget, filterConditions: recommendFilter.conditions, filterLogic: 'and' });
     setRecommendResults(data.candidates);
-    setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
+    setRecommendMeta({ totalCandidates: data.totalCandidates, candidatePoolCount: data.candidatePoolCount, recommendedCandidates: data.recommendedCandidates, filteredByManual: data.filteredByManual, filterConditions: data.filterConditions, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
   };
 
   const highlightRecommendationsInNetwork = async () => {
@@ -4679,6 +4788,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       minThreshold={browserGraphLoadedThreshold}
                       highlightIds={recommendResults.map((r) => r.id)}
                       height={600}
+                      selectionStorageKey={`network-selection:${selectedTaskId}`}
                     />
                   )}
                 </div>
@@ -4821,7 +4931,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             {/* ==== Step 9: Recommendation ==== */}
             {currentView === 'recommendation' && (
               <div className="space-y-4">
-                <h1 className="text-2xl font-semibold">Candidate Recommendation</h1>
+                <h1 className="text-2xl font-semibold">Candidate Analysis</h1>
                 <PredictedMetricsPanel
                   taskId={selectedTaskId}
                   subWeights={predictedSubWeights}
@@ -4829,10 +4939,23 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   tmTarget={predictedTmTarget}
                   onTmTargetChange={setPredictedTmTarget}
                 />
+                <ManualFilteringPanel
+                  key={`manual-filter-${selectedTaskId}`}
+                  taskId={selectedTaskId}
+                  subWeights={normalizePredictedSubWeights(predictedSubWeights)}
+                  tmTarget={predictedTmTarget}
+                  onAppliedFilterChange={(nextFilter) => {
+                    if (appliedCandidateFilterKey(nextFilter) !== appliedCandidateFilterKey(recommendFilter)) {
+                      setRecommendResults([]);
+                      setRecommendMeta(null);
+                    }
+                    setRecommendFilter(nextFilter);
+                  }}
+                />
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h2 className="text-base font-semibold text-slate-900">Strategy 2: Comprehensive Recommendation</h2>
+                  <h2 className="text-base font-semibold text-slate-900">2.2 Recommendation Settings</h2>
                   <p className="text-sm text-slate-600">
-                    Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Strategy 1 predicted property score. Isolated points (clusters containing only 1 sequence) are excluded by default.
+                    Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Property Prediction score. Isolated points (clusters containing only 1 sequence) are excluded by default.
                   </p>
                   <details className="text-xs text-slate-400">
                     <summary className="cursor-pointer select-none">Parameter Description</summary>
@@ -4848,76 +4971,56 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <details className="text-xs text-slate-400 mt-1">
                     <summary className="cursor-pointer select-none">Scoring Algorithm Description</summary>
                     <div className="mt-1 ml-2 space-y-1">
-                      <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
+                      <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv + w₅·predictedScore</p>
                       <ul className="ml-4 list-disc space-y-0.5">
                         <li><b>avgRefSim</b>: average similarity of the candidate to all edge-connected reference sequences ÷ 100, range [0, 1]</li>
                         <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
-                        <li><b>clusterSizeNorm</b>: size of the candidate's cluster ÷ the largest cluster size, range [0, 1]</li>
-                        <li><b>taxDiv</b>: number of distinct classes in the candidate's cluster ÷ the maximum number of classes, range [0, 1]</li>
+                        <li><b>clusterSizeNorm</b>: size of the candidate's network component at the selected connectivity threshold ÷ the largest component size, range [0, 1]</li>
+                        <li><b>taxDiv</b>: number of distinct classes in the candidate's network component ÷ the maximum number of classes, range [0, 1]</li>
+                        <li><b>predictedScore</b>: normalized weighted combination of kcat/Km, solubility, and Tm; contributes 0 when predictions are unavailable</li>
                       </ul>
-                      <p><b>Cluster Source</b>: result of cd-hit clustering by sequence similarity threshold. Sequences within the same cluster are highly similar to each other.</p>
+                      <p><b>Component Source</b>: connected components derived from edges_similarity.csv at the selected connectivity threshold.</p>
                       <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>
                       <p><b>Diversity Selection</b>: supports two strategies — “Proportional” allocates slots by cluster size (larger clusters get more), “Round-robin” selects evenly and alternately across clusters.</p>
                       <p><b>Randomness</b>: fully deterministic when Temperature=0; when &gt;0, softmax temperature sampling is used during cluster round-robin: P(i) = exp(score_i/T) / Σexp(score_j/T) — the larger T, the more random.</p>
                     </div>
                   </details>
-                  <div className="grid grid-cols-5 gap-3 text-sm">
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">Minimum Cluster Size</label>
-                      <input type="number" min={1} max={100} step={1} className="w-full p-2 border rounded text-sm"
-                        value={recommendMinClusterSize}
-                        onChange={(e) => setRecommendMinClusterSize(Math.max(1, Number(e.target.value) || 2))} />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">Top N</label>
-                      <input type="number" min={1} max={5000} step={10} className="w-full p-2 border rounded text-sm"
-                        value={recommendTopN}
-                        onChange={(e) => setRecommendTopN(Math.max(1, Math.min(5000, Number(e.target.value) || 50)))} />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">Selection Strategy</label>
-                      <select className="w-full p-2 border rounded text-sm"
-                        value={recommendDiversityMode}
-                        onChange={(e) => setRecommendDiversityMode(e.target.value as 'proportional' | 'round-robin')}>
-                        <option value="proportional">Proportional</option>
-                        <option value="round-robin">Round-robin</option>
-                      </select>
-                    </div>
-                    <div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">Threshold: {recommendNetworkConnectivityThreshold}%</label>
-                      <input type="range" min={0} max={100} step={1} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
-                        style={{ touchAction: 'none' }}
-                        value={recommendNetworkConnectivityThreshold}
-                        onChange={(e) => setRecommendNetworkConnectivityThreshold(Number(e.target.value))} />
-                    </div>
-                      <label className="block text-xs text-slate-500 mb-1">Randomness (Temperature): {recommendTemperature.toFixed(2)}</label>
-                      <input type="range" min={0} max={1} step={0.05} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
-                        style={{ touchAction: 'none' }}
-                        value={recommendTemperature}
-                        onChange={(e) => setRecommendTemperature(Number(e.target.value))} />
-                    </div>
-                  </div>
+                  <RecommendationSettingsControls
+                    minClusterSize={recommendMinClusterSize}
+                    onMinClusterSizeChange={setRecommendMinClusterSize}
+                    topN={recommendTopN}
+                    onTopNChange={setRecommendTopN}
+                    diversityMode={recommendDiversityMode}
+                    onDiversityModeChange={setRecommendDiversityMode}
+                    connectivityThreshold={recommendNetworkConnectivityThreshold}
+                    onConnectivityThresholdChange={setRecommendNetworkConnectivityThreshold}
+                    temperature={recommendTemperature}
+                    onTemperatureChange={setRecommendTemperature}
+                  />
                   <WeightBar weights={recommendWeights} onChange={setRecommendWeights} labels={WEIGHT_LABELS} defaults={DEFAULT_WEIGHTS} />
                   <div className="flex items-center gap-3">
                     <button className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm"
                       disabled={job.loading}
                       onClick={() => runAction('Candidate recommendation scoring', runRecommendation, 'recommendation')}>
-                      Compute Recommendations
+                      Run Recommendation
                     </button>
                   </div>
                 </div>
-                {recommendMeta && (
+            <h3 className="text-sm font-semibold text-slate-800">2.3 Recommendation Results</h3>
+            {recommendMeta && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
-                    <div>Candidates {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, showing top {recommendResults.length}</div>
-                    {(recommendMeta.filteredByClusterSize > 0 || recommendMeta.filteredBySimilarity > 0) && (
+                    <div>Candidate pool <b>{recommendMeta.candidatePoolCount}</b> / {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, recommended {recommendMeta.recommendedCandidates}</div>
+                    {recommendMeta.filteredByManual > 0 && (
+                      <div className="text-slate-500">Excluded by optional candidate filters: {recommendMeta.filteredByManual}</div>
+                    )}
+                {(recommendMeta.filteredByClusterSize > 0 || recommendMeta.filteredBySimilarity > 0) && (
                       <div className="text-slate-500">
                         Filtered: {recommendMeta.filteredByClusterSize} below minimum cluster size
                         {recommendMeta.filteredBySimilarity > 0 && `, ${recommendMeta.filteredBySimilarity} below similarity threshold`}
                       </div>
                     )}
                     {!recommendMeta.predictedMetricsAvailable && (
-                      <div className="text-amber-700">⚠ Strategy 1 predictions haven't been run yet for this task, so the Predicted Score weight contributed 0.</div>
+                      <div className="text-amber-700">⚠ Property Prediction hasn't been run yet for this task, so the Predicted Score weight contributed 0.</div>
                     )}
                   </div>
                 )}
@@ -4928,12 +5031,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     onHighlight={highlightRecommendationsInNetwork}
                   />
                 )}
-                <ManualFilteringPanel
-                  key={`manual-filter-${selectedTaskId}`}
-                  taskId={selectedTaskId}
-                  subWeights={normalizePredictedSubWeights(predictedSubWeights)}
-                  tmTarget={predictedTmTarget}
-                />
               {renderTailPanels('h-24')}
             </div>
           )}
@@ -5213,7 +5310,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [recommendMinSimilarity, setRecommendMinSimilarity] = useState(0);
   const [recommendTemperature, setRecommendTemperature] = useState(0);
   const [recommendDiversityMode, setRecommendDiversityMode] = useState<'proportional' | 'round-robin'>('proportional');
-  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number; predictedMetricsAvailable: boolean } | null>(null);
+  const [recommendMeta, setRecommendMeta] = useState<RecommendationMeta | null>(null);
+  const [recommendFilter, setRecommendFilter] = useState<AppliedCandidateFilter>({ ...EMPTY_APPLIED_FILTER });
   const [predictedSubWeights, setPredictedSubWeights] = useState<PredictedSubWeights>({ ...DEFAULT_PREDICTED_SUB_WEIGHTS });
   const [predictedTmTarget, setPredictedTmTarget] = useState(60);
 
@@ -5353,7 +5451,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         if (typeof state.recommendTemperature === 'number') setRecommendTemperature(state.recommendTemperature);
         if (state.recommendDiversityMode === 'proportional' || state.recommendDiversityMode === 'round-robin') setRecommendDiversityMode(state.recommendDiversityMode);
         if (typeof state.recommendNetworkConnectivityThreshold === 'number' && Number.isFinite(state.recommendNetworkConnectivityThreshold)) setRecommendNetworkConnectivityThreshold(state.recommendNetworkConnectivityThreshold);
-        // Predicted metrics (Strategy 1) parameters
+        if (state.recommendFilter && typeof state.recommendFilter === 'object') setRecommendFilter(normalizeAppliedCandidateFilter(state.recommendFilter));
+        // Property Prediction scoring parameters
         if (state.predictedSubWeights && typeof state.predictedSubWeights === 'object') setPredictedSubWeights(normalizePredictedSubWeights(state.predictedSubWeights));
         if (typeof state.predictedTmTarget === 'number' && Number.isFinite(state.predictedTmTarget)) setPredictedTmTarget(state.predictedTmTarget);
         const normalizedRecommend = normalizeSavedRecommendResults(state.recommendResults, state.recommendTopN);
@@ -5484,8 +5583,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         recommendDiversityMode,
         recommendResults,
         recommendMeta,
+        recommendFilter,
         recommendNetworkConnectivityThreshold,
-        // Predicted metrics (Strategy 1) parameters
+        // Property Prediction scoring parameters
         predictedSubWeights,
         predictedTmTarget,
       };
@@ -5501,7 +5601,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     threshold, autoScoreFromFiltered, scoringPositionMode, preAlignmentAnchor,
     clusterIdentity, clusterWordSize, clusteringRunInfo, networkPairwiseThresholdPct, networkIncludeReferenceLinks, networkSimilarityMethod,
     cytoBaseUrl, cytoCollection, cytoNetworkTitle, cytoLayout, cytoCategoryColumn, cytoApplyStyle,
-    recommendWeights, recommendTopN, recommendMinClusterSize, recommendMinSimilarity, recommendTemperature, recommendDiversityMode, recommendResults, recommendMeta,
+    recommendWeights, recommendTopN, recommendMinClusterSize, recommendMinSimilarity, recommendTemperature, recommendDiversityMode, recommendResults, recommendMeta, recommendFilter,
     recommendNetworkConnectivityThreshold,
     predictedSubWeights,
     predictedTmTarget,
@@ -5817,9 +5917,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   }
 
   async function runRecommendation() {
-    const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget });
+    const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget, filterConditions: recommendFilter.conditions, filterLogic: 'and' });
     setRecommendResults(data.candidates);
-    setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
+    setRecommendMeta({ totalCandidates: data.totalCandidates, candidatePoolCount: data.candidatePoolCount, recommendedCandidates: data.recommendedCandidates, filteredByManual: data.filteredByManual, filterConditions: data.filterConditions, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
   }
 
   async function highlightRecommendationsInNetwork() {
@@ -7175,6 +7275,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     minThreshold={browserGraphLoadedThreshold}
                     highlightIds={recommendResults.map((r) => r.id)}
                     height={600}
+                    selectionStorageKey={`network-selection:${selectedTaskId}`}
                   />
                 )}
               </div>
@@ -7309,7 +7410,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           {/* ==== Step 9: Recommendation ==== */}
           {currentView === 'recommendation' && (
             <div className="space-y-4">
-              <h1 className="text-2xl font-semibold">Candidate Recommendation</h1>
+              <h1 className="text-2xl font-semibold">Candidate Analysis</h1>
               <PredictedMetricsPanel
                 taskId={selectedTaskId}
                 subWeights={predictedSubWeights}
@@ -7317,10 +7418,23 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 tmTarget={predictedTmTarget}
                 onTmTargetChange={setPredictedTmTarget}
               />
+              <ManualFilteringPanel
+                key={`manual-filter-${selectedTaskId}`}
+                taskId={selectedTaskId}
+                subWeights={normalizePredictedSubWeights(predictedSubWeights)}
+                tmTarget={predictedTmTarget}
+                onAppliedFilterChange={(nextFilter) => {
+                    if (appliedCandidateFilterKey(nextFilter) !== appliedCandidateFilterKey(recommendFilter)) {
+                      setRecommendResults([]);
+                      setRecommendMeta(null);
+                    }
+                    setRecommendFilter(nextFilter);
+                  }}
+              />
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                <h2 className="text-base font-semibold text-slate-900">Strategy 2: Comprehensive Recommendation</h2>
+                <h2 className="text-base font-semibold text-slate-900">2.2 Recommendation Settings</h2>
                 <p className="text-sm text-slate-600">
-                  Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Strategy 1 predicted property score. Isolated points (clusters containing only 1 sequence) are excluded by default.
+                  Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Property Prediction score. Isolated points (clusters containing only 1 sequence) are excluded by default.
                 </p>
                 <details className="text-xs text-slate-400">
                   <summary className="cursor-pointer select-none">Parameter Description</summary>
@@ -7336,76 +7450,56 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <details className="text-xs text-slate-400 mt-1">
                   <summary className="cursor-pointer select-none">Scoring Algorithm Description</summary>
                   <div className="mt-1 ml-2 space-y-1">
-                    <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
+                    <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv + w₅·predictedScore</p>
                     <ul className="ml-4 list-disc space-y-0.5">
                       <li><b>avgRefSim</b>: average similarity of the candidate to all edge-connected reference sequences ÷ 100, range [0, 1]</li>
                       <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
-                      <li><b>clusterSizeNorm</b>: size of the candidate's cluster ÷ the largest cluster size, range [0, 1]</li>
-                      <li><b>taxDiv</b>: number of distinct classes in the candidate's cluster ÷ the maximum number of classes, range [0, 1]</li>
+                      <li><b>clusterSizeNorm</b>: size of the candidate's network component at the selected connectivity threshold ÷ the largest component size, range [0, 1]</li>
+                      <li><b>taxDiv</b>: number of distinct classes in the candidate's network component ÷ the maximum number of classes, range [0, 1]</li>
+                        <li><b>predictedScore</b>: normalized weighted combination of kcat/Km, solubility, and Tm; contributes 0 when predictions are unavailable</li>
                     </ul>
-                    <p><b>Cluster Source</b>: result of cd-hit clustering by sequence similarity threshold. Sequences within the same cluster are highly similar to each other.</p>
+                    <p><b>Component Source</b>: connected components derived from edges_similarity.csv at the selected connectivity threshold.</p>
                     <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>
                     <p><b>Diversity Selection</b>: supports two strategies — “Proportional” allocates slots by cluster size (larger clusters get more), “Round-robin” selects evenly and alternately across clusters.</p>
                     <p><b>Randomness</b>: fully deterministic when Temperature=0; when &gt;0, softmax temperature sampling is used during cluster round-robin: P(i) = exp(score_i/T) / Σexp(score_j/T) — the larger T, the more random.</p>
                   </div>
                 </details>
-                <div className="grid grid-cols-5 gap-3 text-sm">
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Minimum Cluster Size</label>
-                    <input type="number" min={1} max={100} step={1} className="w-full p-2 border rounded text-sm"
-                      value={recommendMinClusterSize}
-                      onChange={(e) => setRecommendMinClusterSize(Math.max(1, Number(e.target.value) || 2))} />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Top N</label>
-                    <input type="number" min={1} max={5000} step={10} className="w-full p-2 border rounded text-sm"
-                      value={recommendTopN}
-                      onChange={(e) => setRecommendTopN(Math.max(1, Math.min(5000, Number(e.target.value) || 50)))} />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Selection Strategy</label>
-                    <select className="w-full p-2 border rounded text-sm"
-                      value={recommendDiversityMode}
-                      onChange={(e) => setRecommendDiversityMode(e.target.value as 'proportional' | 'round-robin')}>
-                      <option value="proportional">Proportional</option>
-                      <option value="round-robin">Round-robin</option>
-                    </select>
-                  </div>
-                  <div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">Threshold: {recommendNetworkConnectivityThreshold}%</label>
-                      <input type="range" min={0} max={100} step={1} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
-                        style={{ touchAction: 'none' }}
-                        value={recommendNetworkConnectivityThreshold}
-                        onChange={(e) => setRecommendNetworkConnectivityThreshold(Number(e.target.value))} />
-                    </div>
-                    <label className="block text-xs text-slate-500 mb-1">Randomness (Temperature): {recommendTemperature.toFixed(2)}</label>
-                    <input type="range" min={0} max={1} step={0.05} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
-                      style={{ touchAction: 'none' }}
-                      value={recommendTemperature}
-                      onChange={(e) => setRecommendTemperature(Number(e.target.value))} />
-                  </div>
-                </div>
+                <RecommendationSettingsControls
+                  minClusterSize={recommendMinClusterSize}
+                  onMinClusterSizeChange={setRecommendMinClusterSize}
+                  topN={recommendTopN}
+                  onTopNChange={setRecommendTopN}
+                  diversityMode={recommendDiversityMode}
+                  onDiversityModeChange={setRecommendDiversityMode}
+                  connectivityThreshold={recommendNetworkConnectivityThreshold}
+                  onConnectivityThresholdChange={setRecommendNetworkConnectivityThreshold}
+                  temperature={recommendTemperature}
+                  onTemperatureChange={setRecommendTemperature}
+                />
                 <WeightBar weights={recommendWeights} onChange={setRecommendWeights} labels={WEIGHT_LABELS} defaults={DEFAULT_WEIGHTS} />
                 <div className="flex items-center gap-3">
                   <button className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm"
                     disabled={job.loading}
                     onClick={() => runAction('Candidate recommendation scoring', runRecommendation, 'recommendation')}>
-                    Compute Recommendations
+                    Run Recommendation
                   </button>
                 </div>
               </div>
+              <h3 className="text-sm font-semibold text-slate-800">2.3 Recommendation Results</h3>
               {recommendMeta && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
-                  <div>Candidates {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, showing top {recommendResults.length}</div>
-                  {(recommendMeta.filteredByClusterSize > 0 || recommendMeta.filteredBySimilarity > 0) && (
+                  <div>Candidate pool <b>{recommendMeta.candidatePoolCount}</b> / {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, recommended {recommendMeta.recommendedCandidates}</div>
+                  {recommendMeta.filteredByManual > 0 && (
+                    <div className="text-slate-500">Excluded by optional candidate filters: {recommendMeta.filteredByManual}</div>
+                  )}
+                {(recommendMeta.filteredByClusterSize > 0 || recommendMeta.filteredBySimilarity > 0) && (
                     <div className="text-slate-500">
                       Filtered: {recommendMeta.filteredByClusterSize} below minimum cluster size
                       {recommendMeta.filteredBySimilarity > 0 && `, ${recommendMeta.filteredBySimilarity} below similarity threshold`}
                     </div>
                   )}
                   {!recommendMeta.predictedMetricsAvailable && (
-                    <div className="text-amber-700">⚠ Strategy 1 predictions haven't been run yet for this task, so the Predicted Score weight contributed 0.</div>
+                    <div className="text-amber-700">⚠ Property Prediction hasn't been run yet for this task, so the Predicted Score weight contributed 0.</div>
                   )}
                 </div>
               )}
@@ -7416,12 +7510,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   onHighlight={highlightRecommendationsInNetwork}
                 />
               )}
-              <ManualFilteringPanel
-                key={`manual-filter-${selectedTaskId}`}
-                taskId={selectedTaskId}
-                subWeights={normalizePredictedSubWeights(predictedSubWeights)}
-                tmTarget={predictedTmTarget}
-              />
               {renderTailPanels('h-28')}
             </div>
           )}
@@ -7489,7 +7577,8 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
   const [recommendMinSimilarity, setRecommendMinSimilarity] = useState(0);
   const [recommendTemperature, setRecommendTemperature] = useState(0);
   const [recommendDiversityMode, setRecommendDiversityMode] = useState<'proportional' | 'round-robin'>('proportional');
-  const [recommendMeta, setRecommendMeta] = useState<{ totalCandidates: number; totalReferences: number; filteredByClusterSize: number; filteredBySimilarity: number; predictedMetricsAvailable: boolean } | null>(null);
+  const [recommendMeta, setRecommendMeta] = useState<RecommendationMeta | null>(null);
+  const [recommendFilter, setRecommendFilter] = useState<AppliedCandidateFilter>({ ...EMPTY_APPLIED_FILTER });
   const [predictedSubWeights, setPredictedSubWeights] = useState<PredictedSubWeights>({ ...DEFAULT_PREDICTED_SUB_WEIGHTS });
   const [predictedTmTarget, setPredictedTmTarget] = useState(60);
 
@@ -7643,7 +7732,8 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
         if (typeof state.recommendMinSimilarity === 'number') setRecommendMinSimilarity(state.recommendMinSimilarity);
         if (typeof state.recommendTemperature === 'number') setRecommendTemperature(state.recommendTemperature);
         if (typeof state.recommendNetworkConnectivityThreshold === 'number' && Number.isFinite(state.recommendNetworkConnectivityThreshold)) setRecommendNetworkConnectivityThreshold(state.recommendNetworkConnectivityThreshold);
-        // Predicted metrics (Strategy 1) parameters
+        if (state.recommendFilter && typeof state.recommendFilter === 'object') setRecommendFilter(normalizeAppliedCandidateFilter(state.recommendFilter));
+        // Property Prediction scoring parameters
         if (state.predictedSubWeights && typeof state.predictedSubWeights === 'object') setPredictedSubWeights(normalizePredictedSubWeights(state.predictedSubWeights));
         if (typeof state.predictedTmTarget === 'number' && Number.isFinite(state.predictedTmTarget)) setPredictedTmTarget(state.predictedTmTarget);
         const normalizedRecommend = normalizeSavedRecommendResults(state.recommendResults, state.recommendTopN);
@@ -7708,8 +7798,9 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
         recommendTemperature,
         recommendResults,
         recommendMeta,
+        recommendFilter,
         recommendNetworkConnectivityThreshold,
-        // Predicted metrics (Strategy 1) parameters
+        // Property Prediction scoring parameters
         predictedSubWeights,
         predictedTmTarget,
       };
@@ -7761,9 +7852,9 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
     setError('');
     try {
       setActiveTaskId(selectedTaskId);
-      const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget });
+      const data = await recommendCandidates({ weights: normalizeRecommendWeights(recommendWeights), topN: recommendTopN, minClusterSize: recommendMinClusterSize, minSimilarity: recommendMinSimilarity, temperature: recommendTemperature, diversityMode: recommendDiversityMode, networkConnectivityThreshold: recommendNetworkConnectivityThreshold, predictedSubWeights: normalizePredictedSubWeights(predictedSubWeights), predictedTmTarget, filterConditions: recommendFilter.conditions, filterLogic: 'and' });
       setRecommendResults(data.candidates);
-      setRecommendMeta({ totalCandidates: data.totalCandidates, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
+      setRecommendMeta({ totalCandidates: data.totalCandidates, candidatePoolCount: data.candidatePoolCount, recommendedCandidates: data.recommendedCandidates, filteredByManual: data.filteredByManual, filterConditions: data.filterConditions, totalReferences: data.totalReferences, filteredByClusterSize: data.filteredByClusterSize, filteredBySimilarity: data.filteredBySimilarity, predictedMetricsAvailable: data.predictedMetricsAvailable });
     } catch (err: any) {
       setError(String(err?.message || err));
     } finally {
@@ -8251,6 +8342,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 minThreshold={browserGraphLoadedThreshold}
                 highlightIds={recommendResults.map((r) => r.id)}
                 height={600}
+                selectionStorageKey={`network-selection:${selectedTaskId}`}
               />
             )}
 
@@ -8310,12 +8402,12 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
           </section>
         )}
 
-        {/* Step 5: Candidate Recommendation */}
+        {/* Step 5: Property Prediction and Recommendation */}
         {selectedTaskId && similarityStatus && (
           <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">5</span>
-              Candidate Recommendation
+              Candidate Analysis
             </h2>
             <PredictedMetricsPanel
               taskId={selectedTaskId}
@@ -8324,9 +8416,22 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
               tmTarget={predictedTmTarget}
               onTmTargetChange={setPredictedTmTarget}
             />
-            <h3 className="text-base font-semibold text-slate-900">Strategy 2: Comprehensive Recommendation</h3>
+            <ManualFilteringPanel
+              key={`manual-filter-${selectedTaskId}`}
+              taskId={selectedTaskId}
+              subWeights={normalizePredictedSubWeights(predictedSubWeights)}
+              tmTarget={predictedTmTarget}
+              onAppliedFilterChange={(nextFilter) => {
+                    if (appliedCandidateFilterKey(nextFilter) !== appliedCandidateFilterKey(recommendFilter)) {
+                      setRecommendResults([]);
+                      setRecommendMeta(null);
+                    }
+                    setRecommendFilter(nextFilter);
+                  }}
+            />
+            <h3 className="text-base font-semibold text-slate-900">2.2 Recommendation Settings</h3>
             <p className="text-sm text-slate-600">
-              Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Strategy 1 predicted property score. Isolated points (clusters containing only 1 sequence) are excluded by default.
+              Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Property Prediction score. Isolated points (clusters containing only 1 sequence) are excluded by default.
             </p>
             <details className="text-xs text-slate-400">
               <summary className="cursor-pointer select-none">Parameter Description</summary>
@@ -8342,67 +8447,47 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
             <details className="text-xs text-slate-400 mt-1">
               <summary className="cursor-pointer select-none">Scoring Algorithm Description</summary>
               <div className="mt-1 ml-2 space-y-1">
-                <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv</p>
+                <p><b>Scoring Formula</b>: Score = w₁·avgRefSim + w₂·maxRefSim + w₃·clusterSizeNorm + w₄·taxDiv + w₅·predictedScore</p>
                 <ul className="ml-4 list-disc space-y-0.5">
                   <li><b>avgRefSim</b>: average similarity of the candidate to all edge-connected reference sequences ÷ 100, range [0, 1]</li>
                   <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
-                  <li><b>clusterSizeNorm</b>: size of the candidate's cluster ÷ the largest cluster size, range [0, 1]</li>
-                  <li><b>taxDiv</b>: number of distinct classes in the candidate's cluster ÷ the maximum number of classes, range [0, 1]</li>
+                  <li><b>clusterSizeNorm</b>: size of the candidate's network component at the selected connectivity threshold ÷ the largest component size, range [0, 1]</li>
+                  <li><b>taxDiv</b>: number of distinct classes in the candidate's network component ÷ the maximum number of classes, range [0, 1]</li>
+                        <li><b>predictedScore</b>: normalized weighted combination of kcat/Km, solubility, and Tm; contributes 0 when predictions are unavailable</li>
                 </ul>
-                <p><b>Cluster Source</b>: result of cd-hit clustering by sequence similarity threshold. Sequences within the same cluster are highly similar to each other.</p>
+                <p><b>Component Source</b>: connected components derived from edges_similarity.csv at the selected connectivity threshold.</p>
                 <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>
                 <p><b>Diversity Selection</b>: supports two strategies — “Proportional” allocates slots by cluster size (larger clusters get more), “Round-robin” selects evenly and alternately across clusters.</p>
                 <p><b>Randomness</b>: fully deterministic when Temperature=0; when &gt;0, softmax temperature sampling is used during cluster round-robin: P(i) = exp(score_i/T) / Σexp(score_j/T) — the larger T, the more random.</p>
               </div>
             </details>
-            <div className="grid grid-cols-5 gap-3 text-sm">
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Minimum Cluster Size</label>
-                <input type="number" min={1} max={100} step={1} className="w-full p-2 border rounded text-sm"
-                  value={recommendMinClusterSize}
-                  onChange={(e) => setRecommendMinClusterSize(Math.max(1, Number(e.target.value) || 2))} />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Top N</label>
-                <input type="number" min={1} max={5000} step={10} className="w-full p-2 border rounded text-sm"
-                  value={recommendTopN}
-                  onChange={(e) => setRecommendTopN(Math.max(1, Math.min(5000, Number(e.target.value) || 50)))} />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Selection Strategy</label>
-                <select className="w-full p-2 border rounded text-sm"
-                  value={recommendDiversityMode}
-                  onChange={(e) => setRecommendDiversityMode(e.target.value as 'proportional' | 'round-robin')}>
-                  <option value="proportional">Proportional</option>
-                  <option value="round-robin">Round-robin</option>
-                </select>
-              </div>
-              <div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">Threshold: {recommendNetworkConnectivityThreshold}%</label>
-                      <input type="range" min={0} max={100} step={1} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
-                        style={{ touchAction: 'none' }}
-                        value={recommendNetworkConnectivityThreshold}
-                        onChange={(e) => setRecommendNetworkConnectivityThreshold(Number(e.target.value))} />
-                    </div>
-                <label className="block text-xs text-slate-500 mb-1">Randomness (Temperature): {recommendTemperature.toFixed(2)}</label>
-                <input type="range" min={0} max={1} step={0.05} className="w-full accent-indigo-500 cursor-pointer" draggable={false}
-                  style={{ touchAction: 'none' }}
-                  value={recommendTemperature}
-                  onChange={(e) => setRecommendTemperature(Number(e.target.value))} />
-              </div>
-            </div>
+            <RecommendationSettingsControls
+              minClusterSize={recommendMinClusterSize}
+              onMinClusterSizeChange={setRecommendMinClusterSize}
+              topN={recommendTopN}
+              onTopNChange={setRecommendTopN}
+              diversityMode={recommendDiversityMode}
+              onDiversityModeChange={setRecommendDiversityMode}
+              connectivityThreshold={recommendNetworkConnectivityThreshold}
+              onConnectivityThresholdChange={setRecommendNetworkConnectivityThreshold}
+              temperature={recommendTemperature}
+              onTemperatureChange={setRecommendTemperature}
+            />
             <WeightBar weights={recommendWeights} onChange={setRecommendWeights} labels={WEIGHT_LABELS} defaults={DEFAULT_WEIGHTS} />
             <button
               className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
               disabled={loading}
               onClick={doRecommend}
             >
-              {loading ? 'Computing...' : 'Compute Recommendations'}
+              {loading ? 'Running...' : 'Run Recommendation'}
             </button>
+            <h3 className="text-sm font-semibold text-slate-800">2.3 Recommendation Results</h3>
             {recommendMeta && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
-                <div>Candidates {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, showing top {recommendResults.length}</div>
+                <div>Candidate pool <b>{recommendMeta.candidatePoolCount}</b> / {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, recommended {recommendMeta.recommendedCandidates}</div>
+                {recommendMeta.filteredByManual > 0 && (
+                  <div className="text-slate-500">Excluded by optional candidate filters: {recommendMeta.filteredByManual}</div>
+                )}
                 {(recommendMeta.filteredByClusterSize > 0 || recommendMeta.filteredBySimilarity > 0) && (
                   <div className="text-slate-500">
                     Filtered: {recommendMeta.filteredByClusterSize} below minimum cluster size
@@ -8410,7 +8495,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                   </div>
                 )}
                 {!recommendMeta.predictedMetricsAvailable && (
-                  <div className="text-amber-700">⚠ Strategy 1 predictions haven't been run yet for this task, so the Predicted Score weight contributed 0.</div>
+                  <div className="text-amber-700">⚠ Property Prediction hasn't been run yet for this task, so the Predicted Score weight contributed 0.</div>
                 )}
               </div>
             )}
@@ -8421,12 +8506,6 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                 onHighlight={highlightRecommendationsInNetwork}
               />
             )}
-            <ManualFilteringPanel
-              key={`manual-filter-${selectedTaskId}`}
-              taskId={selectedTaskId}
-              subWeights={normalizePredictedSubWeights(predictedSubWeights)}
-              tmTarget={predictedTmTarget}
-            />
           </section>
         )}
 
@@ -8460,13 +8539,19 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
 
 // ========== Top-level App: Home page + module routing ==========
 
-type AppModule = 'home' | 'hmmer' | 'blast' | 'compare';
+type AppModule = 'home' | 'hmmer' | 'blast' | 'compare' | 'help';
+
+const appModules = new Set<AppModule>(['home', 'hmmer', 'blast', 'compare', 'help']);
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<AppModule>(() => {
     if (typeof window === 'undefined') return 'home';
-    return (window.localStorage.getItem('enzymeminer.activeModule') as AppModule) || 'home';
+    const saved = window.localStorage.getItem('enzymeminer.activeModule') as AppModule | null;
+    return saved && appModules.has(saved) ? saved : 'home';
   });
+  const [exampleLoading, setExampleLoading] = useState(false);
+  const [exampleMessage, setExampleMessage] = useState('');
+  const [exampleError, setExampleError] = useState('');
 
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -8484,6 +8569,25 @@ export default function App() {
     window.localStorage.setItem('enzymeminer.activeModule', activeModule);
   }, [activeModule]);
 
+  const loadExampleCase = async () => {
+    if (exampleLoading) return;
+    setExampleLoading(true);
+    setExampleMessage('');
+    setExampleError('');
+    try {
+      const data = await loadBundledExample('v1.1-small');
+      const taskId = data.task.id;
+      setActiveTaskId(taskId);
+      window.localStorage.setItem('enzymeminer.hmmer.activeTaskId', taskId);
+      setExampleMessage(`Example loaded as task ${taskId}.`);
+      setActiveModule('hmmer');
+    } catch (err) {
+      setExampleError(String(err instanceof Error ? err.message : err));
+    } finally {
+      setExampleLoading(false);
+    }
+  };
+
   if (activeModule === 'hmmer') {
     return <HmmerPipeline darkMode={darkMode} setDarkMode={setDarkMode} onBack={() => setActiveModule('home')} />;
   }
@@ -8496,35 +8600,74 @@ export default function App() {
     return <ComparePipeline darkMode={darkMode} setDarkMode={setDarkMode} onBack={() => setActiveModule('home')} />;
   }
 
+  if (activeModule === 'help') {
+    return (
+      <HelpAbout
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        onBack={() => setActiveModule('home')}
+        onLoadExample={loadExampleCase}
+        exampleLoading={exampleLoading}
+        exampleMessage={exampleMessage}
+        exampleError={exampleError}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* Header */}
       <header className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-6xl mx-auto px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FlaskConical className="w-7 h-7 text-indigo-600" />
-            <span className="text-xl font-bold tracking-tight">EnzyMiner</span>
+        <div className="max-w-6xl mx-auto px-6 md:px-8 h-16 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <FlaskConical className="w-7 h-7 text-indigo-600 shrink-0" />
+            <span className="text-xl font-bold tracking-tight truncate">EnzyMiner Pro</span>
+            <span className="hidden sm:inline-flex rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">V{__APP_VERSION__}</span>
           </div>
-          <button
-            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-            onClick={() => setDarkMode((v) => !v)}
-            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveModule('help')}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 text-sm text-slate-600 hover:text-slate-800 transition-colors"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span className="hidden sm:inline">Help & About</span>
+            </button>
+            <button
+              type="button"
+              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+              onClick={() => setDarkMode((value) => !value)}
+              title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="max-w-6xl mx-auto px-8 py-12">
-        <div className="mb-10">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Workflow Modules</h1>
-          <p className="text-slate-500">Select a module to start working</p>
+      <main className="max-w-6xl mx-auto px-6 md:px-8 py-12">
+        <div className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900 mb-2">Workflow Modules</h1>
+            <p className="text-slate-500">Select a module to start working, or load the bundled offline example.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadExampleCase()}
+            disabled={exampleLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Box className={`w-4 h-4 ${exampleLoading ? 'animate-pulse' : ''}`} />
+            {exampleLoading ? 'Loading Example…' : 'Load Example Case'}
+          </button>
         </div>
 
+        {exampleError && (
+          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{exampleError}</div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* BLAST Pipeline Module */}
           <button
+            type="button"
             onClick={() => setActiveModule('blast')}
             className="group text-left bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all duration-200"
           >
@@ -8535,16 +8678,15 @@ export default function App() {
               <h2 className="text-lg font-semibold text-slate-900">BLAST Enzyme Mining Workflow</h2>
             </div>
             <p className="text-sm text-slate-500 mb-4 leading-relaxed">
-              Based on BLAST pairwise search against protein databases; suitable when there are few reference sequences (1-5).
-              Supports local databases and NCBI remote search.
+              Pairwise-search workflow for a small reference set. Supports local databases and NCBI remote search.
             </p>
             <div className="flex items-center gap-1 text-sm font-medium text-emerald-600 group-hover:text-emerald-700">
               Enter Module <ArrowRight className="w-4 h-4" />
             </div>
           </button>
 
-          {/* HMMER Pipeline Module */}
           <button
+            type="button"
             onClick={() => setActiveModule('hmmer')}
             className="group text-left bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-200"
           >
@@ -8555,16 +8697,15 @@ export default function App() {
               <h2 className="text-lg font-semibold text-slate-900">HMMER Novel Enzyme Mining Workflow</h2>
             </div>
             <p className="text-sm text-slate-500 mb-4 leading-relaxed">
-              Uses HMM profile search against protein databases to screen candidate enzyme sequences, followed by scoring, clustering, and similarity network analysis.
-              Supports NCBI Protein, UniProt, and nucleotide sequence input.
+              Profile-search workflow with alignment, active-site scoring, clustering, similarity networks, prediction, and recommendation.
             </p>
             <div className="flex items-center gap-1 text-sm font-medium text-indigo-600 group-hover:text-indigo-700">
               Enter Module <ArrowRight className="w-4 h-4" />
             </div>
           </button>
 
-          {/* Compare Module */}
           <button
+            type="button"
             onClick={() => setActiveModule('compare')}
             className="group text-left bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-amber-300 transition-all duration-200"
           >
@@ -8575,15 +8716,29 @@ export default function App() {
               <h2 className="text-lg font-semibold text-slate-900">Network Comparison</h2>
             </div>
             <p className="text-sm text-slate-500 mb-4 leading-relaxed">
-              Select any two tasks from HMMER or BLAST to intersect or merge their sequence sets.
-              Supports cross-module comparison, generating a comparison network and pushing it to Cytoscape.
+              Intersect or merge any two HMMER or BLAST tasks, then inspect, recommend, and export the combined network.
             </p>
             <div className="flex items-center gap-1 text-sm font-medium text-amber-600 group-hover:text-amber-700">
               Enter Module <ArrowRight className="w-4 h-4" />
             </div>
           </button>
         </div>
+
+        <div className="mt-10 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="font-semibold text-slate-900">New in V1.1</div>
+            <div className="text-sm text-slate-500 mt-1">Select and export network nodes, preserve layouts, filter the recommendation pool, and explore a fully offline example.</div>
+          </div>
+          <button type="button" onClick={() => setActiveModule('help')} className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 shrink-0">
+            Read Help & About <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       </main>
+
+      <footer className="max-w-6xl mx-auto px-6 md:px-8 pb-8 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
+        <span>EnzyMiner Pro V{__APP_VERSION__} · Apache-2.0</span>
+        <span>Commit {__BUILD_COMMIT__} · Built {__BUILD_DATE__}</span>
+      </footer>
     </div>
   );
 }

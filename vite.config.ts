@@ -1,15 +1,36 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import path from 'path';
-import {defineConfig, loadEnv} from 'vite';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig(({mode}) => {
+const packageMetadata = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8')) as { version?: string };
+
+function resolveBuildCommit(env: Record<string, string>): string {
+  if (env.BUILD_COMMIT) return env.BUILD_COMMIT;
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: __dirname,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim() || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
     // SECURITY: Do NOT inject secrets into the frontend bundle.
     // If Gemini API calls are needed, proxy them through backend endpoints.
-    define: {},
+    define: {
+      __APP_VERSION__: JSON.stringify(packageMetadata.version || '0.0.0'),
+      __BUILD_COMMIT__: JSON.stringify(resolveBuildCommit(env)),
+      __BUILD_DATE__: JSON.stringify(env.BUILD_DATE || '2026-07-16'),
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -76,6 +76,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<ApiResult<T>
 
 export function healthCheck() {
   return request<{
+    version: string;
+    license: string;
     pipelineRoot: string;
     workDir: string;
     taskId: string;
@@ -91,6 +93,41 @@ export function healthCheck() {
       tm: { url: string; online: boolean };
     };
   }>('/api/health');
+}
+
+export type BundledExample = {
+  id: string;
+  name: string;
+  description: string;
+  module: 'hmmer' | 'blast' | 'compare';
+  candidateCount: number;
+  referenceCount: number;
+  requiresExternalServices: boolean;
+};
+
+export function listBundledExamples() {
+  return request<{ examples: BundledExample[] }>('/api/examples');
+}
+
+export function loadBundledExample(exampleId = 'v1.1-small') {
+  return request<{
+    example: BundledExample;
+    task: {
+      id: string;
+      workDir: string;
+      createdAt: number;
+      name: string;
+      note: string;
+      module: 'hmmer' | 'blast' | 'compare';
+      exampleId: string;
+    };
+    loadedFromCache: boolean;
+    calculationsStarted: boolean;
+  }>('/api/examples/load', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ exampleId }),
+  });
 }
 
 export function listTasks() {
@@ -722,6 +759,41 @@ export function loadPredictionMetricsStatus(smiles?: string) {
   }>(`/api/network/prediction-status${query ? `?${query}` : ''}`);
 }
 
+export type NetworkLayoutSnapshot = {
+  formatVersion: number;
+  savedAt: string | null;
+  nodeFingerprint: string;
+  frozen: boolean;
+  renderer: 'd3' | 'cytoscape';
+  zoom: number;
+  pan: { x: number; y: number };
+  positions: Record<string, { x: number; y: number }>;
+};
+
+export function loadNetworkLayout() {
+  return request<{
+    exists: boolean;
+    state: 'missing' | 'ready' | 'partial' | 'stale';
+    exact?: boolean;
+    matchingCount?: number;
+    savedCount?: number;
+    nodeCount: number;
+    layout?: NetworkLayoutSnapshot;
+  }>('/api/network/layout');
+}
+
+export function saveNetworkLayout(layout: Omit<NetworkLayoutSnapshot, 'formatVersion' | 'savedAt' | 'nodeFingerprint'>) {
+  return request<{ savedAt: string; savedCount: number; nodeCount: number; layout: NetworkLayoutSnapshot }>('/api/network/layout', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(layout),
+  });
+}
+
+export function clearNetworkLayout() {
+  return request<{ cleared: boolean }>('/api/network/layout', { method: 'DELETE' });
+}
+
 export type BrowserGraphNode = {
   id: string;
   cluster: string;
@@ -1020,9 +1092,16 @@ export function recommendCandidates(opts?: {
   diversityMode?: 'proportional' | 'round-robin';
   predictedSubWeights?: Partial<PredictedSubWeights>;
   predictedTmTarget?: number;
+  filterConditions?: ManualFilterCondition[];
+  filterLogic?: 'and' | 'or';
 }) {
   return request<{
     totalCandidates: number;
+    candidatePoolCount: number;
+    recommendedCandidates: number;
+    filteredByManual: number;
+    filterConditions: ManualFilterCondition[];
+    filterLogic: 'and' | 'or';
     totalReferences: number;
     filteredByClusterSize: number;
     filteredBySimilarity: number;
@@ -1048,6 +1127,8 @@ export function recommendCandidates(opts?: {
       diversityMode: opts?.diversityMode,
       predictedSubWeights: opts?.predictedSubWeights,
       predictedTmTarget: opts?.predictedTmTarget,
+      filterConditions: opts?.filterConditions,
+      filterLogic: opts?.filterLogic || 'and',
     }),
   });
 }

@@ -1,0 +1,15 @@
+id,cluster,cluster_size,representative,is_reference,kingdom,phylum,class,order,family,genus,species
+EX_CAND_01,Cluster_1,4,1,0,Bacteria,Pseudomonadota,Gammaproteobacteria,ExampleOrder1,ExampleFamily1,ExampleGenus1,Synthetic species 1
+EX_CAND_02,Cluster_1,4,0,0,Bacteria,Bacillota,Bacilli,ExampleOrder2,ExampleFamily2,ExampleGenus2,Synthetic species 2
+EX_CAND_03,Cluster_1,4,0,0,Bacteria,Actinomycetota,Actinomycetia,ExampleOrder3,ExampleFamily3,ExampleGenus3,Synthetic species 3
+EX_CAND_04,Cluster_1,4,0,0,Bacteria,Bacteroidota,Bacteroidia,ExampleOrder4,ExampleFamily4,ExampleGenus4,Synthetic species 4
+EX_CAND_05,Cluster_2,4,1,0,Bacteria,Pseudomonadota,Alphaproteobacteria,ExampleOrder5,ExampleFamily5,ExampleGenus5,Synthetic species 5
+EX_CAND_06,Cluster_2,4,0,0,Bacteria,Bacillota,Clostridia,ExampleOrder6,ExampleFamily6,ExampleGenus6,Synthetic species 6
+EX_CAND_07,Cluster_2,4,0,0,Bacteria,Actinomycetota,Actinomycetia,ExampleOrder7,ExampleFamily7,ExampleGenus7,Synthetic species 7
+EX_CAND_08,Cluster_2,4,0,0,Bacteria,Bacteroidota,Bacteroidia,ExampleOrder8,ExampleFamily8,ExampleGenus8,Synthetic species 8
+EX_CAND_09,Cluster_3,4,1,0,Archaea,Euryarchaeota,Methanobacteria,ExampleOrder9,ExampleFamily9,ExampleGenus9,Synthetic species 9
+EX_CAND_10,Cluster_3,4,0,0,Archaea,Thermoproteota,Thermoprotei,ExampleOrder10,ExampleFamily10,ExampleGenus10,Synthetic species 10
+EX_CAND_11,Cluster_3,4,0,0,Eukaryota,Ascomycota,Eurotiomycetes,ExampleOrder11,ExampleFamily11,ExampleGenus11,Synthetic species 11
+EX_CAND_12,Cluster_3,4,0,0,Eukaryota,Basidiomycota,Agaricomycetes,ExampleOrder12,ExampleFamily12,ExampleGenus12,Synthetic species 12
+EX_REF_A,Reference,1,1,1,Bacteria,Pseudomonadota,Gammaproteobacteria,Exampleales,Exampleaceae,Examplegenus,EX REF A
+EX_REF_B,Reference,1,1,1,Bacteria,Pseudomonadota,Gammaproteobacteria,Exampleales,Exampleaceae,Examplegenus,EX REF B

@@ -76,6 +76,9 @@ function authMiddleware(req, res, next) {
 app.use('/api/', authMiddleware);
 
 const projectRoot = path.resolve(__dirname, '..');
+const examplesRoot = path.join(projectRoot, 'examples');
+const packageMetadata = JSON.parse(fsSync.readFileSync(path.join(projectRoot, 'package.json'), 'utf-8'));
+const appVersion = String(packageMetadata.version || '0.0.0');
 const workspaceRoot = path.resolve(projectRoot, '..');
 const pipelineRoot = process.env.PIPELINE_ROOT
   ? path.resolve(process.env.PIPELINE_ROOT)
@@ -3882,6 +3885,160 @@ async function upsertCytoscapeStyle(baseUrl, opts) {
   return { styleName, categoryColumn };
 }
 
+const BUNDLED_EXAMPLES = new Map([
+  ['v1.1-small', {
+    id: 'v1.1-small',
+    name: 'V1.1 Small Offline Example',
+    description: 'Synthetic precomputed network with 12 candidates, 2 references, mock properties, and a saved layout.',
+    module: 'hmmer',
+    candidateCount: 12,
+    referenceCount: 2,
+    requiresExternalServices: false,
+    directory: path.join(examplesRoot, 'v1.1-small'),
+  }],
+]);
+
+function publicExampleMetadata(example) {
+  const { directory: _directory, ...metadata } = example;
+  return metadata;
+}
+
+route.get('/api/examples', async (_req, res) => {
+  try {
+    const examples = [];
+    for (const example of BUNDLED_EXAMPLES.values()) {
+      try {
+        await fs.access(path.join(example.directory, 'manifest.json'));
+        examples.push(publicExampleMetadata(example));
+      } catch {
+        // Do not advertise an example whose bundled files are incomplete.
+      }
+    }
+    res.json({ ok: true, examples });
+  } catch (err) {
+    jsonError(res, 'Failed to list bundled examples', err);
+  }
+});
+
+route.post('/api/examples/load', async (req, res) => {
+  let taskDir = null;
+  try {
+    const exampleId = String(req.body?.exampleId || 'v1.1-small').trim();
+    const example = BUNDLED_EXAMPLES.get(exampleId);
+    if (!example) {
+      res.status(404).json({ ok: false, message: `Unknown bundled example: ${exampleId}` });
+      return;
+    }
+    await fs.access(path.join(example.directory, 'manifest.json'));
+    await ensureDir(tasksRoot);
+
+    const taskId = normalizeTaskId(`example-v1-1-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+    taskDir = path.join(tasksRoot, taskId);
+    await fs.cp(example.directory, taskDir, { recursive: true, force: false, errorOnExist: true });
+
+    const createdAt = Date.now();
+    const taskMeta = {
+      id: taskId,
+      createdAt,
+      name: `${example.name} (${taskId.slice(-4)})`,
+      note: 'Bundled synthetic V1.1 example; no external calculation was started.',
+      module: example.module,
+      exampleId,
+    };
+    await fs.writeFile(path.join(taskDir, 'task.json'), JSON.stringify(taskMeta, null, 2), 'utf-8');
+
+    const candidateFasta = path.join(taskDir, 'candidates_cdhit85.fasta');
+    const referenceFasta = path.join(taskDir, 'ref.fasta');
+    const alignmentPath = path.join(taskDir, 'scoring_input_auto.mafft.fasta');
+    const state = {
+      currentView: 'network',
+      stepState: {
+        reference: 'success',
+        hmm: 'success',
+        search: 'success',
+        alignment: 'success',
+        scoring: 'success',
+        clustering: 'success',
+        similarity: 'success',
+        'network-push': 'idle',
+        recommendation: 'idle',
+      },
+      lastCompletedStep: 'similarity',
+      searchMode: 'ebi',
+      ebiDatabase: 'refprot',
+      referenceFastaPath: referenceFasta,
+      candidateFasta,
+      alignmentPath,
+      refId: 'EX_REF_A',
+      networkSourceFasta: candidateFasta,
+      networkReferenceFasta: referenceFasta,
+      networkPairwiseThresholdPct: 75,
+      networkIncludeReferenceLinks: true,
+      networkSimilarityMethod: 'biopython',
+      predictedSubWeights: { kcat: 0.4, solubility: 0.3, tm: 0.3 },
+      predictedTmTarget: 65,
+      recommendFilter: { conditions: [], filteredCount: 12, totalCandidates: 12 },
+      recommendTopN: 6,
+      recommendMinClusterSize: 1,
+      recommendMinSimilarity: 0,
+      recommendNetworkConnectivityThreshold: 75,
+      recommendDiversityMode: 'proportional',
+    };
+    await writePipelineState(taskDir, state, 'hmmer');
+
+    const networkContext = await buildNetworkArtifactContext(taskDir, {
+      sourceFastaPath: candidateFasta,
+      referenceFastaPath: referenceFasta,
+      includeReferenceLinks: true,
+      similarityMethod: 'biopython',
+    });
+    await writeNetworkBuildMeta(taskDir, networkContext);
+
+    const fastaText = await fs.readFile(candidateFasta, 'utf-8');
+    const candidateRecords = parseFastaRecords(fastaText);
+    const seqLookup = buildSequenceLookup(candidateRecords);
+    const predictionContext = buildPredictionCacheContext({
+      candidateIds: candidateRecords.map((record) => record.id),
+      seqLookup,
+      smiles: '',
+      modes: { cataPro: false, solubility: false, ec: false, tm: false },
+    });
+    await writePredictionCacheMeta(taskDir, predictionContext);
+
+    const nodeIds = await loadCurrentNetworkNodeIds(taskDir);
+    const positions = {};
+    const referenceIds = new Set(['EX_REF_A', 'EX_REF_B']);
+    const candidateIds = nodeIds.filter((id) => !referenceIds.has(id));
+    candidateIds.forEach((id, index) => {
+      const angle = (Math.PI * 2 * index) / Math.max(1, candidateIds.length);
+      positions[id] = { x: Number((420 + Math.cos(angle) * 285).toFixed(3)), y: Number((340 + Math.sin(angle) * 235).toFixed(3)) };
+    });
+    positions.EX_REF_A = { x: 335, y: 340 };
+    positions.EX_REF_B = { x: 505, y: 340 };
+    await fs.writeFile(path.join(taskDir, NETWORK_LAYOUT_FILE), JSON.stringify({
+      formatVersion: NETWORK_LAYOUT_FORMAT_VERSION,
+      savedAt: new Date().toISOString(),
+      nodeFingerprint: networkNodeFingerprint(nodeIds),
+      positions,
+      frozen: true,
+      zoom: 1,
+      pan: { x: 0, y: 0 },
+      renderer: 'd3',
+    }, null, 2), 'utf-8');
+
+    res.json({
+      ok: true,
+      example: publicExampleMetadata(example),
+      task: { ...taskMeta, workDir: taskDir },
+      loadedFromCache: true,
+      calculationsStarted: false,
+    });
+  } catch (err) {
+    if (taskDir) await fs.rm(taskDir, { recursive: true, force: true }).catch(() => {});
+    jsonError(res, 'Failed to load bundled example', err);
+  }
+});
+
 route.get('/api/tasks', async (_req, res) => {
   try {
     const tasks = await listTasks();
@@ -4033,6 +4190,8 @@ route.get('/api/health', async (req, res) => {
   res.json({
     ok: true,
     ready,
+    version: appVersion,
+    license: 'Apache-2.0',
     pipelineRoot,
     workDir,
     taskId,
@@ -5771,6 +5930,139 @@ route.get('/api/network/data', async (req, res) => {
   }
 });
 
+const NETWORK_LAYOUT_FILE = 'network_layout.json';
+const NETWORK_LAYOUT_FORMAT_VERSION = 1;
+const MAX_NETWORK_LAYOUT_NODES = 100000;
+
+function networkNodeFingerprint(ids) {
+  return createHash('sha256')
+    .update(Array.from(new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean))).sort().join('\n'))
+    .digest('hex');
+}
+
+async function loadCurrentNetworkNodeIds(workDir) {
+  const { rows } = await readCsvRows(path.join(workDir, 'nodes.csv'));
+  return rows.map((row) => String(row.id || '').trim()).filter(Boolean);
+}
+
+function normalizeNetworkLayoutPositions(rawPositions, allowedIds) {
+  if (!rawPositions || typeof rawPositions !== 'object' || Array.isArray(rawPositions)) {
+    throw manualFilterBadRequest('Layout positions must be an object keyed by node id');
+  }
+  const positions = {};
+  for (const [rawId, rawPosition] of Object.entries(rawPositions)) {
+    const id = String(rawId || '').trim();
+    if (!id || !allowedIds.has(id) || !rawPosition || typeof rawPosition !== 'object') continue;
+    const x = Number(rawPosition.x);
+    const y = Number(rawPosition.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    positions[id] = { x, y };
+  }
+  return positions;
+}
+
+route.get('/api/network/layout', async (req, res) => {
+  try {
+    const { workDir } = await resolveWorkDirForReq(req);
+    const nodeIds = await loadCurrentNetworkNodeIds(workDir);
+    const currentFingerprint = networkNodeFingerprint(nodeIds);
+    let layout;
+    try {
+      layout = JSON.parse(await fs.readFile(path.join(workDir, NETWORK_LAYOUT_FILE), 'utf-8'));
+    } catch (err) {
+      if (err?.code === 'ENOENT') {
+        res.json({ ok: true, exists: false, state: 'missing', nodeCount: nodeIds.length });
+        return;
+      }
+      throw err;
+    }
+    const positions = layout?.positions && typeof layout.positions === 'object' ? layout.positions : {};
+    const currentIds = new Set(nodeIds);
+    const matchingPositions = Object.fromEntries(
+      Object.entries(positions).filter(([id, pos]) => currentIds.has(id) && Number.isFinite(Number(pos?.x)) && Number.isFinite(Number(pos?.y))),
+    );
+    const savedCount = Object.keys(positions).length;
+    const matchingCount = Object.keys(matchingPositions).length;
+    const exact = layout?.nodeFingerprint === currentFingerprint && savedCount === nodeIds.length;
+    const state = exact ? 'ready' : (matchingCount > 0 ? 'partial' : 'stale');
+    res.json({
+      ok: true,
+      exists: true,
+      state,
+      exact,
+      matchingCount,
+      savedCount,
+      nodeCount: nodeIds.length,
+      layout: {
+        formatVersion: Number(layout?.formatVersion) || NETWORK_LAYOUT_FORMAT_VERSION,
+        savedAt: layout?.savedAt || null,
+        nodeFingerprint: layout?.nodeFingerprint || '',
+        frozen: layout?.frozen !== false,
+        renderer: layout?.renderer === 'cytoscape' ? 'cytoscape' : 'd3',
+        zoom: Number.isFinite(Number(layout?.zoom)) ? Number(layout.zoom) : 1,
+        pan: {
+          x: Number.isFinite(Number(layout?.pan?.x)) ? Number(layout.pan.x) : 0,
+          y: Number.isFinite(Number(layout?.pan?.y)) ? Number(layout.pan.y) : 0,
+        },
+        positions: matchingPositions,
+      },
+    });
+  } catch (err) {
+    jsonError(res, 'Failed to load saved network layout', err);
+  }
+});
+
+route.put('/api/network/layout', async (req, res) => {
+  try {
+    const { workDir } = await resolveWorkDirForReq(req);
+    const nodeIds = await loadCurrentNetworkNodeIds(workDir);
+    if (nodeIds.length > MAX_NETWORK_LAYOUT_NODES) {
+      res.status(413).json({ ok: false, message: `Network layout persistence supports at most ${MAX_NETWORK_LAYOUT_NODES} nodes` });
+      return;
+    }
+    const allowedIds = new Set(nodeIds);
+    const positions = normalizeNetworkLayoutPositions(req.body?.positions, allowedIds);
+    if (!Object.keys(positions).length) {
+      res.status(400).json({ ok: false, message: 'No valid positions were supplied for the current network' });
+      return;
+    }
+    const payload = {
+      formatVersion: NETWORK_LAYOUT_FORMAT_VERSION,
+      savedAt: new Date().toISOString(),
+      nodeFingerprint: networkNodeFingerprint(nodeIds),
+      frozen: req.body?.frozen !== false,
+      renderer: req.body?.renderer === 'cytoscape' ? 'cytoscape' : 'd3',
+      zoom: Number.isFinite(Number(req.body?.zoom)) ? Number(req.body.zoom) : 1,
+      pan: {
+        x: Number.isFinite(Number(req.body?.pan?.x)) ? Number(req.body.pan.x) : 0,
+        y: Number.isFinite(Number(req.body?.pan?.y)) ? Number(req.body.pan.y) : 0,
+      },
+      positions,
+    };
+    const target = path.join(workDir, NETWORK_LAYOUT_FILE);
+    const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
+    await fs.writeFile(temp, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
+    await fs.rename(temp, target);
+    res.json({ ok: true, savedAt: payload.savedAt, savedCount: Object.keys(positions).length, nodeCount: nodeIds.length, layout: payload });
+  } catch (err) {
+    jsonError(res, 'Failed to save network layout', err);
+  }
+});
+
+route.delete('/api/network/layout', async (req, res) => {
+  try {
+    const { workDir } = await resolveWorkDirForReq(req);
+    try {
+      await fs.unlink(path.join(workDir, NETWORK_LAYOUT_FILE));
+    } catch (err) {
+      if (err?.code !== 'ENOENT') throw err;
+    }
+    res.json({ ok: true, cleared: true });
+  } catch (err) {
+    jsonError(res, 'Failed to clear saved network layout', err);
+  }
+});
+
 // ── Browser Graph Data (full nodes + filtered edges for in-browser visualization) ──
 route.post('/api/network/browser-graph', async (req, res) => {
   try {
@@ -6270,6 +6562,8 @@ route.post('/api/network/recommend-candidates', async (req, res) => {
       };
       const predictedSubWeights = normalizePredictedSubWeights(req.body?.predictedSubWeights);
       const predictedTmTarget = Number.isFinite(Number(req.body?.predictedTmTarget)) ? Number(req.body.predictedTmTarget) : 60;
+      const filterConditions = normalizeManualFilterConditions(req.body?.filterConditions);
+      const filterLogic = String(req.body?.filterLogic || '').toLowerCase() === 'or' ? 'or' : 'and';
       const topN = Math.max(1, Math.min(Number(req.body?.topN) || 50, 5000));
       const minClusterSize = Math.max(1, Number(req.body?.minClusterSize) || 2);
       const minSimilarity = Math.max(0, Math.min(100, Number(req.body?.minSimilarity) || 0));
@@ -6283,6 +6577,21 @@ route.post('/api/network/recommend-candidates', async (req, res) => {
       const { rows: edgeRows } = await readCsvRows(edgesPath);
 
       if (!nodeRows.length) throw new Error('nodes.csv is empty – run similarity computation first');
+
+      const allCandidateIds = nodeRows.filter((node) => String(node.is_reference) !== '1').map((node) => String(node.id || '').trim()).filter(Boolean);
+      let manualFilterIds = null;
+      if (filterConditions.length) {
+        // Manual filtering is explicitly a post-prediction workflow. Keep the
+        // recommendation candidate pool identical to the filter preview by
+        // considering only candidates present in predicted_metrics.csv.
+        const predictedForFilter = await loadPredictedMetricsMap(workDir);
+        const predictedCandidateIds = allCandidateIds.filter((id) => predictedForFilter.has(id));
+        const filterRows = await buildManualFilterRows(workDir, predictedCandidateIds, predictedSubWeights, predictedTmTarget);
+        manualFilterIds = new Set(filterRows.filter((row) => filterLogic === 'or'
+          ? filterConditions.some((condition) => manualFilterConditionMatches(row, condition))
+          : filterConditions.every((condition) => manualFilterConditionMatches(row, condition))).map((row) => row.id));
+      }
+      const filteredByManual = manualFilterIds ? allCandidateIds.length - manualFilterIds.size : 0;
 
       // Identify reference node IDs
       const referenceIds = new Set(
@@ -6369,6 +6678,7 @@ route.post('/api/network/recommend-candidates', async (req, res) => {
       let filteredBySimilarity = 0;
       for (const node of nodeRows) {
         if (String(node.is_reference) === '1') continue;
+        if (manualFilterIds && !manualFilterIds.has(node.id)) continue;
         const rootId = find(node.id);
         const compSize = componentSizes.get(rootId) || 1;
         if (compSize < minClusterSize) { filteredByClusterSize++; continue; }
@@ -6603,7 +6913,6 @@ route.post('/api/network/recommend-candidates', async (req, res) => {
                     weights.avgRefSimilarity * avgSim +
                     weights.maxRefSimilarity * maxSim +
                     weights.clusterSize * cand.clusterSizeNorm +
-                    weights.networkComponentSize * cand.networkComponentSizeNorm +
                     weights.taxonomyDiversity * cand.taxonomyDiversity +
                     weights.predictedScore * cand.predictedScore
                   ).toFixed(4));
@@ -6622,7 +6931,12 @@ route.post('/api/network/recommend-candidates', async (req, res) => {
 
       res.json({
         ok: true,
-        totalCandidates: candidates.length,
+        totalCandidates: allCandidateIds.length,
+        candidatePoolCount: manualFilterIds ? manualFilterIds.size : allCandidateIds.length,
+        recommendedCandidates: diverseTopN.length,
+        filteredByManual,
+        filterConditions,
+        filterLogic,
         totalReferences: referenceIds.size,
         filteredByClusterSize,
         filteredBySimilarity,
@@ -6933,6 +7247,64 @@ function compareManualFilterRows(left, right, field, direction) {
 
 // Filter every candidate that already has cached property predictions. This is
 // intentionally independent of the automatic Top-N recommendation output.
+async function buildManualFilterRows(workDir, ids, predictedSubWeights, tmTarget) {
+  const normalizedIds = Array.from(new Set((ids || []).map((id) => String(id || '').trim()).filter(Boolean)));
+  const rawPredictedMetrics = await loadPredictedMetricsMap(workDir);
+  const [records, metadata] = await Promise.all([
+    loadRecommendedSequenceRecords(workDir, normalizedIds),
+    loadRecommendedMetadata(workDir, normalizedIds),
+  ]);
+  const normalizedMetrics = computePredictedNormalization(
+    Array.from(rawPredictedMetrics.values()),
+    predictedSubWeights,
+    tmTarget,
+  );
+  return normalizedIds.map((id) => {
+    const predicted = rawPredictedMetrics.get(id) || {};
+    const normalized = normalizedMetrics.get(id) || {};
+    const meta = metadata.get(id) || {};
+    const record = records.get(id);
+    const sequence = String(record?.seq || meta.sequence || '').replace(/\s+/g, '').toUpperCase();
+    return {
+      id,
+      sequence,
+      length: sequence ? sequence.length : finiteNumberOrNull(meta.length || meta.slen),
+      hmm_score: finiteNumberOrNull(meta.hmm_score),
+      evalue: finiteNumberOrNull(meta.evalue),
+      bitscore: finiteNumberOrNull(meta.bitscore),
+      pident: finiteNumberOrNull(meta.pident),
+      qcovs: finiteNumberOrNull(meta.qcovs),
+      uniprot_accession: meta.uniprot_accession || meta.accession || '',
+      uniprot_identifier: meta.uniprot_identifier || meta.identifier || '',
+      taxonomy_id: meta.taxonomy_id || '',
+      kingdom: meta.kingdom || '',
+      phylum: meta.phylum || '',
+      class: meta.class || '',
+      order: meta.order || '',
+      family: meta.family || '',
+      genus: meta.genus || '',
+      species: meta.species || '',
+      description: meta.description || '',
+      kcat: finiteNumberOrNull(predicted.kcat),
+      km: finiteNumberOrNull(predicted.km),
+      catalytic_efficiency: finiteNumberOrNull(normalized.catalyticEfficiency),
+      solubility: finiteNumberOrNull(predicted.solubility),
+      tm: finiteNumberOrNull(predicted.tm),
+      ec_top1: predicted.ec_top1 || '',
+      ec_score1: finiteNumberOrNull(predicted.ec_score1),
+      ec_top2: predicted.ec_top2 || '',
+      ec_score2: finiteNumberOrNull(predicted.ec_score2),
+      ec_top3: predicted.ec_top3 || '',
+      ec_score3: finiteNumberOrNull(predicted.ec_score3),
+      predicted_score: finiteNumberOrNull(normalized.predictedScore),
+      cataPro_source: predicted.cataPro_source || '',
+      solubility_source: predicted.solubility_source || '',
+      tm_source: predicted.tm_source || '',
+      ec_source: predicted.ec_source || '',
+    };
+  });
+}
+
 route.post('/api/network/filter-predicted-candidates', async (req, res) => {
   try {
     const { workDir } = await resolveWorkDirForReq(req);
@@ -6964,59 +7336,7 @@ route.post('/api/network/filter-predicted-candidates', async (req, res) => {
       return;
     }
 
-    const [records, metadata] = await Promise.all([
-      loadRecommendedSequenceRecords(workDir, ids),
-      loadRecommendedMetadata(workDir, ids),
-    ]);
-    const normalizedMetrics = computePredictedNormalization(
-      Array.from(rawPredictedMetrics.values()),
-      predictedSubWeights,
-      tmTarget,
-    );
-    const rows = ids.map((id) => {
-      const predicted = rawPredictedMetrics.get(id) || {};
-      const normalized = normalizedMetrics.get(id) || {};
-      const meta = metadata.get(id) || {};
-      const record = records.get(id);
-      const sequence = String(record?.seq || meta.sequence || '').replace(/\s+/g, '').toUpperCase();
-      return {
-        id,
-        sequence,
-        length: sequence ? sequence.length : finiteNumberOrNull(meta.length || meta.slen),
-        hmm_score: finiteNumberOrNull(meta.hmm_score),
-        evalue: finiteNumberOrNull(meta.evalue),
-        bitscore: finiteNumberOrNull(meta.bitscore),
-        pident: finiteNumberOrNull(meta.pident),
-        qcovs: finiteNumberOrNull(meta.qcovs),
-        uniprot_accession: meta.uniprot_accession || meta.accession || '',
-        uniprot_identifier: meta.uniprot_identifier || meta.identifier || '',
-        taxonomy_id: meta.taxonomy_id || '',
-        kingdom: meta.kingdom || '',
-        phylum: meta.phylum || '',
-        class: meta.class || '',
-        order: meta.order || '',
-        family: meta.family || '',
-        genus: meta.genus || '',
-        species: meta.species || '',
-        description: meta.description || '',
-        kcat: finiteNumberOrNull(predicted.kcat),
-        km: finiteNumberOrNull(predicted.km),
-        catalytic_efficiency: finiteNumberOrNull(normalized.catalyticEfficiency),
-        solubility: finiteNumberOrNull(predicted.solubility),
-        tm: finiteNumberOrNull(predicted.tm),
-        ec_top1: predicted.ec_top1 || '',
-        ec_score1: finiteNumberOrNull(predicted.ec_score1),
-        ec_top2: predicted.ec_top2 || '',
-        ec_score2: finiteNumberOrNull(predicted.ec_score2),
-        ec_top3: predicted.ec_top3 || '',
-        ec_score3: finiteNumberOrNull(predicted.ec_score3),
-        predicted_score: finiteNumberOrNull(normalized.predictedScore),
-        cataPro_source: predicted.cataPro_source || '',
-        solubility_source: predicted.solubility_source || '',
-        tm_source: predicted.tm_source || '',
-        ec_source: predicted.ec_source || '',
-      };
-    });
+    const rows = await buildManualFilterRows(workDir, ids, predictedSubWeights, tmTarget);
 
     const filteredRows = conditions.length
       ? rows.filter((row) => logic === 'or'

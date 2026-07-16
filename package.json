@@ -1,7 +1,8 @@
 {
   "name": "enzyminer-pro",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.1.0",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=${FRONTEND_HOST:-127.0.0.1}",

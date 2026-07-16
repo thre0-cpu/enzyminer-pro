@@ -1,6 +1,6 @@
 # EnzyMiner Pro
 
-当前版本：**V1.0.3**
+当前版本：**V1.1.0**
 
 高通量酶挖掘全栈工具平台，支持 **HMMER**、**BLAST** 和 **Compare** 三种模块，涵盖从参考序列管理到 Cytoscape 网络可视化和候选序列智能推荐的完整流水线。
 
@@ -10,12 +10,14 @@
 
 ---
 
-## V1.0.3 稳定性更新
+## V1.1.0 更新
 
-- 相似性计算与性质预测统一为“状态检查 → 使用已有结果 / 计算 / 更新”的交互，不再因进入页面或加载结果而隐式启动昂贵计算。
-- 相似性结果增加输入指纹和方法校验，可识别 `ready`、`stale`、`legacy`、`missing` 状态；强制重算收纳到 More actions 并要求确认。
-- 性质预测缓存按候选序列、SMILES、预测器地址和结果完整性校验；读取缓存使用纯 GET，不会重新调用 EC、kcat/Km、Sol、Tm 服务。
-- 保留旧版 CSV 和 mock 预测兼容性，并补充后端集成回归测试。
+- **Similarity Network 交互选择**：新增 Navigate / Select Nodes 模式，可点击节点选择或取消选择，支持选择当前可见节点、全部已加载节点、清空选择，并导出选中节点的 FASTA 或完整 CSV。
+- **网络布局持久化**：可冻结并保存 D3/Cytoscape.js 节点坐标、缩放和平移状态；再次打开任务时恢复布局。节点集合发生变化时会提示 `partial` / `stale`，不会把旧坐标错误套到新节点。
+- **Candidate Analysis 重构**：明确拆分为 `1. Property Prediction` 和 `2. Recommendation`。人工条件筛选成为推荐前的可选候选池过滤；没有有效筛选条件时仍对全部候选运行自动推荐。
+- **离线 Example Case**：内置 12 条 synthetic candidates + 2 条 references 的预计算示例，可直接演示网络选择、布局恢复、性质表、筛选和推荐，不调用外部预测服务，也不启动昂贵计算。
+- **Help & About / 发布信息**：新增帮助页，显示版本、构建 commit、构建日期和许可证；项目采用 Apache-2.0，第三方组件说明见 `THIRD_PARTY_NOTICES.md`。
+- **稳定性延续**：相似性计算和性质预测继续使用显式状态检查与缓存指纹，页面加载、预览和读取已有结果不会隐式启动计算；保留旧 CSV、mock 预测和 V1.0 任务兼容路径。
 
 ---
 
@@ -32,8 +34,8 @@
 | 5 | **Scoring** | 基于比对位点的自定义打分规则，支持 JSON 导入/导出，阈值过滤 |
 | 6 | **Clustering** | CD-HIT 聚类（默认 85% identity），去冗余 |
 | 7 | **Similarity** | 全序列 pairwise 相似性计算（global/local alignment），进度条实时显示 |
-| 8 | **Network Push** | 按相似性阈值推送网络到 Cytoscape 桌面端（CyREST），或在浏览器中查看网络并下载 PNG/SVG 图像 |
-| 9 | **候选推荐** | 支持系统自动推荐与预测性质人工筛选，可勾选、全选并保存 FASTA/完整 CSV |
+| 8 | **Similarity Network** | 推送到 Cytoscape，或在浏览器中选择/导出节点、下载 PNG/SVG、冻结并恢复布局 |
+| 9 | **Candidate Analysis** | 分为 Property Prediction 与 Recommendation；支持可选候选池筛选、自动排序、勾选、导出和网络高亮 |
 
 ### HMMER 模块（基于隐马尔可夫模型搜索）
 
@@ -46,8 +48,8 @@
 | 5 | **Scoring** | 自定义位点打分规则，支持 JSON 导入/导出 |
 | 6 | **Clustering** | CD-HIT 聚类去冗余 |
 | 7 | **Similarity** | Pairwise 相似性计算 |
-| 8 | **Network Push** | 推送到 Cytoscape，或在浏览器中查看并下载 PNG/SVG 网络图 |
-| 9 | **候选推荐** | 支持系统自动推荐与预测性质人工筛选，可勾选、全选并保存 FASTA/完整 CSV |
+| 8 | **Similarity Network** | 推送到 Cytoscape，或在浏览器中选择/导出节点、下载 PNG/SVG、冻结并恢复布局 |
+| 9 | **Candidate Analysis** | 分为 Property Prediction 与 Recommendation；支持可选候选池筛选、自动排序、勾选、导出和网络高亮 |
 
 ### Compare 模块（网络对比）
 
@@ -57,7 +59,7 @@
 | 2 | **合并网络** | 合并多个来源的网络数据 |
 | 3 | **推送到 Cytoscape** | 推送合并后的网络到 Cytoscape |
 | 4 | **Similarity** | 跨网络相似性计算 |
-| 5 | **候选推荐** | 基于多维加权评分的候选序列自动推荐 |
+| 5 | **Candidate Analysis** | 对合并网络运行性质预测、可选候选池筛选和多维自动推荐 |
 
 ---
 
@@ -232,6 +234,8 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 - `GET /api/tasks` — 列出所有任务
 - `POST /api/tasks` — 创建任务
 - `GET /api/runtime/logs` — 获取运行日志和进度
+- `GET /api/examples` — 列出内置离线示例
+- `POST /api/examples/load` — 复制预计算示例为独立任务；不会启动计算
 
 ### BLAST 模块
 - `POST /api/blast/build-db` — 构建 BLAST 数据库
@@ -252,124 +256,119 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 - `GET /api/scoring/alignment-download` — 下载生成的 `scoring_input_auto.mafft.fasta`
 - `POST /api/scoring/run` — 打分
 - `POST /api/clustering/run` — CD-HIT 聚类
-- `POST /api/network/compute-similarity` — 相似性计算
+- `GET /api/network/similarity-status` — 只读检查相似性缓存状态
+- `POST /api/network/compute-similarity` — 显式计算或按请求复用相似性结果
+- `POST /api/network/browser-graph` — 读取浏览器网络图节点与阈值过滤后的边
+- `GET|PUT|DELETE /api/network/layout` — 读取、保存或清除任务级网络布局
 - `POST /api/network/push-cytoscape` — 推送到 Cytoscape
-- `POST /api/network/predict-metrics` — 性质预测（kcat/solubility/Tm），结果缓存到 `predicted_metrics.csv`
-- `POST /api/network/recommend-candidates` — 候选序列推荐（六维加权，含 Strategy 1 预测评分）
-- `POST /api/network/filter-predicted-candidates` — 对全部已完成性质预测的候选进行多条件人工筛选、排序和分页
+- `GET /api/network/prediction-status` — 只读检查性质预测缓存状态
+- `GET /api/network/predicted-metrics` — 只读加载已验证的性质预测结果
+- `POST /api/network/predict-metrics` — 批量性质预测或增量补算，结果缓存到 `predicted_metrics.csv`
+- `POST /api/network/filter-predicted-candidates` — 预览可选候选池过滤、排序和分页
+- `POST /api/network/recommend-candidates` — 在全部候选或已应用过滤候选池上运行五维自动推荐
 - `POST /api/network/export-recommended-fasta` — 导出推荐候选 FASTA
 - `POST /api/network/export-recommended-csv` — 导出推荐候选完整 CSV（序列、HMM/UniProt/taxonomy 元数据、网络评分及预测性质）
 - `POST /api/network/highlight-cytoscape` — 在 Cytoscape 中高亮选中节点
 
-## 8. 候选推荐系统
+## 8. Similarity Network（浏览器网络图）
 
-### Strategy 1: Property Prediction Score（性质预测评分）
+浏览器网络图支持 D3 和 Cytoscape.js 两种轻量渲染器，不要求 Cytoscape 桌面端在线。
 
-在 Recommendation 页面新增「Strategy 1」卡片，可一键对网络中所有候选序列运行以下四个预测：
+### 节点选择与导出
+
+- **Navigate**：拖动节点、平移和缩放网络，不改变选择。
+- **Select Nodes**：点击节点进行选择/取消选择；手工选择使用蓝色边框，推荐高亮使用金色边框。
+- 支持搜索节点 ID、选择当前可见节点、选择全部已加载节点和清空选择。
+- 选中节点可导出为 FASTA 或完整 CSV。CSV 会合并序列、HMM/BLAST 来源元数据、UniProt/分类信息、网络字段和已缓存的预测性质。
+- 当前选择按任务保存在浏览器 `localStorage`，刷新页面后可恢复。
+
+### 布局冻结与持久化
+
+- **Freeze & Save Layout**：保存当前节点坐标、renderer、zoom 和 pan 到任务目录下的 `network_layout.json`，并冻结节点位置。
+- **Unlock**：允许继续拖动或运行力导向布局，但不会删除已保存快照。
+- **Restore Saved Layout**：恢复最近保存的布局。
+- **Run Automatic Layout**：重新计算布局，只有再次保存后才覆盖持久化快照。
+- **Clear Saved Layout**：主动删除任务的布局快照。
+- 布局状态包括 `ready`、`partial`、`stale`、`missing`。当网络节点变化时，只恢复仍然存在的节点坐标并明确提示，不会静默错配。
+
+网络图仍可下载 PNG 或 SVG；导出只包含图本身，不包含页面工具栏和提示框。
+
+## 9. Candidate Analysis
+
+Candidate Analysis 明确分为两个大模块：
+
+1. **Property Prediction**：运行或读取 kcat/Km、Solubility、Tm 和 EC 预测。
+2. **Recommendation**：可选地先过滤候选池，再对候选池自动评分、排序和选择。
+
+### 9.1 Property Prediction
 
 | 预测指标 | 说明 | 评分逻辑 | 外部服务 |
 |----------|------|----------|----------|
-| **kcat/Km** | 催化效率 | 值越大越好（min-max 归一化） | CataPro (可选) |
-| **Solubility** | 溶解度概率 | 值越大越好（min-max 归一化） | PLM_Sol (可选) |
-| **EC Number** | 酶分类号（Top-3） | 展示预测结果与置信度 | CLEAN (可选) |
-| **Tm** | 熔解温度 (°C) | 越接近「目标温度」越好（高斯衰减） | TmPred (可选) |
+| **kcat/Km** | 催化效率 | 对 `kcat / Km` 取对数后归一化，值越大越好 | CataPro（可选） |
+| **Solubility** | 溶解度概率 | 值越大越好 | PLM_Sol（可选） |
+| **EC Number** | 酶分类号 Top-3 | 用于展示和条件筛选，不直接进入 Predicted Score | CLEAN（可选） |
+| **Tm** | 熔解温度 (°C) | 越接近目标温度越好 | Tm 服务（可选） |
 
-四个指标通过**可拖拽权重条**（默认各 1/3）实时调整占比，并计算加权综合评分（`predictedScore`）。
+kcat/Km、Solubility 和 Tm 通过可拖拽权重条合并为 `predictedScore`；EC Top-3 及置信度可在表格中查看。
 
-> **EC Number 鼠标悬停提示**：将鼠标悬停在 EC Number 列上，会浮窗显示 Top-3 EC 预测结果及其置信度百分比。
+- 普通 **Run Property Prediction** 会复用输入与上下文匹配的缓存，仅补算缺失或失效的预测器结果。
+- **Recompute All** 位于更多操作中，用于用户明确要求的全量重算。
+- CataPro、PLM_Sol、CLEAN 使用 `/predict/batch`；应用层默认每批 64 条（`PREDICTION_BATCH_SIZE`，最大 256）。
+- 进度按“候选序列 × 预测器”真实工作单元统计，并显示已完成批次、耗时和 ETA；服务没有批次内部进度接口时不会伪造百分比。
+- 单条校验失败或服务离线时使用确定性 mock 回退并记录来源；缓存读取本身不会再次调用服务。
+- 缓存文件为 `predicted_metrics.csv` 和 `predicted_metrics.meta.json`，状态包括 `ready`、`stale` 和 `missing`。
 
-**参数配置：**
+预测服务地址由 `CATAPRO_URL`、`SOL_URL`、`EC_URL`、`TM_URL` 配置，默认端口分别为 8003、8004、8000、8005；超时由 `PREDICTION_REQUEST_TIMEOUT_MS` 配置，默认 600000 ms。
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| kcat 权重 | 33% | kcat/Km 预测值占比 |
-| Solubility 权重 | 33% | 溶解度预测值占比 |
-| Tm 权重 | 33% | 熔解温度占比 |
-| Tm 目标温度 | 60°C | 序列 Tm 越接近此值得分越高 |
-| 底物 SMILES | _(空)_ | 用于 CataPro kcat/Km 预测，留空使用 mock 值 |
+### 9.2 Optional Candidate Pool Filters
 
-**预测服务状态**：Dashboard 的健康检查面板会显示各预测服务（kcat/Km、Solubility、EC Number、Tm）的在线/离线状态及服务地址。Prediction 页面标题旁也会以绿/灰圆点显示各服务状态。
+人工筛选现在是 Recommendation 的可选前置步骤，而不是与自动推荐平行的第二套最终流程。
 
-**进度条与 ETA**：进度按“候选序列 × 预测器”工作单元统计。CataPro、PLM_Sol、CLEAN 每个 HTTP 批次完成后更新一次，Tm 每条完成后更新一次；界面同时显示各预测器的条目/批次数和预计剩余时间。服务在批次内部没有进度接口，因此界面不会伪造批次内部百分比。结果缓存到任务目录下的 `predicted_metrics.csv`；"Recompute All" 可强制重新计算。
+- 没有有效筛选条件时，**Run Recommendation** 使用网络中的全部候选序列。
+- 点击 **Apply Filters** 后，有效条件定义新的推荐候选池；自动推荐只对匹配序列进行评分和 Top N 选择。
+- 条件变化但尚未 Apply 时，不会悄悄改变已应用的候选池。
+- 有筛选条件时只使用已有性质预测的候选；未预测序列不会伪造属性参与性质条件筛选。
+- 最多可添加 20 条条件，当前 UI 按 AND 组合。EC 可匹配 Top-1/2/3 任意项或指定排名。
+- 文本字段支持包含、不包含、等于、不等于和开头匹配；数值字段支持 `>`、`≥`、`<`、`≤`、`=` 和区间。
+- 可筛选 sequence length、HMM/BLAST 指标、UniProt/分类学字段、kcat、Km、kcat/Km、Solubility、Tm、EC 和 Predicted Score。
+- 筛选预览支持服务端排序、分页、选择当前页、选择全部匹配结果、清空选择，并可独立导出 FASTA/CSV。
 
-**批量调用与回退**：CataPro、PLM_Sol、CLEAN 分别调用 `/predict/batch`，默认每个应用层批次 64 条（`PREDICTION_BATCH_SIZE`，最大 256）。单条校验失败或整个批次请求失败时，仅对应结果使用确定性 mock 回退并记录 `source=mock`，下次运行会在真实服务在线时重试。Tm 暂无批量接口，仍调用 `/predict`。外部服务地址由 `CATAPRO_URL`、`SOL_URL`、`EC_URL`、`TM_URL` 配置，默认端口分别为 8003、8004、8000、8005；单批请求超时由 `PREDICTION_REQUEST_TIMEOUT_MS` 配置，默认 600000 ms。
+### 9.3 Automatic Recommendation
 
-### Strategy 2: Comprehensive Recommendation（综合推荐）
-
-候选序列通过六维加权评分公式进行排序：
+候选序列按五维加权评分：
 
 $$
-\text{Score} = w_1 \cdot \overline{S}_{\text{ref}} + w_2 \cdot S_{\text{ref,max}} + w_3 \cdot \hat{C} + w_4 \cdot D_{\text{tax}} + w_5 \cdot \text{NetComp} + w_6 \cdot \text{PredictedScore}
+\text{Score} = w_1 \cdot \overline{S}_{\text{ref}} + w_2 \cdot S_{\text{ref,max}} + w_3 \cdot \hat{C} + w_4 \cdot D_{\text{tax}} + w_5 \cdot \text{PredictedScore}
 $$
 
 | 维度 | 说明 | 默认权重 |
 |------|------|----------|
-| `avgRefSimilarity` | 与所有参考序列的平均相似性 | 0.28 |
-| `maxRefSimilarity` | 与最相似参考序列的相似性 | 0.20 |
-| `clusterSize` | 所在聚类的归一化大小 | 0.12 |
-| `networkComponentSize` | 所在网络连通分量的归一化大小 | 0.12 |
-| `taxonomyDiversity` | 所在聚类的分类多样性 | 0.08 |
-| `predictedScore` | Strategy 1 的综合预测评分 | **0.20** |
+| `avgRefSimilarity` | 与全部参考节点边的平均相似性 | 0.28 |
+| `maxRefSimilarity` | 与最相似参考节点的相似性 | 0.20 |
+| `clusterSize` | 指定 Connectivity Threshold 下所在网络连通分量的归一化大小 | 0.24 |
+| `taxonomyDiversity` | 所在连通分量中 class 的归一化多样性 | 0.08 |
+| `predictedScore` | Property Prediction 综合评分；没有预测时贡献为 0 | 0.20 |
 
-> 原有 5 个指标权重整体按比例缩小到 80%，新增 `predictedScore` 默认占 20%。如果该任务还没跑过 Strategy 1，该权重贡献为 0（页面有黄色提示）。
+参数包括 Minimum Cluster Size、Top N、Selection Strategy、Network Connectivity Threshold（默认 85%）、Temperature 和五维 WeightBar。所有权重会自动归一化到总和 1。
 
-### 多样性选择（Cluster Round-Robin）
+- **Proportional**：按各连通分量候选数分配 Top N 名额。
+- **Round-robin**：在各连通分量间轮流选择，强调跨分量覆盖。
+- **Temperature = 0**：确定性选择；大于 0 时使用 softmax 温度采样。
+- 推荐结果支持分页、逐条勾选、选择当前页、选择全部、清空选择、导出 FASTA/完整 CSV，以及在浏览器网络图或 Cytoscape 桌面端高亮。
+- 筛选条件、推荐参数、推荐结果和选择状态按任务持久化；输入条件变化会使旧推荐结果失效，避免把旧排序误当成新结果。
 
-为避免推荐结果集中在少数大聚类中，采用聚类轮询策略：
-1. 按最高得分对聚类排序
-2. 每轮从每个聚类依次取一个候选
-3. 循环直至达到 Top N 数量
+## 10. Help & About 与离线 Example Case
 
-### Temperature 采样
+首页和 Help & About 页面提供 **Load Example Case**。后端会把 `examples/v1.1-small/` 复制成一个独立 HMMER 任务，并加载预计算的相似性 CSV、mock 性质结果和保存布局：
 
-- **T = 0**（默认）：确定性选择，每个聚类内取最高分
-- **T > 0**：使用 softmax 温度采样（$P(i) = \frac{e^{s_i/T}}{\sum_j e^{s_j/T}}$），引入可控随机性
+- 12 条 synthetic candidates、2 条 synthetic references、53 条边；
+- 不访问 UniProt、EBI、预测服务或其他外部网络；
+- 不启动 MAFFT、MMseqs2、pairwise alignment 或性质预测；
+- 示例只用于软件交互演示和回归测试，不是生物学 benchmark，也不能解释为实验结果。
 
-### 可配置参数
+Help & About 同时说明工作流、缓存状态、网络操作、离线服务行为、本机/受信任内网部署边界，并显示 `version`、`commit`、`build date` 和 `license`。
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| 最小 Cluster 大小 | 2 | 过滤孤立节点（cluster_size < 阈值的候选被排除） |
-| Top N | 50 | 推荐候选数量 |
-| Temperature | 0 | 采样温度（0 = 确定性，越大越随机） |
-| Network Connectivity Threshold | 85% | 网络连通性阈值 |
-| Weights | 见上表 | 六维权重（通过可视化拖拽条调节，自动归一化至总和 = 1） |
-
-### 权重调节 UI（WeightBar）
-
-前端提供多段式彩色比例条，六种颜色分别对应六个评分维度：
-- 🟣 **靛蓝** — avgRefSimilarity
-- 🔵 **天蓝** — maxRefSimilarity
-- 🟢 **翠绿** — clusterSize
-- 🟣 **紫色** — networkComponentSize
-- 🟡 **琥珀** — taxonomyDiversity
-- 🩷 **粉色** — predictedScore
-
-通过拖拽分隔线调整权重比例，「恢复默认」按钮一键重置。
-
-### Manual Filtering（人工筛选）
-
-Recommendation 页面在系统自动推荐之外提供独立的人工筛选区域，数据范围是当前任务中**所有已经完成 Strategy 1 性质预测的候选序列**，不受自动推荐 Top N 限制。
-
-- 可动态添加最多 20 条条件，当前版本按 **AND** 组合
-- EC 条件默认匹配 `ec_top1`、`ec_top2`、`ec_top3` 任意一个，也可限定只匹配 Top 1、Top 2 或 Top 3
-- 文本字段支持包含、不包含、等于、不等于、开头匹配；可筛选 ID、EC、UniProt、description 和各级分类学字段
-- 数值字段支持 `>`、`≥`、`<`、`≤`、`=` 和区间；可筛选 sequence length、HMM/BLAST 指标、kcat、Km、kcat/Km、Solubility、Tm 和 Predicted Score
-- 结果支持服务端排序和分页，并提供「选择当前页」「选择全部筛选结果」「清空选择」及逐条勾选
-- 选中结果可保存为 FASTA 或完整 CSV；筛选条件、排序、每页条数和选择状态按任务保存到浏览器本地存储
-
-系统自动推荐结果同样支持分页、逐条勾选、选择当前页、选择全部推荐结果、清空选择，并且只保存当前选中的序列。新计算出的推荐结果默认全部选中，以保持原有的一键保存体验。
-
-### 附加功能
-
-- **浏览器网络图下载**：在线 D3/Cytoscape.js 网络图可直接保存为 PNG 或 SVG；仅导出图本身，不包含页面工具栏和提示框
-- **FASTA/CSV 保存**：系统推荐和人工筛选结果均可先勾选，再通过 Save Selected 下拉保存 FASTA 或 CSV。CSV 包含完整序列、长度、HMM/BLAST 分数、UniProt/分类学/描述字段、网络与推荐评分（如适用），以及 kcat、Km、kcat/Km、溶解度、Tm、EC 和预测来源
-- **Cytoscape 高亮**：一键在 Cytoscape 桌面端选中/高亮推荐的候选节点（通过 CyREST Commands API）
-- **状态持久化**：推荐结果和所有参数（包括 Strategy 1 的权重、Tm 目标温度、网络连通性阈值等）在页面刷新后自动恢复
-- **全局错误边界**：前端增加了 `GlobalErrorBoundary`，捕获渲染阶段的运行时错误（如缓存数据缺少新字段），展示友好的错误提示和重载按钮，避免白屏
-- **防御性数据标准化**：Recommendation 结果在加载时自动对缺失字段做防御性处理，避免旧缓存数据导致 `.toFixed()` 调用 undefined 崩溃
-
-## 9. 项目结构
+## 11. 项目结构
 
 ```
 enzyminer-pro/
@@ -379,13 +378,26 @@ enzyminer-pro/
 │   ├── ncbi_annotate.py     # NCBI Entrez 分类注释（BLAST 用）
 │   └── uniprot_fill.py      # UniProt 注释（HMMER 用）
 ├── src/
-│   ├── App.tsx              # 主 React 组件（HMMER + BLAST + Compare 三模块）
-│   ├── RecommendationPanels.tsx # 系统推荐选择表格与人工筛选共享组件
-│   └── api.ts               # 前端 API 客户端
+│   ├── App.tsx              # 主 React 组件（HMMER + BLAST + Compare）
+│   ├── NetworkGraph.tsx      # D3/Cytoscape.js 网络选择、导出与布局持久化
+│   ├── RecommendationPanels.tsx # 推荐选择表格与候选池筛选组件
+│   ├── HelpAbout.tsx         # Help & About / Example Case 页面
+│   └── api.ts                # 前端 API 客户端
+├── examples/v1.1-small/      # synthetic + mock 离线预计算示例
+├── LICENSE                   # Apache License 2.0
+├── THIRD_PARTY_NOTICES.md    # 第三方软件、模型和数据资源说明
 ├── index.html
 ├── package.json
 ├── start.sh                 # 一键启动脚本
 ├── stop.sh                  # 停止脚本
-├── vite.config.ts
-└── tailwind.config.js
+└── vite.config.ts
 ```
+
+## 12. 版本与许可证
+
+- 当前应用版本：**1.1.0**
+- 构建日期：**2026-07-16**
+- 项目原始代码和文档：**Apache License 2.0**，完整文本见 `LICENSE`
+- 第三方工具、模型、权重、数据库和服务继续受各自许可证与使用条款约束，见 `THIRD_PARTY_NOTICES.md`
+
+`/api/health` 会返回当前后端版本和许可证；前端首页与 Help & About 会显示构建时注入的版本、commit 和构建日期。

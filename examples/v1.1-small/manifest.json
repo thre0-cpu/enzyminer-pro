@@ -1,0 +1,9 @@
+{
+  "id": "v1.1-small",
+  "name": "V1.1 Small Offline Example",
+  "description": "Synthetic precomputed network with 12 candidates, 2 references, mock properties, and a saved layout.",
+  "module": "hmmer",
+  "candidateCount": 12,
+  "referenceCount": 2,
+  "requiresExternalServices": false
+}

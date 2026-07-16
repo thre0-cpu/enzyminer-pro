@@ -207,6 +207,8 @@ test('invalid async task ids return 400 without terminating the server', async (
   const health = await api('/api/health');
   assert.equal(health.response.status, 200);
   assert.equal(health.body.ok, true);
+  assert.equal(health.body.version, '1.1.0');
+  assert.equal(health.body.license, 'Apache-2.0');
   assert.equal(typeof health.body.tools.mmseqs, 'boolean');
   assert.deepEqual(Object.keys(health.body.pythonPackages).sort(), ['biopython', 'pandas', 'requests', 'tqdm']);
 
@@ -995,4 +997,252 @@ test('manual filtering supports five simulated candidate-screening scenarios', a
   assert.equal(empty.body.totalPredicted, 0);
   assert.deepEqual(empty.body.rows, []);
   assert.deepEqual(empty.body.matchingIds, []);
+});
+
+test('network layout persistence validates nodes and reports ready, partial, and missing states', async () => {
+  const taskId = 'layout-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  await fs.writeFile(
+    path.join(taskDir, 'nodes.csv'),
+    [
+      'id,cluster,cluster_size,representative,is_reference',
+      'nodeA,Cluster_1,2,1,0',
+      'nodeB,Cluster_1,2,0,0',
+    ].join('\n'),
+  );
+
+  const missing = await api(`/api/network/layout?taskId=${taskId}`);
+  assert.equal(missing.response.status, 200);
+  assert.equal(missing.body.state, 'missing');
+  assert.equal(missing.body.exists, false);
+  assert.equal(missing.body.nodeCount, 2);
+
+  const saved = await api(`/api/network/layout?taskId=${taskId}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      renderer: 'd3',
+      frozen: true,
+      zoom: 1.25,
+      pan: { x: 12, y: -7 },
+      positions: {
+        nodeA: { x: 10, y: 20 },
+        nodeB: { x: 30, y: 40 },
+        ghost: { x: 50, y: 60 },
+        invalid: { x: 'not-a-number', y: 0 },
+      },
+    }),
+  });
+  assert.equal(saved.response.status, 200);
+  assert.equal(saved.body.savedCount, 2);
+  assert.deepEqual(Object.keys(saved.body.layout.positions).sort(), ['nodeA', 'nodeB']);
+
+  const ready = await api(`/api/network/layout?taskId=${taskId}`);
+  assert.equal(ready.response.status, 200);
+  assert.equal(ready.body.state, 'ready');
+  assert.equal(ready.body.exact, true);
+  assert.equal(ready.body.matchingCount, 2);
+  assert.equal(ready.body.layout.zoom, 1.25);
+  assert.deepEqual(ready.body.layout.pan, { x: 12, y: -7 });
+
+  await fs.appendFile(path.join(taskDir, 'nodes.csv'), '\nnodeC,Cluster_2,1,1,0');
+  const partial = await api(`/api/network/layout?taskId=${taskId}`);
+  assert.equal(partial.response.status, 200);
+  assert.equal(partial.body.state, 'partial');
+  assert.equal(partial.body.exact, false);
+  assert.equal(partial.body.matchingCount, 2);
+  assert.equal(partial.body.nodeCount, 3);
+
+  const cleared = await api(`/api/network/layout?taskId=${taskId}`, { method: 'DELETE' });
+  assert.equal(cleared.response.status, 200);
+  assert.equal(cleared.body.cleared, true);
+
+  const missingAgain = await api(`/api/network/layout?taskId=${taskId}`);
+  assert.equal(missingAgain.response.status, 200);
+  assert.equal(missingAgain.body.state, 'missing');
+  assert.equal(missingAgain.body.exists, false);
+});
+
+test('recommendation uses the same optional filtered candidate pool as manual filtering', async () => {
+  const taskId = 'recommend-filter-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  await fs.writeFile(
+    path.join(taskDir, 'candidates.fasta'),
+    [
+      '>candA', 'AAAAAAAAAA',
+      '>candB', 'BBBBBBBBBB',
+      '>candC', 'CCCCCCCCCC',
+      '>candD', 'DDDDDDDDDD',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'nodes.csv'),
+    [
+      'id,cluster,cluster_size,representative,is_reference,kingdom,phylum,class,order,family,genus,species',
+      'ref1,Reference,1,1,1,Bacteria,ReferencePhylum,ReferenceClass,ReferenceOrder,ReferenceFamily,ReferenceGenus,Reference species',
+      'candA,Cluster_1,2,1,0,Bacteria,Firmicutes,Bacilli,OrderA,FamilyA,GenusA,Species A',
+      'candB,Cluster_1,2,0,0,Bacteria,Proteobacteria,Gammaproteobacteria,OrderB,FamilyB,GenusB,Species B',
+      'candC,Cluster_2,2,1,0,Eukaryota,Chordata,Mammalia,OrderC,FamilyC,GenusC,Species C',
+      'candD,Cluster_2,2,0,0,Archaea,Euryarchaeota,Methanobacteria,OrderD,FamilyD,GenusD,Species D',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'edges_similarity.csv'),
+    [
+      'source,target,similarity,weight,cluster',
+      'candA,candB,91,0.91,Cluster_1',
+      'candC,candD,89,0.89,Cluster_2',
+      'ref1,candA,88,0.88,Reference',
+      'ref1,candB,86,0.86,Reference',
+      'ref1,candC,84,0.84,Reference',
+      'ref1,candD,82,0.82,Reference',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'hits_filtered.csv'),
+    [
+      'target,hmm_score,evalue,uniprot_accession,uniprot_identifier,taxonomy_id,kingdom,phylum,class,species,description',
+      'candA,200,1e-30,A0,A_ZERO,1,Bacteria,Firmicutes,Bacilli,Species A,Alpha oxidase',
+      'candB,150,1e-20,B0,B_ZERO,2,Bacteria,Proteobacteria,Gammaproteobacteria,Species B,Beta oxidase',
+      'candC,100,1e-10,C0,C_ZERO,3,Eukaryota,Chordata,Mammalia,Species C,Gamma enzyme',
+      'candD,50,1e-5,D0,D_ZERO,4,Archaea,Euryarchaeota,Methanobacteria,Species D,Delta enzyme',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'predicted_metrics.csv'),
+    [
+      'id,kcat,km,solubility,tm,ec_top1,ec_score1,ec_top2,ec_score2,ec_top3,ec_score3,cataPro_source,solubility_source,tm_source,ec_source',
+      'candA,20,2,0.8,65,1.1.3.1,0.9,2.2.2.2,0.1,3.3.3.3,0.05,mock,mock,mock,mock',
+      'candB,30,10,0.7,70,4.4.4.4,0.8,1.1.3.2,0.7,5.5.5.5,0.1,mock,mock,mock,mock',
+      'candC,5,0.5,0.9,55,6.6.6.6,0.8,7.7.7.7,0.2,1.1.3.3,0.6,mock,mock,mock,mock',
+      'candD,1,1,0.2,40,8.8.8.8,0.9,9.9.9.9,0.1,0.0.0.0,0.05,mock,mock,mock,mock',
+    ].join('\n'),
+  );
+
+  const recommend = (filterConditions = []) => api(`/api/network/recommend-candidates?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      topN: 10,
+      minClusterSize: 1,
+      minSimilarity: 0,
+      networkConnectivityThreshold: 80,
+      diversityMode: 'round-robin',
+      temperature: 0,
+      filterConditions,
+      filterLogic: 'and',
+    }),
+  });
+  const filter = (conditions) => api(`/api/network/filter-predicted-candidates?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ conditions, logic: 'and', includeAllIds: true, page: 1, pageSize: 50 }),
+  });
+
+  const unfiltered = await recommend();
+  assert.equal(unfiltered.response.status, 200);
+  assert.equal(unfiltered.body.totalCandidates, 4);
+  assert.equal(unfiltered.body.candidatePoolCount, 4);
+  assert.equal(unfiltered.body.recommendedCandidates, 4);
+
+  const ecConditions = [{ field: 'ec', operator: 'contains', value: '1.1.3', ecScope: 'any' }];
+  const [ecPreview, ecRecommendation] = await Promise.all([filter(ecConditions), recommend(ecConditions)]);
+  assert.equal(ecPreview.response.status, 200);
+  assert.equal(ecRecommendation.response.status, 200);
+  assert.equal(ecRecommendation.body.candidatePoolCount, 3);
+  assert.deepEqual(
+    new Set(ecRecommendation.body.candidates.map((candidate) => candidate.id)),
+    new Set(ecPreview.body.matchingIds),
+  );
+
+  const combinedConditions = [
+    ...ecConditions,
+    { field: 'kcat', operator: 'gt', value: 15 },
+  ];
+  const [combinedPreview, combinedRecommendation] = await Promise.all([
+    filter(combinedConditions),
+    recommend(combinedConditions),
+  ]);
+  assert.equal(combinedRecommendation.response.status, 200);
+  assert.equal(combinedRecommendation.body.candidatePoolCount, 2);
+  assert.deepEqual(
+    new Set(combinedRecommendation.body.candidates.map((candidate) => candidate.id)),
+    new Set(combinedPreview.body.matchingIds),
+  );
+
+  const noMatch = await recommend([{ field: 'ec', operator: 'contains', value: '42.42.42', ecScope: 'any' }]);
+  assert.equal(noMatch.response.status, 200);
+  assert.equal(noMatch.body.candidatePoolCount, 0);
+  assert.equal(noMatch.body.recommendedCandidates, 0);
+  assert.deepEqual(noMatch.body.candidates, []);
+});
+
+test('bundled V1.1 example loads precomputed artifacts without starting expensive calculations', async () => {
+  const listed = await api('/api/examples');
+  assert.equal(listed.response.status, 200);
+  const example = listed.body.examples.find((item) => item.id === 'v1.1-small');
+  assert.ok(example);
+  assert.equal(example.requiresExternalServices, false);
+  assert.equal(example.candidateCount, 12);
+
+  const loaded = await api('/api/examples/load', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ exampleId: 'v1.1-small' }),
+  });
+  assert.equal(loaded.response.status, 200);
+  assert.equal(loaded.body.loadedFromCache, true);
+  assert.equal(loaded.body.calculationsStarted, false);
+  assert.equal(loaded.body.task.module, 'hmmer');
+  const taskId = loaded.body.task.id;
+  const taskDir = path.join(tasksRoot, taskId);
+
+  await Promise.all([
+    fs.access(path.join(taskDir, 'nodes.csv')),
+    fs.access(path.join(taskDir, 'edges_similarity.csv')),
+    fs.access(path.join(taskDir, 'predicted_metrics.csv')),
+    fs.access(path.join(taskDir, 'network_layout.json')),
+  ]);
+
+  const similarityStatus = await api(`/api/network/similarity-status?taskId=${taskId}`);
+  assert.equal(similarityStatus.response.status, 200);
+  assert.equal(similarityStatus.body.state, 'ready');
+
+  const predictionStatus = await api(`/api/network/prediction-status?taskId=${taskId}`);
+  assert.equal(predictionStatus.response.status, 200);
+  assert.equal(predictionStatus.body.state, 'ready');
+  assert.equal(predictionStatus.body.candidateCount, 12);
+
+  const graph = await api(`/api/network/browser-graph?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ pairwiseThresholdPct: 0, maxEdges: 1000 }),
+  });
+  assert.equal(graph.response.status, 200);
+  assert.equal(graph.body.nodeCount, 14);
+  assert.equal(graph.body.edgeCount, 53);
+
+  const layout = await api(`/api/network/layout?taskId=${taskId}`);
+  assert.equal(layout.response.status, 200);
+  assert.equal(layout.body.state, 'ready');
+  assert.equal(layout.body.layout.frozen, true);
+  assert.equal(layout.body.matchingCount, 14);
+
+  const recommendation = await api(`/api/network/recommend-candidates?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ topN: 6, minClusterSize: 1, networkConnectivityThreshold: 75, temperature: 0 }),
+  });
+  assert.equal(recommendation.response.status, 200);
+  assert.equal(recommendation.body.totalCandidates, 12);
+  assert.equal(recommendation.body.candidatePoolCount, 12);
+  assert.equal(recommendation.body.recommendedCandidates, 6);
+
+  const runtime = await api(`/api/runtime/logs?taskId=${taskId}&limit=200`);
+  assert.equal(runtime.response.status, 200);
+  const logText = (runtime.body.lines || []).join('\n').toLowerCase();
+  assert.equal(logText.includes('compute-similarity'), false);
+  assert.equal(logText.includes('predict-metrics'), false);
 });
