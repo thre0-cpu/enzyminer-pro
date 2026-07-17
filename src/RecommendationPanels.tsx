@@ -543,7 +543,7 @@ export function ManualFilteringPanel({
   return (
     <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div>
-        <h3 className="text-sm font-semibold text-slate-800">2.1 Optional Candidate Pool Filters</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Optional Candidate Pool Filters</h3>
         <p className="mt-1 text-xs leading-relaxed text-slate-500">
           Apply hard filters to candidates with completed property predictions. Conditions are combined with AND.
           With no active condition, Recommendation uses every candidate. Applied conditions define the automatic recommendation pool; table checkboxes only control export.

@@ -85,8 +85,8 @@ import type { AppliedCandidateFilter } from './RecommendationPanels';
 import { downloadButtonClass, outlinedActionButtonClass } from './uiStyles';
 const NetworkGraph = React.lazy(() => import('./NetworkGraph'));
 
-type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'recommendation';
-type BlastView = 'dashboard' | 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'recommendation';
+type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'prediction' | 'recommendation';
+type BlastView = 'dashboard' | 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'prediction' | 'recommendation';
 type PipelineStepKey = 'reference' | 'hmm' | 'search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network-push' | 'recommendation';
 type BlastPipelineStepKey = 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network-push' | 'recommendation';
 type StepStatus = 'idle' | 'running' | 'success' | 'error';
@@ -1011,7 +1011,7 @@ function PredictedMetricsPanel({
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-slate-900">1. Property Prediction</h2>
+        <h2 className="text-base font-semibold text-slate-900">Prediction Settings & Results</h2>
         {services && (
           <div className="flex items-center gap-2 text-[10px]">
             <span className={`inline-block w-2 h-2 rounded-full ${services.cataPro ? 'bg-green-500' : 'bg-slate-300'}`} />
@@ -3170,6 +3170,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
             <Section title="Analysis" />
             <NavItem icon={<Network className="w-4 h-4" />} label="Similarity Network" active={currentView === 'network'} onClick={() => setCurrentView('network')} />
+            <NavItem icon={<FlaskConical className="w-4 h-4" />} label="Property Prediction" active={currentView === 'prediction'} onClick={() => setCurrentView('prediction')} />
             <NavItem icon={<Star className="w-4 h-4" />} label="Recommendation" active={currentView === 'recommendation'} onClick={() => setCurrentView('recommendation')} />
           </nav>
         </div>
@@ -4928,10 +4929,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               </div>
             )}
 
-            {/* ==== Step 9: Recommendation ==== */}
-            {currentView === 'recommendation' && (
+            {/* ==== Analysis: Property Prediction ==== */}
+            {currentView === 'prediction' && (
               <div className="space-y-4">
-                <h1 className="text-2xl font-semibold">Candidate Analysis</h1>
+                <div>
+                  <h1 className="text-2xl font-semibold">Property Prediction</h1>
+                  <p className="mt-1 text-sm text-slate-500">Run, reuse, and review cached biochemical property predictions before filtering or ranking candidates.</p>
+                </div>
                 <PredictedMetricsPanel
                   taskId={selectedTaskId}
                   subWeights={predictedSubWeights}
@@ -4939,6 +4943,22 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   tmTarget={predictedTmTarget}
                   onTmTargetChange={setPredictedTmTarget}
                 />
+                {renderTailPanels('h-28')}
+              </div>
+            )}
+
+            {/* ==== Analysis: Recommendation ==== */}
+            {currentView === 'recommendation' && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h1 className="text-2xl font-semibold">Recommendation</h1>
+                    <p className="mt-1 text-sm text-slate-500">Optionally filter the candidate pool, then rank and select sequences for export or network highlighting.</p>
+                  </div>
+                  <button className={outlinedActionButtonClass()} onClick={() => setCurrentView('prediction')}>
+                    Open Property Prediction
+                  </button>
+                </div>
                 <ManualFilteringPanel
                   key={`manual-filter-${selectedTaskId}`}
                   taskId={selectedTaskId}
@@ -4953,7 +4973,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   }}
                 />
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h2 className="text-base font-semibold text-slate-900">2.2 Recommendation Settings</h2>
+                  <h2 className="text-base font-semibold text-slate-900">Recommendation Settings</h2>
                   <p className="text-sm text-slate-600">
                     Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Property Prediction score. Isolated points (clusters containing only 1 sequence) are excluded by default.
                   </p>
@@ -5006,7 +5026,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     </button>
                   </div>
                 </div>
-            <h3 className="text-sm font-semibold text-slate-800">2.3 Recommendation Results</h3>
+            <h3 className="text-sm font-semibold text-slate-800">Recommendation Results</h3>
             {recommendMeta && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
                     <div>Candidate pool <b>{recommendMeta.candidatePoolCount}</b> / {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, recommended {recommendMeta.recommendedCandidates}</div>
@@ -6077,6 +6097,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
             <Section title="Analysis" />
             <NavItem icon={<Network className="w-4 h-4" />} label="Similarity Network" active={currentView === 'network'} onClick={() => setCurrentView('network')} />
+            <NavItem icon={<FlaskConical className="w-4 h-4" />} label="Property Prediction" active={currentView === 'prediction'} onClick={() => setCurrentView('prediction')} />
             <NavItem icon={<Star className="w-4 h-4" />} label="Recommendation" active={currentView === 'recommendation'} onClick={() => setCurrentView('recommendation')} />
           </nav>
         </div>
@@ -7408,9 +7429,12 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           )}
 
           {/* ==== Step 9: Recommendation ==== */}
-          {currentView === 'recommendation' && (
+          {currentView === 'prediction' && (
             <div className="space-y-4">
-              <h1 className="text-2xl font-semibold">Candidate Analysis</h1>
+              <div>
+                <h1 className="text-2xl font-semibold">Property Prediction</h1>
+                <p className="mt-1 text-sm text-slate-500">Run, reuse, and review cached biochemical property predictions before filtering or ranking candidates.</p>
+              </div>
               <PredictedMetricsPanel
                 taskId={selectedTaskId}
                 subWeights={predictedSubWeights}
@@ -7418,6 +7442,21 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 tmTarget={predictedTmTarget}
                 onTmTargetChange={setPredictedTmTarget}
               />
+              {renderTailPanels('h-28')}
+            </div>
+          )}
+
+          {currentView === 'recommendation' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl font-semibold">Recommendation</h1>
+                  <p className="mt-1 text-sm text-slate-500">Optionally filter the candidate pool, then rank and select sequences for export or network highlighting.</p>
+                </div>
+                <button className={outlinedActionButtonClass()} onClick={() => setCurrentView('prediction')}>
+                  Open Property Prediction
+                </button>
+              </div>
               <ManualFilteringPanel
                 key={`manual-filter-${selectedTaskId}`}
                 taskId={selectedTaskId}
@@ -7432,7 +7471,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   }}
               />
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                <h2 className="text-base font-semibold text-slate-900">2.2 Recommendation Settings</h2>
+                <h2 className="text-base font-semibold text-slate-900">Recommendation Settings</h2>
                 <p className="text-sm text-slate-600">
                   Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Property Prediction score. Isolated points (clusters containing only 1 sequence) are excluded by default.
                 </p>
@@ -7485,7 +7524,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   </button>
                 </div>
               </div>
-              <h3 className="text-sm font-semibold text-slate-800">2.3 Recommendation Results</h3>
+              <h3 className="text-sm font-semibold text-slate-800">Recommendation Results</h3>
               {recommendMeta && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
                   <div>Candidate pool <b>{recommendMeta.candidatePoolCount}</b> / {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, recommended {recommendMeta.recommendedCandidates}</div>
@@ -8402,13 +8441,14 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
           </section>
         )}
 
-        {/* Step 5: Property Prediction and Recommendation */}
+        {/* Step 5: Property Prediction */}
         {selectedTaskId && similarityStatus && (
           <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">5</span>
-              Candidate Analysis
+              <span className="w-7 h-7 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center text-sm font-bold">5</span>
+              Property Prediction
             </h2>
+            <p className="text-sm text-slate-600">Run, reuse, and review cached biochemical property predictions independently from candidate recommendation.</p>
             <PredictedMetricsPanel
               taskId={selectedTaskId}
               subWeights={predictedSubWeights}
@@ -8416,6 +8456,17 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
               tmTarget={predictedTmTarget}
               onTmTargetChange={setPredictedTmTarget}
             />
+          </section>
+        )}
+
+        {/* Step 6: Recommendation */}
+        {selectedTaskId && similarityStatus && (
+          <section className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-sm font-bold">6</span>
+              Recommendation
+            </h2>
+            <p className="text-sm text-slate-600">Optionally filter the candidate pool, then rank and select sequences for export or network highlighting.</p>
             <ManualFilteringPanel
               key={`manual-filter-${selectedTaskId}`}
               taskId={selectedTaskId}
@@ -8429,7 +8480,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                     setRecommendFilter(nextFilter);
                   }}
             />
-            <h3 className="text-base font-semibold text-slate-900">2.2 Recommendation Settings</h3>
+            <h3 className="text-base font-semibold text-slate-900">Recommendation Settings</h3>
             <p className="text-sm text-slate-600">
               Ranks candidate sequences using a multi-dimensional score combining similarity, taxonomic diversity, cluster size, and the Property Prediction score. Isolated points (clusters containing only 1 sequence) are excluded by default.
             </p>
@@ -8481,7 +8532,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
             >
               {loading ? 'Running...' : 'Run Recommendation'}
             </button>
-            <h3 className="text-sm font-semibold text-slate-800">2.3 Recommendation Results</h3>
+            <h3 className="text-sm font-semibold text-slate-800">Recommendation Results</h3>
             {recommendMeta && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm space-y-1">
                 <div>Candidate pool <b>{recommendMeta.candidatePoolCount}</b> / {recommendMeta.totalCandidates}, references {recommendMeta.totalReferences}, recommended {recommendMeta.recommendedCandidates}</div>
