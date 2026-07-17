@@ -863,8 +863,15 @@ test('recommended CSV export merges sequence, source metadata, recommendation sc
   await fs.writeFile(
     path.join(taskDir, 'hits_filtered.csv'),
     [
-      'target,hmm_score,evalue,length,sequence,uniprot_accession,uniprot_identifier,taxonomy_id,kingdom,phylum,class,species,description,external_link',
-      'P12345,245.7,1e-40,18,,P12345,TEST_ENZYME,9606,Eukaryota,Chordata,Mammalia,Homo sapiens,"Oxidase, alpha ""test""",https://example.test/P12345',
+      'target,hmm_score,score,evalue,length,sequence,uniprot_accession,uniprot_identifier,taxonomy_id,kingdom,phylum,class,species,description,external_link',
+      'P12345,245.7,999,1e-40,18,,P12345,TEST_ENZYME,9606,Eukaryota,Chordata,Mammalia,Homo sapiens,"Oxidase, alpha ""test""",https://example.test/P12345',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'scored_results.csv'),
+    [
+      'id,score',
+      'P12345,0.73',
     ].join('\n'),
   );
   await fs.writeFile(
@@ -940,6 +947,7 @@ test('recommended CSV export merges sequence, source metadata, recommendation sc
   assert.equal(row.uniprot_identifier, 'TEST_ENZYME');
   assert.equal(row.description, 'Oxidase, alpha "test"');
   assert.equal(row.order, 'Primates');
+  assert.equal(row.scoring_score, '0.73');
   assert.equal(row.recommendation_score, '0.84');
   assert.equal(row.kcat, '20');
   assert.equal(row.km, '4');
@@ -966,11 +974,21 @@ test('manual filtering supports five simulated candidate-screening scenarios', a
   await fs.writeFile(
     path.join(taskDir, 'hits_filtered.csv'),
     [
-      'target,hmm_score,evalue,uniprot_accession,uniprot_identifier,taxonomy_id,kingdom,phylum,class,species,description',
-      'candA,200,1e-30,A0,A_ZERO,1,Bacteria,Firmicutes,Bacilli,Species A,Alpha oxidase',
-      'candB,150,1e-20,B0,B_ZERO,2,Bacteria,Proteobacteria,Gammaproteobacteria,Species B,Beta oxidase',
-      'candC,100,1e-10,C0,C_ZERO,3,Eukaryota,Chordata,Mammalia,Species C,Gamma enzyme',
-      'candD,50,1e-5,D0,D_ZERO,4,Archaea,Euryarchaeota,Methanobacteria,Species D,Delta enzyme',
+      'target,hmm_score,score,evalue,uniprot_accession,uniprot_identifier,taxonomy_id,kingdom,phylum,class,species,description',
+      'candA,200,900,1e-30,A0,A_ZERO,1,Bacteria,Firmicutes,Bacilli,Species A,Alpha oxidase',
+      'candB,150,800,1e-20,B0,B_ZERO,2,Bacteria,Proteobacteria,Gammaproteobacteria,Species B,Beta oxidase',
+      'candC,100,700,1e-10,C0,C_ZERO,3,Eukaryota,Chordata,Mammalia,Species C,Gamma enzyme',
+      'candD,50,600,1e-5,D0,D_ZERO,4,Archaea,Euryarchaeota,Methanobacteria,Species D,Delta enzyme',
+    ].join('\n'),
+  );
+  await fs.writeFile(
+    path.join(taskDir, 'scored_results.csv'),
+    [
+      'id,score',
+      'candA,0.6',
+      'candB,0.95',
+      'candC,0.8',
+      'candD,0.2',
     ].join('\n'),
   );
   await fs.writeFile(
@@ -1001,6 +1019,7 @@ test('manual filtering supports five simulated candidate-screening scenarios', a
     assert.deepEqual(result.body.matchingIds, ['candA', 'candB', 'candC']);
     assert.equal(result.body.rows[0].length, 10);
     assert.equal(result.body.rows[0].hmm_score, 200);
+    assert.equal(result.body.rows[0].scoring_score, 0.6);
     assert.equal(result.body.rows[0].species, 'Species A');
   });
 
@@ -1019,7 +1038,7 @@ test('manual filtering supports five simulated candidate-screening scenarios', a
         { field: 'ec', operator: 'contains', value: '1.1.3', ecScope: 'any' },
         { field: 'kcat', operator: 'gt', value: 15 },
       ],
-      sort: { field: 'kcat', direction: 'desc' },
+      sort: { field: 'scoring_score', direction: 'desc' },
     });
     assert.equal(result.response.status, 200);
     assert.equal(result.body.filteredCount, 2);
@@ -1082,6 +1101,7 @@ test('manual filtering supports five simulated candidate-screening scenarios', a
   const csvValues = csvLines[1].split(',');
   const csvRow = Object.fromEntries(csvHeaders.map((header, index) => [header, csvValues[index]]));
   assert.equal(csvRow.id, 'candA');
+  assert.equal(csvRow.scoring_score, '0.6');
   assert.equal(csvRow.catalytic_efficiency, '10');
   assert.notEqual(csvRow.predicted_score, '');
 

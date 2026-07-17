@@ -311,6 +311,7 @@ const NUMERIC_FIELD_OPTIONS: Array<{ value: ManualFilterField; label: string }> 
   { value: 'solubility', label: 'Solubility' },
   { value: 'tm', label: 'Tm' },
   { value: 'predicted_score', label: 'Predicted Score' },
+  { value: 'scoring_score', label: 'Scoring Score' },
 ];
 
 const TEXT_FIELDS = new Set(TEXT_FIELD_OPTIONS.map((option) => option.value));
@@ -730,6 +731,7 @@ export function ManualFilteringPanel({
                   <th className="px-2 py-2 text-right">Solubility</th>
                   <th className="px-2 py-2 text-right">Tm</th>
                   <th className="px-2 py-2 text-right">Pred. Score</th>
+                  <th className="px-2 py-2 text-right">Scoring Score</th>
                   <th className="px-2 py-2 text-right">Length</th>
                   <th className="px-2 py-2 text-left">Species</th>
                   <th className="px-2 py-2 text-left">Description</th>
@@ -758,13 +760,14 @@ export function ManualFilteringPanel({
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.solubility)}</td>
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.tm, 2)}</td>
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.predicted_score)}</td>
+                    <td className="px-2 py-1.5 text-right">{formatMetric(row.scoring_score)}</td>
                     <td className="px-2 py-1.5 text-right">{row.length ?? '—'}</td>
                     <td className="max-w-[180px] px-2 py-1.5">{row.species || '—'}</td>
                     <td className="max-w-[280px] truncate px-2 py-1.5" title={row.description}>{row.description || '—'}</td>
                   </tr>
                 ))}
                 {rows.length === 0 && (
-                  <tr><td colSpan={13} className="px-3 py-8 text-center text-sm text-slate-500">No candidates match the current filters.</td></tr>
+                  <tr><td colSpan={14} className="px-3 py-8 text-center text-sm text-slate-500">No candidates match the current filters.</td></tr>
                 )}
               </tbody>
             </table>

@@ -1030,7 +1030,8 @@ export type ManualFilterField =
   | 'uniprot_accession' | 'uniprot_identifier' | 'description' | 'taxonomy_id'
   | 'kingdom' | 'phylum' | 'class' | 'order' | 'family' | 'genus' | 'species'
   | 'length' | 'hmm_score' | 'evalue' | 'bitscore' | 'pident' | 'qcovs'
-  | 'kcat' | 'km' | 'catalytic_efficiency' | 'solubility' | 'tm' | 'predicted_score';
+  | 'kcat' | 'km' | 'catalytic_efficiency' | 'solubility' | 'tm' | 'predicted_score'
+  | 'scoring_score';
 
 export type ManualFilterCondition = {
   field: ManualFilterField;
@@ -1049,6 +1050,7 @@ export type ManualFilterRow = {
   bitscore: number | null;
   pident: number | null;
   qcovs: number | null;
+  scoring_score: number | null;
   uniprot_accession: string;
   uniprot_identifier: string;
   taxonomy_id: string;

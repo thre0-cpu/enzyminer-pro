@@ -7389,7 +7389,14 @@ async function loadRecommendedMetadata(workDir, ids) {
         for (const token of rowTokens) {
           for (const requestedId of tokenIndex.get(token) || []) matchedIds.add(requestedId);
         }
-        for (const requestedId of matchedIds) mergeNonEmptyFields(metadata.get(requestedId), row);
+        // The search result CSVs and scored_results.csv can both expose a
+        // generic `score` column, but they represent different metrics. Keep
+        // the Scoring-step value under a dedicated key so a HMM/BLAST score
+        // loaded earlier cannot shadow it.
+        const sourceRow = fileName === 'scored_results.csv'
+          ? { ...row, scoring_score: row.scoring_score || row.score }
+          : row;
+        for (const requestedId of matchedIds) mergeNonEmptyFields(metadata.get(requestedId), sourceRow);
       }
     } catch {
       // Metadata sources are optional and differ between HMMER/BLAST/legacy tasks.
@@ -7419,7 +7426,7 @@ const MANUAL_FILTER_TEXT_FIELDS = new Set([
 ]);
 const MANUAL_FILTER_NUMERIC_FIELDS = new Set([
   'length', 'hmm_score', 'evalue', 'bitscore', 'pident', 'qcovs', 'kcat', 'km',
-  'catalytic_efficiency', 'solubility', 'tm', 'predicted_score',
+  'catalytic_efficiency', 'solubility', 'tm', 'predicted_score', 'scoring_score',
 ]);
 const MANUAL_FILTER_TEXT_OPERATORS = new Set(['contains', 'not_contains', 'equals', 'not_equals', 'starts_with']);
 const MANUAL_FILTER_NUMERIC_OPERATORS = new Set(['gt', 'gte', 'lt', 'lte', 'eq', 'between']);
@@ -7557,6 +7564,7 @@ async function buildManualFilterRows(workDir, ids, predictedSubWeights, tmTarget
       bitscore: finiteNumberOrNull(meta.bitscore),
       pident: finiteNumberOrNull(meta.pident),
       qcovs: finiteNumberOrNull(meta.qcovs),
+      scoring_score: finiteNumberOrNull(meta.scoring_score),
       uniprot_accession: meta.uniprot_accession || meta.accession || '',
       uniprot_identifier: meta.uniprot_identifier || meta.identifier || '',
       taxonomy_id: meta.taxonomy_id || '',
@@ -7733,7 +7741,7 @@ route.post('/api/network/export-recommended-csv', async (req, res) => {
         species: meta.species || candidate.species || '',
         description: meta.description || '',
         external_link: meta.external_link || '',
-        scoring_score: meta.score || '',
+        scoring_score: meta.scoring_score ?? '',
         cluster: candidate.cluster || meta.cluster || '',
         cluster_size: candidate.cluster_size ?? meta.cluster_size ?? '',
         network_component: candidate.networkComponent || '',
