@@ -13,11 +13,17 @@ import argparse
 import datetime as dt
 import html
 import re
+import unicodedata
 import zipfile
 from pathlib import Path
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+PAGE_WIDTH_TWIPS = 11906
+PAGE_MARGIN_TWIPS = 800
+TABLE_WIDTH_TWIPS = PAGE_WIDTH_TWIPS - (PAGE_MARGIN_TWIPS * 2)
+TABLE_FONT_HALF_POINTS = 18  # 9 pt
 
 
 def x(value: object) -> str:
@@ -31,7 +37,14 @@ def strip_inline_markdown(value: str) -> str:
     return value.replace("\\|", "|")
 
 
-def run(text: str, *, bold: bool = False, italic: bool = False, code: bool = False) -> str:
+def run(
+    text: str,
+    *,
+    bold: bool = False,
+    italic: bool = False,
+    code: bool = False,
+    size_half_points: int | None = None,
+) -> str:
     props = []
     if bold:
         props.append("<w:b/>")
@@ -40,6 +53,8 @@ def run(text: str, *, bold: bool = False, italic: bool = False, code: bool = Fal
     if code:
         props.append('<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas" w:eastAsia="Microsoft YaHei"/>')
         props.append('<w:shd w:fill="EEF2F7"/>')
+    if size_half_points is not None:
+        props.append(f'<w:sz w:val="{int(size_half_points)}"/><w:szCs w:val="{int(size_half_points)}"/>')
     rpr = f"<w:rPr>{''.join(props)}</w:rPr>" if props else ""
     space = ' xml:space="preserve"' if text[:1].isspace() or text[-1:].isspace() else ""
     return f"<w:r>{rpr}<w:t{space}>{x(text)}</w:t></w:r>"
@@ -85,31 +100,80 @@ def parse_table_cells(line: str) -> list[str]:
     return [strip_inline_markdown(cell.strip()) for cell in cells]
 
 
+def display_width(value: str) -> int:
+    """Approximate rendered width, counting CJK full-width characters twice."""
+    width = 0
+    for char in value:
+        width += 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+    return width
+
+
+def table_column_widths(rows: list[list[str]], width_count: int) -> list[int]:
+    """Allocate the full printable page width according to bounded cell content."""
+    if width_count <= 0:
+        return []
+
+    padded_rows = [row + [""] * (width_count - len(row)) for row in rows]
+    weights = []
+    for column_index in range(width_count):
+        longest = max((display_width(row[column_index]) for row in padded_rows), default=1)
+        # Extremely long paths/descriptions must wrap instead of taking the whole page.
+        weights.append(max(5, min(longest, 36)))
+
+    if width_count <= 2:
+        minimum_width = 1800
+    elif width_count == 3:
+        minimum_width = 1250
+    elif width_count == 4:
+        minimum_width = 1000
+    elif width_count == 5:
+        minimum_width = 850
+    else:
+        minimum_width = 650
+    minimum_width = min(minimum_width, TABLE_WIDTH_TWIPS // width_count)
+
+    distributable = max(0, TABLE_WIDTH_TWIPS - minimum_width * width_count)
+    total_weight = sum(weights) or width_count
+    widths = [minimum_width + round(distributable * weight / total_weight) for weight in weights]
+    widths[-1] += TABLE_WIDTH_TWIPS - sum(widths)
+    return widths
+
+
 def table_xml(lines: list[str]) -> str:
     rows = [parse_table_cells(line) for index, line in enumerate(lines) if index != 1]
     if not rows:
         return ""
     width_count = max(len(row) for row in rows)
-    grid = "".join('<w:gridCol w:w="1800"/>' for _ in range(width_count))
+    column_widths = table_column_widths(rows, width_count)
+    grid = "".join(f'<w:gridCol w:w="{width}"/>' for width in column_widths)
     out = [
-        '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/>'
-        '<w:tblBorders><w:top w:val="single" w:sz="4" w:color="CBD5E1"/>'
-        '<w:left w:val="single" w:sz="4" w:color="CBD5E1"/>'
-        '<w:bottom w:val="single" w:sz="4" w:color="CBD5E1"/>'
-        '<w:right w:val="single" w:sz="4" w:color="CBD5E1"/>'
-        '<w:insideH w:val="single" w:sz="4" w:color="CBD5E1"/>'
-        '<w:insideV w:val="single" w:sz="4" w:color="CBD5E1"/>'
+        f'<w:tbl><w:tblPr><w:tblW w:w="{TABLE_WIDTH_TWIPS}" w:type="dxa"/>'
+        '<w:jc w:val="center"/><w:tblLayout w:type="fixed"/>'
+        '<w:tblCellMar>'
+        '<w:top w:w="70" w:type="dxa"/><w:left w:w="90" w:type="dxa"/>'
+        '<w:bottom w:w="70" w:type="dxa"/><w:right w:w="90" w:type="dxa"/>'
+        '</w:tblCellMar>'
+        '<w:tblBorders><w:top w:val="single" w:sz="4" w:color="D8C5DC"/>'
+        '<w:left w:val="single" w:sz="4" w:color="D8C5DC"/>'
+        '<w:bottom w:val="single" w:sz="4" w:color="D8C5DC"/>'
+        '<w:right w:val="single" w:sz="4" w:color="D8C5DC"/>'
+        '<w:insideH w:val="single" w:sz="4" w:color="D8C5DC"/>'
+        '<w:insideV w:val="single" w:sz="4" w:color="D8C5DC"/>'
         '</w:tblBorders></w:tblPr>',
         f"<w:tblGrid>{grid}</w:tblGrid>",
     ]
     for row_index, row in enumerate(rows):
-        out.append("<w:tr>")
-        for cell in row + [""] * (width_count - len(row)):
+        out.append('<w:tr><w:trPr><w:cantSplit/></w:trPr>')
+        padded_row = row + [""] * (width_count - len(row))
+        for column_index, cell in enumerate(padded_row):
             shade = '<w:shd w:fill="F3EAF5"/>' if row_index == 0 else ""
             bold = row_index == 0
+            paragraph_alignment = '<w:jc w:val="center"/>' if row_index == 0 else ""
             out.append(
-                f'<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/>{shade}</w:tcPr>'
-                f'<w:p>{run(cell, bold=bold)}</w:p></w:tc>'
+                f'<w:tc><w:tcPr><w:tcW w:w="{column_widths[column_index]}" w:type="dxa"/>'
+                f'<w:vAlign w:val="center"/>{shade}</w:tcPr>'
+                f'<w:p><w:pPr>{paragraph_alignment}<w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr>'
+                f'{run(cell, bold=bold, size_half_points=TABLE_FONT_HALF_POINTS)}</w:p></w:tc>'
             )
         out.append("</w:tr>")
     out.append("</w:tbl>")
@@ -189,7 +253,7 @@ def document_xml(markdown: str) -> str:
     body = markdown_body(markdown)
     return f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="{W}" xmlns:r="{R}"><w:body>{body}
-<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="900" w:right="800" w:bottom="900" w:left="800" w:header="400" w:footer="400"/></w:sectPr>
+<w:sectPr><w:pgSz w:w="{PAGE_WIDTH_TWIPS}" w:h="16838"/><w:pgMar w:top="900" w:right="{PAGE_MARGIN_TWIPS}" w:bottom="900" w:left="{PAGE_MARGIN_TWIPS}" w:header="400" w:footer="400"/></w:sectPr>
 </w:body></w:document>'''
 
 
