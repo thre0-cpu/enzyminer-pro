@@ -16,6 +16,12 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 
+import {
+  buildTaskReport,
+  reportFileName,
+  saveGeneratedReport,
+} from './taskReport.mjs';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -93,6 +99,7 @@ const defaultWorkDir = process.env.PIPELINE_WORK_DIR
 const RESERVED_TASK_IDS = new Set(['default', 'hmmer-default', 'blast-default']);
 
 const pythonBin = process.env.PIPELINE_PYTHON || process.env.PYTHON_BIN || 'python3';
+const reportPythonBin = process.env.REPORT_PYTHON || pythonBin;
 const mmseqsBin = process.env.MMSEQS_BIN || 'mmseqs';
 const mmseqsThreadsRaw = Number(process.env.MMSEQS_THREADS || 8);
 const mmseqsThreads = Number.isFinite(mmseqsThreadsRaw)
@@ -4306,6 +4313,69 @@ route.get('/api/task/artifacts', async (req, res) => {
     res.json({ ok: true, taskId, workDir, artifacts });
   } catch (err) {
     jsonError(res, 'Failed to list task artifacts', err);
+  }
+});
+
+route.post('/api/report/export', async (req, res) => {
+  try {
+    const { taskId, workDir } = await resolveWorkDirForReq(req);
+    const language = String(req.body?.language || 'en').toLowerCase() === 'zh' ? 'zh' : 'en';
+    const format = String(req.body?.format || 'markdown').trim().toLowerCase();
+    if (!['markdown', 'pdf', 'docx'].includes(format)) {
+      res.status(400).json({
+        ok: false,
+        message: 'format must be one of: markdown, pdf, docx',
+      });
+      return;
+    }
+
+    const report = await buildTaskReport({
+      taskId,
+      workDir,
+      projectRoot,
+      appVersion,
+      language,
+    });
+
+    if (format === 'markdown') {
+      const fileName = reportFileName(taskId, language, 'md');
+      await saveGeneratedReport(workDir, fileName, report.markdown, 'utf-8');
+      res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(report.markdown);
+      return;
+    }
+
+    if (format === 'pdf') {
+      // Keep PDF generation dependency-free: return a print-optimized HTML
+      // document. The frontend opens it in a new window and the document's
+      // load handler launches the browser's native "Save as PDF" dialog.
+      const fileName = reportFileName(taskId, language, 'html');
+      await saveGeneratedReport(workDir, fileName, report.html, 'utf-8');
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('X-Report-Filename', reportFileName(taskId, language, 'pdf'));
+      res.send(report.html);
+      return;
+    }
+
+    const markdownFileName = reportFileName(taskId, language, 'md');
+    const markdownPath = await saveGeneratedReport(workDir, markdownFileName, report.markdown, 'utf-8');
+    const fileName = reportFileName(taskId, language, 'docx');
+    const docxPath = path.join(workDir, fileName);
+    const title = language === 'zh' ? 'EnzyMiner Pro 任务报告' : 'EnzyMiner Pro Task Report';
+    await execFile(reportPythonBin, [
+      path.join(projectRoot, 'backend', 'generate_report_docx.py'),
+      markdownPath,
+      docxPath,
+      '--title',
+      title,
+    ], { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+    const docx = await fs.readFile(docxPath);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(docx);
+  } catch (err) {
+    jsonError(res, 'Failed to generate task report', err);
   }
 });
 

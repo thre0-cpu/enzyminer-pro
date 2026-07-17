@@ -161,6 +161,7 @@ process.env.PREDICTION_REQUEST_TIMEOUT_MS = '5000';
 process.env.API_KEY = '';
 process.env.ALLOWED_ORIGINS = '';
 process.env.PIPELINE_PYTHON = fakePythonPath;
+process.env.REPORT_PYTHON = process.env.PYTHON_BIN || 'python3';
 
 const { startServer } = await import('../backend/server.mjs');
 let backend;
@@ -1245,4 +1246,159 @@ test('bundled V1.1 example loads precomputed artifacts without starting expensiv
   const logText = (runtime.body.lines || []).join('\n').toLowerCase();
   assert.equal(logText.includes('compute-similarity'), false);
   assert.equal(logText.includes('predict-metrics'), false);
+});
+
+test('task reports export existing task results in Chinese, English, PDF-print, and Word formats', async (t) => {
+  const taskId = 'report-export-task';
+  const otherTaskId = 'report-isolation-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  const otherTaskDir = path.join(tasksRoot, otherTaskId);
+  await Promise.all([
+    fs.mkdir(taskDir, { recursive: true }),
+    fs.mkdir(otherTaskDir, { recursive: true }),
+  ]);
+
+  await Promise.all([
+    fs.writeFile(path.join(taskDir, 'task.json'), JSON.stringify({
+      id: taskId,
+      name: 'Oxidase report example',
+      module: 'hmmer',
+      createdAt: Date.now() - 60_000,
+    }, null, 2)),
+    fs.writeFile(path.join(taskDir, 'ref.fasta'), '>reference_A\nMAAAAA\n'),
+    fs.writeFile(path.join(taskDir, 'hits_all.csv'), 'id,hmm_score\ncandidate_A,90\ncandidate_B,80\ncandidate_C,70\n'),
+    fs.writeFile(path.join(taskDir, 'hits_filtered.csv'), 'id,hmm_score\ncandidate_A,90\ncandidate_B,80\n'),
+    fs.writeFile(path.join(taskDir, 'scoring_input_auto.mafft.fasta'), '>reference_A\nMAAAAA\n>candidate_A\nMAAAAT\n>candidate_B\nMAAATT\n'),
+    fs.writeFile(path.join(taskDir, 'scored_results.csv'), 'id,score,passed,length\ncandidate_A,8.5,true,6\ncandidate_B,7.2,true,6\n'),
+    fs.writeFile(path.join(taskDir, 'scored_passed.fasta'), '>candidate_A\nMAAAAT\n>candidate_B\nMAAATT\n'),
+    fs.writeFile(path.join(taskDir, 'candidates_cdhit85.fasta'), '>candidate_A\nMAAAAT\n>candidate_B\nMAAATT\n'),
+    fs.writeFile(path.join(taskDir, 'nodes.csv'), [
+      'id,cluster,cluster_size,is_reference,species',
+      'reference_A,Reference,1,1,Reference species',
+      'candidate_A,Cluster_1,2,0,Species alpha',
+      'candidate_B,Cluster_1,2,0,Species beta',
+    ].join('\n') + '\n'),
+    fs.writeFile(path.join(taskDir, 'edges_similarity.csv'), [
+      'source,target,similarity',
+      'reference_A,candidate_A,91',
+      'reference_A,candidate_B,82',
+      'candidate_A,candidate_B,79',
+    ].join('\n') + '\n'),
+    fs.writeFile(path.join(taskDir, 'predicted_metrics.csv'), [
+      'id,kcat,km,catalytic_efficiency,solubility,tm,ec_top1,ec_score1,ec_source',
+      'candidate_A,20,2,10,0.8,65,1.1.3.4,0.94,mock',
+      'candidate_B,10,1,10,0.7,60,1.1.3.5,0.90,mock',
+    ].join('\n') + '\n'),
+    fs.writeFile(path.join(taskDir, 'hmmer_state.json'), JSON.stringify({
+      searchMode: 'online',
+      ebiDatabase: 'refprot',
+      ebiDatabaseVersion: '2025_01',
+      threshold: 6.5,
+      scoringRules: [
+        { pos: 36, allowed: ['G'], score: 1, label: 'M1_36_G' },
+        { pos: 41, allowed: ['G', 'A'], score: 2.5, label: 'M1_41_GA' },
+      ],
+      recommendFilter: {
+        conditions: [{ field: 'ec', operator: 'contains', value: '1.1.3', ecScope: 'any' }],
+        filteredCount: 2,
+        totalCandidates: 2,
+      },
+      recommendMeta: {
+        candidatePoolCount: 2,
+        totalCandidates: 2,
+        totalReferences: 1,
+        recommendedCandidates: 1,
+        filteredByClusterSize: 0,
+        filteredBySimilarity: 0,
+      },
+      recommendTopN: 1,
+      recommendResults: [{ id: 'candidate_A', score: 0.91, cluster: 'Cluster_1', species: 'Species alpha' }],
+    }, null, 2)),
+    fs.writeFile(path.join(otherTaskDir, 'task.json'), JSON.stringify({
+      id: otherTaskId,
+      name: 'SHOULD_NOT_APPEAR_IN_PRIMARY_REPORT',
+      module: 'hmmer',
+    }, null, 2)),
+  ]);
+
+  await t.test('Chinese Markdown is generated from the editable template and persisted in the task directory', async () => {
+    const result = await api(`/api/report/export?taskId=${taskId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ language: 'zh', format: 'markdown' }),
+    });
+    assert.equal(result.response.status, 200);
+    assert.match(result.response.headers.get('content-type') || '', /text\/markdown/);
+    assert.match(result.body, /^# EnzyMiner Pro 任务报告/m);
+    assert.match(result.body, /report-export-task/);
+    assert.match(result.body, /Oxidase report example/);
+    assert.match(result.body, /性质预测/);
+    assert.match(result.body, /### 详细打分规则/);
+    assert.match(result.body, /\| Pos \| Allowed \(comma separated\) \| Score \| Label \|/);
+    assert.match(result.body, /\| 41 \| G, A \| 2\.5 \| M1_41_GA \|/);
+    assert.match(result.body, /candidate_A/);
+    assert.doesNotMatch(result.body, /SHOULD_NOT_APPEAR_IN_PRIMARY_REPORT/);
+    assert.equal(
+      await fs.readFile(path.join(taskDir, `${taskId}_task-report_zh.md`), 'utf-8'),
+      result.body,
+    );
+  });
+
+  await t.test('English Markdown uses the English template', async () => {
+    const result = await api(`/api/report/export?taskId=${taskId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ language: 'en', format: 'markdown' }),
+    });
+    assert.equal(result.response.status, 200);
+    assert.match(result.body, /^# EnzyMiner Pro Task Report/m);
+    assert.match(result.body, /Property Prediction/);
+    assert.match(result.body, /Detailed scoring rules/);
+    assert.match(result.body, /M1_36_G/);
+    assert.match(result.body, /Candidate Recommendation/);
+  });
+
+  await t.test('PDF option returns a print-friendly HTML document without running calculations', async () => {
+    const result = await api(`/api/report/export?taskId=${taskId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ language: 'zh', format: 'pdf' }),
+    });
+    assert.equal(result.response.status, 200);
+    assert.match(result.response.headers.get('content-type') || '', /text\/html/);
+    assert.match(result.body, /^<!doctype html>/i);
+    assert.match(result.body, /window\.print\(\)/);
+    assert.match(result.body, /#660874/i);
+    assert.match(result.body, /EnzyMiner Pro 任务报告/);
+    await fs.access(path.join(taskDir, `${taskId}_task-report_zh.html`));
+  });
+
+  await t.test('Word option returns a valid DOCX ZIP package', async () => {
+    const response = await fetch(`${baseUrl}/api/report/export?taskId=${taskId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ language: 'en', format: 'docx' }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') || '', /officedocument\.wordprocessingml\.document/);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    assert.equal(String.fromCharCode(bytes[0], bytes[1]), 'PK');
+    const saved = new Uint8Array(await fs.readFile(path.join(taskDir, `${taskId}_task-report_en.docx`)));
+    assert.equal(String.fromCharCode(saved[0], saved[1]), 'PK');
+  });
+
+  await t.test('a partial task still produces a report with explicit unavailable sections', async () => {
+    const result = await api(`/api/report/export?taskId=${otherTaskId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ language: 'en', format: 'markdown' }),
+    });
+    assert.equal(result.response.status, 200);
+    assert.match(result.body, /SHOULD_NOT_APPEAR_IN_PRIMARY_REPORT/);
+    assert.match(result.body, /No corresponding artifact is currently available for this task\./);
+  });
+
+  const runtime = await api(`/api/runtime/logs?taskId=${taskId}&limit=200`);
+  assert.equal(runtime.response.status, 200);
+  assert.deepEqual(runtime.body.lines, []);
 });

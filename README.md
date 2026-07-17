@@ -15,6 +15,7 @@
 - **Similarity Network 交互选择**：新增 Navigate / Select Nodes 模式，可点击节点选择或取消选择，支持选择当前可见节点、全部已加载节点、清空选择，并导出选中节点的 FASTA 或完整 CSV。
 - **网络布局持久化**：可冻结并保存 D3/Cytoscape.js 节点坐标、缩放和平移状态；再次打开任务时恢复布局。节点集合发生变化时会提示 `partial` / `stale`，不会把旧坐标错误套到新节点。
 - **Analysis 页面拆分**：左侧 `ANALYSIS` 导航按 `Similarity Network → Property Prediction → Recommendation` 排列。性质预测是独立页面，不再嵌套在 Recommendation 中；人工条件筛选仍是推荐前的可选候选池过滤。
+- **Task Report**：左侧新增 `REPORT → Task Report`，可将当前任务已有结果汇总为中文或英文报告，并保存为 Markdown、PDF 或 Word；生成报告不会重新启动任何计算或预测。
 - **离线 Example Case**：内置 12 条 synthetic candidates + 2 条 references 的预计算示例，可直接演示网络选择、布局恢复、性质表、筛选和推荐，不调用外部预测服务，也不启动昂贵计算。
 - **Help & About / 发布信息**：新增帮助页，显示版本、构建 commit、构建日期和许可证；项目采用 Apache-2.0，第三方组件说明见 `THIRD_PARTY_NOTICES.md`。
 - **稳定性延续**：相似性计算和性质预测继续使用显式状态检查与缓存指纹，页面加载、预览和读取已有结果不会隐式启动计算；保留旧 CSV、mock 预测和 V1.0 任务兼容路径。
@@ -37,6 +38,7 @@
 | Analysis | **Similarity Network** | 推送到 Cytoscape，或在浏览器中选择/导出节点、下载 PNG/SVG、冻结并恢复布局 |
 | Analysis | **Property Prediction** | 独立运行或复用 kcat/Km、Solubility、Tm 和 EC 预测结果 |
 | Analysis | **Recommendation** | 可选候选池筛选、自动排序、勾选、导出和网络高亮 |
+| Report | **Task Report** | 从当前任务已有产物生成中英文 Markdown、PDF 或 Word 报告，不重新计算 |
 
 ### HMMER 模块（基于隐马尔可夫模型搜索）
 
@@ -52,6 +54,7 @@
 | Analysis | **Similarity Network** | 推送到 Cytoscape，或在浏览器中选择/导出节点、下载 PNG/SVG、冻结并恢复布局 |
 | Analysis | **Property Prediction** | 独立运行或复用 kcat/Km、Solubility、Tm 和 EC 预测结果 |
 | Analysis | **Recommendation** | 可选候选池筛选、自动排序、勾选、导出和网络高亮 |
+| Report | **Task Report** | 从当前任务已有产物生成中英文 Markdown、PDF 或 Word 报告，不重新计算 |
 
 ### Compare 模块（网络对比）
 
@@ -63,6 +66,7 @@
 | 4 | **Similarity** | 跨网络相似性计算 |
 | 5 | **Property Prediction** | 对合并网络独立运行或复用性质预测 |
 | 6 | **Recommendation** | 可选候选池筛选和多维自动推荐 |
+| 7 | **Task Report** | 汇总 Compare 任务已有网络、预测和推荐结果并导出报告 |
 
 ---
 
@@ -258,6 +262,7 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 - `GET /api/runtime/logs` — 获取运行日志和进度
 - `GET /api/examples` — 列出内置离线示例
 - `POST /api/examples/load` — 复制预计算示例为独立任务；不会启动计算
+- `POST /api/report/export` — 从当前任务已有产物生成中英文 Markdown、PDF 打印页或 Word 报告；不会启动计算
 
 ### BLAST 模块
 - `POST /api/blast/build-db` — 构建 BLAST 数据库
@@ -315,7 +320,7 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 
 网络图仍可下载 PNG 或 SVG；导出只包含图本身，不包含页面工具栏和提示框。
 
-## Analysis：Property Prediction 与 Recommendation
+## 9. Analysis：Property Prediction 与 Recommendation
 
 HMMER 和 BLAST 工作流的左侧 `ANALYSIS` 分组包含三个并列页面，并按以下顺序排列：
 
@@ -382,7 +387,32 @@ $$
 - 推荐结果支持分页、逐条勾选、选择当前页、选择全部、清空选择、导出 FASTA/完整 CSV，以及在浏览器网络图或 Cytoscape 桌面端高亮。
 - 筛选条件、推荐参数、推荐结果和选择状态按任务持久化；输入条件变化会使旧推荐结果失效，避免把旧排序误当成新结果。
 
-## 10. Help & About 与离线 Example Case
+## 10. Task Report
+
+HMMER 和 BLAST 工作流左侧新增独立入口 `REPORT → Task Report`；Compare 工作流在页面末尾提供相同的报告保存面板。报告生成器只读取当前任务目录中已经存在的状态文件和结果文件，**不会**隐式运行搜索、MAFFT、打分、聚类、相似性计算、性质预测、筛选或推荐。
+
+前端仅提供：
+
+- 报告语言：**中文** / **English**；
+- 保存格式：**Markdown (`.md`)**、**PDF**、**Word (`.docx`)**；
+- 一个统一的 **Save Report** 按钮。
+
+PDF 使用浏览器原生打印能力：点击保存后会打开排版后的报告和打印对话框，在 Destination/目标打印机中选择 **Save as PDF / 另存为 PDF**。这样不需要额外安装 Chromium、Puppeteer、LaTeX 或系统级 PDF 引擎。Word 文件由 Python 标准库直接生成，不依赖 `python-docx`。
+
+报告会尽可能汇总：任务元数据、工作流漏斗和步骤状态、Reference、Search & Filter、Alignment、Active Site Scoring、Clustering、Similarity Network、Property Prediction、Manual Filtering、Recommendation、数据一致性警告、产物清单和可复现性信息。缺少中间文件的未完成任务也可以生成报告，相应章节会明确标记为不可用。
+
+中英文模板是仓库中的普通 Markdown 文件，可直接编辑：
+
+```text
+report-templates/task-report.zh.md
+report-templates/task-report.en.md
+```
+
+模板占位符说明见 `report-templates/README.md`。每次生成报告时后端都会重新读取模板，因此修改模板后无需改前端；重新点击保存即可使用新模板。生成的 `.md`、打印用 `.html` 和 `.docx` 文件同时保存在当前 `tasks/{taskId}/` 目录，便于任务归档。
+
+如流水线使用了特殊 Python 启动器，可通过 `REPORT_PYTHON` 单独指定 Word 生成器使用的 Python 可执行文件；默认复用 `PIPELINE_PYTHON` / `PYTHON_BIN` / `python3`。
+
+## 11. Help & About 与离线 Example Case
 
 首页和 Help & About 页面提供 **Load Example Case**。后端会把 `examples/v1.1-small/` 复制成一个独立 HMMER 任务，并加载预计算的相似性 CSV、mock 性质结果和保存布局：
 
@@ -393,12 +423,14 @@ $$
 
 Help & About 同时说明工作流、缓存状态、网络操作、离线服务行为、本机/受信任内网部署边界，并显示 `version`、`commit`、`build date` 和 `license`。
 
-## 11. 项目结构
+## 12. 项目结构
 
 ```
 enzyminer-pro/
 ├── backend/
-│   └── server.mjs          # Express 后端（所有 API）
+│   ├── server.mjs          # Express 后端（所有 API）
+│   ├── taskReport.mjs      # 只读聚合任务产物并渲染中英文报告
+│   └── generate_report_docx.py # 无第三方依赖的 Word 生成器
 ├── scripts/
 │   ├── ncbi_annotate.py     # NCBI Entrez 分类注释（BLAST 用）
 │   └── uniprot_fill.py      # UniProt 注释（HMMER 用）
@@ -406,9 +438,11 @@ enzyminer-pro/
 │   ├── App.tsx              # 主 React 组件（HMMER + BLAST + Compare）
 │   ├── NetworkGraph.tsx      # D3/Cytoscape.js 网络选择、导出与布局持久化
 │   ├── RecommendationPanels.tsx # 推荐选择表格与候选池筛选组件
+│   ├── TaskReportPanel.tsx  # 报告语言、格式选择与保存面板
 │   ├── HelpAbout.tsx         # Help & About / Example Case 页面
 │   └── api.ts                # 前端 API 客户端
 ├── examples/v1.1-small/      # synthetic + mock 离线预计算示例
+├── report-templates/         # 可直接编辑的中英文 Markdown 报告模板
 ├── LICENSE                   # Apache License 2.0
 ├── THIRD_PARTY_NOTICES.md    # 第三方软件、模型和数据资源说明
 ├── index.html
@@ -418,7 +452,7 @@ enzyminer-pro/
 └── vite.config.ts
 ```
 
-## 12. 版本与许可证
+## 13. 版本与许可证
 
 - 当前应用版本：**1.1.0**
 - 构建日期：**2026-07-16**

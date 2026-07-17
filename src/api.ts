@@ -26,6 +26,15 @@ export type EbiHmmDatabase = {
   order: number;
 };
 
+export type TaskReportLanguage = 'en' | 'zh';
+export type TaskReportFormat = 'markdown' | 'pdf' | 'docx';
+
+export type TaskReportDownload = {
+  blob: Blob;
+  fileName: string;
+  contentType: string;
+};
+
 let activeTaskId = 'default';
 
 function withTaskId(url: string) {
@@ -93,6 +102,47 @@ async function request<T>(url: string, init?: RequestInit): Promise<ApiResult<T>
     throw new Error(details ? `${message}\n${details}` : message);
   }
   return payload as ApiResult<T>;
+}
+
+export async function downloadTaskReport(
+  language: TaskReportLanguage,
+  format: TaskReportFormat,
+): Promise<TaskReportDownload> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (import.meta.env.VITE_API_KEY) headers['x-api-key'] = import.meta.env.VITE_API_KEY;
+
+  let response: Response;
+  try {
+    response = await fetch(withTaskId('/api/report/export'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ language, format }),
+    });
+  } catch (err) {
+    const details = err instanceof Error ? err.message : String(err || 'network error');
+    throw new Error(`Backend API is unreachable. Confirm that the API service is running on port 8787, then retry. (${details})`);
+  }
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const payload = await parseJsonSafe(response);
+      const message = payload?.message || `Request failed: ${response.status}`;
+      const details = payload?.details || '';
+      throw new Error(details ? `${message}\n${details}` : message);
+    }
+    const message = (await response.text()).trim();
+    throw new Error(message || `Request failed: ${response.status}`);
+  }
+
+  const contentType = response.headers.get('content-type') || 'application/octet-stream';
+  const disposition = response.headers.get('content-disposition') || '';
+  const headerName = response.headers.get('x-report-filename') || '';
+  const dispositionName = disposition.match(/filename="?([^";]+)"?/i)?.[1] || '';
+  const safeTaskId = String(activeTaskId || 'task').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 64) || 'task';
+  const extension = format === 'markdown' ? 'md' : format;
+  const fileName = headerName || dispositionName || `${safeTaskId}_task-report_${language}.${extension}`;
+  return { blob: await response.blob(), fileName, contentType };
 }
 
 export function healthCheck() {

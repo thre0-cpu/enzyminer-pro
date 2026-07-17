@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Database,
+  FileText,
   Filter,
   FlaskConical,
   GitCompareArrows,
@@ -80,13 +81,14 @@ import {
 import type { EbiHmmDatabase, BlastDbSource, BlastMergeStrategy, CompareTaskInfo, CompareResult, PreAlignmentAnchor, ScoringPositionMode, ScoringRule, RecommendCandidate, RecommendWeights, PredictedSubWeights, PredictedMetricsRow, PredictionProgress, SimilarityArtifactState, PredictionArtifactState, BrowserGraphNode, BrowserGraphEdge, ManualFilterCondition } from './api';
 import AlignmentViewer from './AlignmentViewer';
 import HelpAbout from './HelpAbout';
+import TaskReportPanel from './TaskReportPanel';
 import { ManualFilteringPanel, SystemRecommendationResults } from './RecommendationPanels';
 import type { AppliedCandidateFilter } from './RecommendationPanels';
 import { downloadButtonClass, outlinedActionButtonClass } from './uiStyles';
 const NetworkGraph = React.lazy(() => import('./NetworkGraph'));
 
-type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'prediction' | 'recommendation';
-type BlastView = 'dashboard' | 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'prediction' | 'recommendation';
+type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'prediction' | 'recommendation' | 'report';
+type BlastView = 'dashboard' | 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'prediction' | 'recommendation' | 'report';
 type PipelineStepKey = 'reference' | 'hmm' | 'search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network-push' | 'recommendation';
 type BlastPipelineStepKey = 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network-push' | 'recommendation';
 type StepStatus = 'idle' | 'running' | 'success' | 'error';
@@ -3172,6 +3174,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             <NavItem icon={<Network className="w-4 h-4" />} label="Similarity Network" active={currentView === 'network'} onClick={() => setCurrentView('network')} />
             <NavItem icon={<FlaskConical className="w-4 h-4" />} label="Property Prediction" active={currentView === 'prediction'} onClick={() => setCurrentView('prediction')} />
             <NavItem icon={<Star className="w-4 h-4" />} label="Recommendation" active={currentView === 'recommendation'} onClick={() => setCurrentView('recommendation')} />
+
+            <Section title="Report" />
+            <NavItem icon={<FileText className="w-4 h-4" />} label="Task Report" active={currentView === 'report'} onClick={() => setCurrentView('report')} />
           </nav>
         </div>
       </aside>
@@ -5054,6 +5059,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               {renderTailPanels('h-24')}
             </div>
           )}
+          {currentView === 'report' && (
+            <TaskReportPanel taskId={selectedTaskId} />
+          )}
             </div>
           </div>
         </div>
@@ -6099,6 +6107,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             <NavItem icon={<Network className="w-4 h-4" />} label="Similarity Network" active={currentView === 'network'} onClick={() => setCurrentView('network')} />
             <NavItem icon={<FlaskConical className="w-4 h-4" />} label="Property Prediction" active={currentView === 'prediction'} onClick={() => setCurrentView('prediction')} />
             <NavItem icon={<Star className="w-4 h-4" />} label="Recommendation" active={currentView === 'recommendation'} onClick={() => setCurrentView('recommendation')} />
+
+            <Section title="Report" />
+            <NavItem icon={<FileText className="w-4 h-4" />} label="Task Report" active={currentView === 'report'} onClick={() => setCurrentView('report')} />
           </nav>
         </div>
       </aside>
@@ -7552,6 +7563,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               {renderTailPanels('h-28')}
             </div>
           )}
+          {currentView === 'report' && (
+            <TaskReportPanel taskId={selectedTaskId} />
+          )}
         </div>
       </main>
     </div>
@@ -8559,6 +8573,8 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
             )}
           </section>
         )}
+
+        <TaskReportPanel taskId={selectedTaskId} compact />
 
         {/* Runtime Logs */}
         {runtimeLogs.length > 0 && (

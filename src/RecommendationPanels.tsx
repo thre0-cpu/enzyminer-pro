@@ -73,7 +73,7 @@ export function CandidateSaveControls({
     <div className="inline-flex overflow-hidden rounded-lg border border-emerald-700 shadow-sm">
       <button
         type="button"
-        className={downloadButtonClass(saving || ids.length === 0)}
+        className={`${downloadButtonClass(saving || ids.length === 0)} rounded-r-none`}
         onClick={handleSave}
         disabled={saving || ids.length === 0}
       >
