@@ -4,6 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { gzipSync } from 'node:zlib';
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'enzymeminer-test-'));
 const tasksRoot = path.join(tempRoot, 'tasks');
@@ -16,6 +17,10 @@ await fs.writeFile(fakePythonPath, `#!/usr/bin/env node
 import fs from 'node:fs/promises';
 
 const [scriptPath, inputPath, outputPath] = process.argv.slice(2);
+if (scriptPath && scriptPath.endsWith('uniprot_fill.py') && inputPath) {
+  console.log('mock UniProt enrichment complete');
+  process.exit(0);
+}
 if (!scriptPath || scriptPath === '-c' || !inputPath || !outputPath) {
   process.exit(1);
 }
@@ -63,6 +68,47 @@ const fakePredictor = http.createServer(async (req, res) => {
   for await (const chunk of req) body += chunk;
   const payload = body ? JSON.parse(body) : null;
   res.setHeader('content-type', 'application/json');
+
+  if (req.url === '/ebi/result/pdb-job' && req.method === 'GET') {
+    res.end(JSON.stringify({
+      status: 'SUCCESS',
+      page_count: 1,
+      result: {
+        hits: [{
+          name: '123',
+          acc: null,
+          score: 88.5,
+          evalue: 1e-20,
+          metadata: {
+            accession: '1ABC_A',
+            identifier: '1ABC_A',
+            description: 'PDB-only enzyme chain',
+            uniprot_accession: null,
+            uniprot_identifier: null,
+            external_link: 'https://www.ebi.ac.uk/pdbe/entry/pdb/1abc',
+          },
+        }],
+      },
+    }));
+    return;
+  }
+
+  if (req.url === '/ebi/download/pdb-job/fullfasta' && req.method === 'POST') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (req.url === '/ebi/download/pdb-job' && req.method === 'GET') {
+    res.end(JSON.stringify([{ format: 'fullfasta', status: 'AVAILABLE', url: null, size: 27 }]));
+    return;
+  }
+
+  if (req.url === '/ebi/download/pdb-job/fullfasta' && req.method === 'GET') {
+    res.setHeader('content-type', 'application/gzip');
+    res.end(gzipSync('>1ABC_A\nMPEPTIDESEQ\n'));
+    return;
+  }
 
   if (req.url === '/catapro/predict/batch' && req.method === 'POST') {
     fakeStats.cataProBatches.push(payload.map((item) => item.id));
@@ -156,6 +202,8 @@ process.env.SOL_URL = `${fakeUrl}/sol`;
 process.env.EC_URL = `${fakeUrl}/ec`;
 process.env.TM_URL = `${fakeUrl}/tm`;
 process.env.EBI_HMMER_DATABASES_URL = `${fakeUrl}/ebi/databases`;
+process.env.EBI_HMMER_RESULT_URL = `${fakeUrl}/ebi/result`;
+process.env.EBI_HMMER_DOWNLOAD_URL = `${fakeUrl}/ebi/download`;
 process.env.PREDICTION_BATCH_SIZE = '2';
 process.env.PREDICTION_REQUEST_TIMEOUT_MS = '5000';
 process.env.API_KEY = '';
@@ -208,7 +256,7 @@ test('invalid async task ids return 400 without terminating the server', async (
   const health = await api('/api/health');
   assert.equal(health.response.status, 200);
   assert.equal(health.body.ok, true);
-  assert.equal(health.body.version, '1.1.0');
+  assert.equal(health.body.version, '1.1.1');
   assert.equal(health.body.license, 'Apache-2.0');
   assert.equal(typeof health.body.tools.mmseqs, 'boolean');
   assert.deepEqual(Object.keys(health.body.pythonPackages).sort(), ['biopython', 'pandas', 'requests', 'tqdm']);
@@ -219,7 +267,7 @@ test('invalid async task ids return 400 without terminating the server', async (
   assert.equal(blockedOrigin.headers.get('access-control-allow-origin'), null);
 });
 
-test('EBI database metadata exposes only enabled sequence databases and uses its cache', async () => {
+test('EBI database metadata exposes enabled sequence databases and supports forced refresh', async () => {
   const first = await api('/api/search/ebi/databases');
   assert.equal(first.response.status, 200);
   assert.equal(first.body.source, 'live');
@@ -233,6 +281,11 @@ test('EBI database metadata exposes only enabled sequence databases and uses its
   assert.equal(cached.response.status, 200);
   assert.equal(cached.body.source, 'cache');
   assert.equal(fakeStats.ebiDatabaseRequests, 1);
+
+  const refreshed = await api('/api/search/ebi/databases?refresh=1');
+  assert.equal(refreshed.response.status, 200);
+  assert.equal(refreshed.body.source, 'live');
+  assert.equal(fakeStats.ebiDatabaseRequests, 2);
 });
 
 test('scoring results support server-side pagination', async () => {
@@ -257,7 +310,7 @@ test('scoring results support server-side pagination', async () => {
   assert.equal(clampedPage.body.preview.rows[0].id, 'candidate_51');
 });
 
-test('alignment preview stays bounded and the generated MAFFT FASTA can be downloaded', async () => {
+test('alignment preview supports full reference columns, raw windows, and FASTA download', async () => {
   const taskId = 'alignment-preview-task';
   const taskDir = path.join(tasksRoot, taskId);
   await fs.mkdir(taskDir, { recursive: true });
@@ -277,15 +330,15 @@ test('alignment preview stays bounded and the generated MAFFT FASTA can be downl
   assert.equal(preview.body.alignmentLength, 300);
   assert.equal(preview.body.totalRecords, 3);
   assert.equal(preview.body.rows.length, 2);
-  assert.equal(preview.body.rows[0].segment.length, 240);
-  assert.equal(preview.body.consensus, 'A'.repeat(240));
-  assert.equal(preview.body.conservation.length, 240);
+  assert.equal(preview.body.rows[0].segment.length, 300);
+  assert.equal(preview.body.consensus, 'A'.repeat(300));
+  assert.equal(preview.body.conservation.length, 300);
   assert.equal(preview.body.conservation[0], 1);
   assert.equal(preview.body.conservation[5], 0.6667);
   assert.equal(preview.body.conservation[6], 0.6667);
   assert.equal(preview.body.conservation[7], 1);
-  assert.equal(preview.body.maxPreviewColumns, 240);
-  assert.equal(preview.body.columnsTruncated, true);
+  assert.equal('maxPreviewColumns' in preview.body, false);
+  assert.equal('columnsTruncated' in preview.body, false);
 
   const referencePreview = await api(
     `/api/scoring/alignment-preview?taskId=${taskId}&start=1&end=120&limit=2&referenceId=seq2`,
@@ -297,6 +350,18 @@ test('alignment preview stays bounded and the generated MAFFT FASTA can be downl
   assert.equal(referencePreview.body.rows[0].id, 'seq2');
   assert.equal(referencePreview.body.rows[0].isReference, true);
   assert.equal(referencePreview.body.rows[1].id, 'seq1');
+
+  const collapsedReferencePreview = await api(
+    `/api/scoring/alignment-preview?taskId=${taskId}&start=241&end=250&collapseReferenceGaps=true&referenceId=seq2`,
+  );
+  assert.equal(collapsedReferencePreview.response.status, 200);
+  assert.equal(collapsedReferencePreview.body.start, 1);
+  assert.equal(collapsedReferencePreview.body.end, 300);
+  assert.equal(collapsedReferencePreview.body.rows[0].segment.length, 300);
+  assert.deepEqual(
+    collapsedReferencePreview.body.referencePositions.slice(0, 8),
+    [1, 2, 3, 4, 5, null, null, 6],
+  );
 
   const pagedReferencePreview = await api(
     `/api/scoring/alignment-preview?taskId=${taskId}&start=1&end=120&limit=1&offset=2&referenceId=seq2`,
@@ -311,7 +376,7 @@ test('alignment preview stays bounded and the generated MAFFT FASTA can be downl
   assert.equal(finalWindow.body.start, 241);
   assert.equal(finalWindow.body.end, 300);
   assert.equal(finalWindow.body.rows[0].segment.length, 60);
-  assert.equal(finalWindow.body.columnsTruncated, false);
+  assert.equal('columnsTruncated' in finalWindow.body, false);
   assert.equal(finalWindow.body.consensus[0], 'A');
   assert.equal(finalWindow.body.conservation[0], 0.6667);
 
@@ -753,6 +818,39 @@ test('prediction batches requests, reports real progress and ETA, and falls back
   assert.equal(finalProgress.predictors.tm.completedBatches, ids.length);
 });
 
+
+test('EBI PDB hits keep database identifiers and stage 3 fills sequences from EBI fullfasta', async () => {
+  const taskId = 'ebi-pdb-sequence-task';
+  const download = await api('/api/search/ebi/download', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ taskId, jobId: 'pdb-job', database: 'pdb' }),
+  });
+
+  assert.equal(download.response.status, 200);
+  const downloadedRow = download.body.preview.rows[0];
+  assert.equal(downloadedRow.target, '1ABC_A');
+  assert.equal(downloadedRow.source_database, 'pdb');
+  assert.equal(downloadedRow.database_accession, '1ABC_A');
+  assert.equal(downloadedRow.database_identifier, '1ABC_A');
+  assert.equal(downloadedRow.uniprot_accession, '');
+  assert.equal(downloadedRow.sequence, '');
+
+  const fill = await api('/api/search/ebi/uniprot-fill', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ taskId }),
+  });
+
+  assert.equal(fill.response.status, 200);
+  assert.equal(fill.body.ebiSequenceStats.downloaded, 1);
+  assert.equal(fill.body.ebiSequenceStats.matched, 1);
+  assert.equal(fill.body.sequenceCount, 1);
+  const filledRow = fill.body.preview.rows[0];
+  assert.equal(filledRow.sequence, 'MPEPTIDESEQ');
+  assert.equal(filledRow.length, '11');
+  assert.equal(filledRow.uniprot_accession, '');
+});
 
 test('recommended CSV export merges sequence, source metadata, recommendation scores, and predictions', async () => {
   const taskId = 'recommended-export-task';

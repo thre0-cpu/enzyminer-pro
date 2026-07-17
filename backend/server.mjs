@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 
 import express from 'express';
 import cors from 'cors';
@@ -109,8 +110,10 @@ const apiHost = String(process.env.API_HOST || '127.0.0.1').trim() || '127.0.0.1
 const apiPort = Number(process.env.API_PORT || 8787);
 const runtimeStaleMs = Number(process.env.RUNTIME_STALE_MS || 45 * 60 * 1000);
 const uniprotFillTimeoutMs = Number(process.env.UNIPROT_FILL_TIMEOUT_MS || 30 * 60 * 1000);
-const ebiSearchUrl = 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/search/hmmsearch';
-const ebiResultUrl = 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/result';
+const ebiDownloadGenerationTimeoutMs = Number(process.env.EBI_DOWNLOAD_GENERATION_TIMEOUT_MS || 20 * 60 * 1000);
+const ebiSearchUrl = process.env.EBI_HMMER_SEARCH_URL || 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/search/hmmsearch';
+const ebiResultUrl = process.env.EBI_HMMER_RESULT_URL || 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/result';
+const ebiDownloadUrl = process.env.EBI_HMMER_DOWNLOAD_URL || 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/download';
 const ebiDatabasesUrl = process.env.EBI_HMMER_DATABASES_URL || 'https://www.ebi.ac.uk/Tools/hmmer/api/v1/search/databases';
 const ebiDatabaseCacheTtlMs = 6 * 60 * 60 * 1000;
 let ebiDatabaseCache = { fetchedAt: 0, databases: [] };
@@ -1788,7 +1791,7 @@ async function pollEbiHmmsearchUntilSuccess(jobId) {
   setRuntimeMeta({ ebiJobId: String(jobId) });
 
   let results = null;
-  const maxAttempts = 915;
+  const maxAttempts = 5;
   for (let i = 0; i < maxAttempts; i += 1) {
     let statusRes = {};
     try {
@@ -1806,7 +1809,9 @@ async function pollEbiHmmsearchUntilSuccess(jobId) {
       });
     } catch (err) {
       pushRuntimeLine(`[ebi] status request failed attempt=${i + 1}/${maxAttempts}: ${String(err)}`);
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      if (i < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
       continue;
     }
 
@@ -1816,7 +1821,7 @@ async function pollEbiHmmsearchUntilSuccess(jobId) {
       break;
     }
     if (status === 'FAILURE' || status === 'ERROR') {
-      throw new Error(`EBI job failed: ${JSON.stringify(statusRes).slice(0, 800)}`);
+      throw createHttpError(502, `EBI job failed with status ${status}. Please retry stage 1.`);
     }
 
     if (status === 'RETRY') {
@@ -1824,11 +1829,16 @@ async function pollEbiHmmsearchUntilSuccess(jobId) {
     } else {
       pushRuntimeLine(`[ebi] status=${status || 'PENDING'} attempt=${i + 1}/${maxAttempts}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    if (i < maxAttempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
   }
 
   if (!results) {
-    throw new Error('EBI job polling timeout');
+    throw createHttpError(
+      503,
+      `EBI did not complete after ${maxAttempts} status checks. Please retry stage 1.`,
+    );
   }
 
   const pageCount = Number(results.page_count || 1);
@@ -1930,14 +1940,19 @@ async function runEbiHmmsearch(hmmFile, database) {
   return downloadEbiHmmsearchResults(jobId);
 }
 
-function mapEbiHitsToRows(allHits) {
+function mapEbiHitsToRows(allHits, sourceDatabase = '') {
   return allHits.map((h) => {
     const meta = h.metadata || {};
-    const accession = meta.uniprot_accession || meta.accession || '';
-    const identifier = meta.uniprot_identifier || meta.identifier || '';
+    // metadata.accession belongs to the selected EBI database. It is not
+    // necessarily a UniProt accession (for example PDB and MGnify records).
+    const databaseAccession = meta.accession || h.acc || '';
+    const databaseIdentifier = meta.identifier || '';
+    const uniprotAccession = meta.uniprot_accession || '';
+    const uniprotIdentifier = meta.uniprot_identifier || '';
     const description = meta.description || h.desc || '';
     const length = Number(meta.length || h.length || 0) || '';
-    const target = accession || identifier || h.acc || h.name || '';
+    const target = uniprotAccession || databaseAccession || uniprotIdentifier
+      || databaseIdentifier || h.name || '';
 
     return {
       target,
@@ -1945,26 +1960,32 @@ function mapEbiHitsToRows(allHits) {
       evalue: h.evalue ?? h.pvalue ?? '',
       length,
       sequence: '',
-      uniprot_accession: accession,
-      uniprot_identifier: identifier,
+      source_database: sourceDatabase,
+      database_accession: databaseAccession,
+      database_identifier: databaseIdentifier,
+      uniprot_accession: uniprotAccession,
+      uniprot_identifier: uniprotIdentifier,
       taxonomy_id: meta.taxonomy_id || '',
       kingdom: meta.kingdom || '',
       phylum: meta.phylum || '',
       class: meta['class'] || '',
       species: meta.species || '',
       description,
-      external_link: meta.external_link || (accession ? `https://www.uniprot.org/uniprotkb/${accession}/entry` : ''),
+      external_link: meta.external_link || (uniprotAccession ? `https://www.uniprot.org/uniprotkb/${uniprotAccession}/entry` : ''),
     };
   });
 }
 
-async function writeEbiHitsCsv(allHits, outputCsv) {
+async function writeEbiHitsCsv(allHits, outputCsv, sourceDatabase = '') {
   const headers = [
     'target',
     'hmm_score',
     'evalue',
     'length',
     'sequence',
+    'source_database',
+    'database_accession',
+    'database_identifier',
     'uniprot_accession',
     'uniprot_identifier',
     'taxonomy_id',
@@ -1976,7 +1997,7 @@ async function writeEbiHitsCsv(allHits, outputCsv) {
     'external_link',
   ];
 
-  const rows = mapEbiHitsToRows(allHits);
+  const rows = mapEbiHitsToRows(allHits, sourceDatabase);
 
   const lines = [headers.map(csvEscape).join(',')]
     .concat(rows.map((row) => headers.map((h) => csvEscape(row[h] ?? '')).join(',')));
@@ -1997,6 +2018,147 @@ async function readEbiDownloadMeta(workDir) {
   } catch {
     return null;
   }
+}
+
+async function curlEbiDownloadToFile(url, outputPath, { method = 'GET', timeoutMs = uniprotFillTimeoutMs } = {}) {
+  const timeoutSeconds = Math.max(10, Math.ceil(Number(timeoutMs || uniprotFillTimeoutMs) / 1000));
+  await runCmd('curl', [
+    '-sS',
+    '-L',
+    '-f',
+    '--connect-timeout',
+    '30',
+    '--max-time',
+    String(timeoutSeconds),
+    '--retry',
+    '2',
+    '--retry-delay',
+    '1',
+    '-X',
+    String(method || 'GET').toUpperCase(),
+    '-o',
+    outputPath,
+    url,
+  ], pipelineRoot, { timeoutMs: Number(timeoutMs || uniprotFillTimeoutMs) + 5_000 });
+}
+
+async function downloadEbiFullFasta(jobId, workDir) {
+  const encodedJobId = encodeURIComponent(String(jobId));
+  const generateUrl = `${ebiDownloadUrl}/${encodedJobId}/fullfasta`;
+  const generateResponsePath = path.join(workDir, '.ebi-fullfasta-generate-response');
+  const outputPath = path.join(workDir, '.ebi-fullfasta-download');
+
+  try {
+    pushRuntimeLine('[ebi] requesting full-length FASTA generation...');
+    await curlEbiDownloadToFile(generateUrl, generateResponsePath, {
+      method: 'POST',
+      timeoutMs: 60_000,
+    });
+
+    const startedAt = Date.now();
+    while (true) {
+      const downloads = await fetchJsonViaCurl(`${ebiDownloadUrl}/${encodedJobId}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      }, {
+        retries: 2,
+        retryDelayMs: 1_000,
+        label: 'ebi-download',
+        curlRetries: 1,
+        connectTimeoutSec: 30,
+        maxTimeSec: 120,
+      });
+      const fullFasta = Array.isArray(downloads)
+        ? downloads.find((item) => String(item?.format || '').toLowerCase() === 'fullfasta')
+        : null;
+      const status = String(fullFasta?.status || 'NOT_GENERATED').toUpperCase();
+      setRuntimeMeta({ ebiFullFastaStatus: status });
+      if (status === 'AVAILABLE') {
+        break;
+      }
+      if (status === 'FAILED') {
+        throw new Error('EBI failed to generate the full-length FASTA download');
+      }
+      if (Date.now() - startedAt >= ebiDownloadGenerationTimeoutMs) {
+        throw new Error(`Timed out waiting for EBI full-length FASTA after ${Math.round(ebiDownloadGenerationTimeoutMs / 1000)} seconds`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+
+    pushRuntimeLine('[ebi] downloading full-length FASTA...');
+    await curlEbiDownloadToFile(generateUrl, outputPath, {
+      method: 'GET',
+      timeoutMs: uniprotFillTimeoutMs,
+    });
+    return outputPath;
+  } finally {
+    await fs.rm(generateResponsePath, { force: true });
+  }
+}
+
+function ebiFastaLookupKeys(value) {
+  const raw = String(value || '').trim().replace(/^>/, '');
+  if (!raw) return [];
+  const firstToken = raw.split(/\s+/)[0];
+  const candidates = [raw, firstToken];
+  if (firstToken.includes('|')) {
+    candidates.push(...firstToken.split('|'));
+  }
+  const withoutRange = firstToken.replace(/\/\d+-\d+$/, '');
+  candidates.push(withoutRange);
+  return [...new Set(candidates.map((item) => String(item || '').trim().toUpperCase()).filter(Boolean))];
+}
+
+async function mergeEbiFullFastaIntoHits(hitsCsv, fastaPath, sourceDatabase = '') {
+  const raw = await fs.readFile(fastaPath);
+  const isGzip = raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b;
+  const fastaText = (isGzip ? gunzipSync(raw) : raw).toString('utf-8');
+  const records = parseFastaRecords(fastaText);
+  const sequenceByKey = new Map();
+  for (const record of records) {
+    const sequence = String(record.seq || '').replace(/\s+/g, '').toUpperCase();
+    if (!sequence) continue;
+    for (const key of ebiFastaLookupKeys(record.id)) sequenceByKey.set(key, sequence);
+    for (const key of ebiFastaLookupKeys(record.header)) sequenceByKey.set(key, sequence);
+  }
+
+  const { headers: originalHeaders, rows } = await readCsvRows(hitsCsv);
+  const headers = [...originalHeaders];
+  for (const required of ['length', 'sequence', 'source_database', 'database_accession', 'database_identifier']) {
+    if (!headers.includes(required)) headers.push(required);
+  }
+
+  let matched = 0;
+  for (const row of rows) {
+    const candidateValues = [
+      row.database_identifier,
+      row.uniprot_identifier,
+      row.database_accession,
+      row.uniprot_accession,
+      row.target,
+    ];
+    let sequence = '';
+    for (const value of candidateValues) {
+      for (const key of ebiFastaLookupKeys(value)) {
+        if (sequenceByKey.has(key)) {
+          sequence = sequenceByKey.get(key) || '';
+          break;
+        }
+      }
+      if (sequence) break;
+    }
+    if (sequence) {
+      row.sequence = sequence;
+      row.length = String(sequence.length);
+      matched += 1;
+    }
+    if (!String(row.source_database || '').trim() && sourceDatabase) {
+      row.source_database = sourceDatabase;
+    }
+  }
+
+  await writeCsvRows(hitsCsv, headers, rows);
+  return { downloaded: records.length, matched, total: rows.length };
 }
 
 function pipelineStateFilename(module) {
@@ -2070,13 +2232,13 @@ async function retryFailedEbiPages({ jobId, failedPages }) {
   return { recoveredHits, stillFailedPages };
 }
 
-async function mergeEbiRecoveredRows(csvPath, recoveredHits) {
+async function mergeEbiRecoveredRows(csvPath, recoveredHits, sourceDatabase = '') {
   const { headers, rows } = await readCsvRows(csvPath);
   if (!headers.length) {
     throw new Error('hits_all.csv is missing, please run download first');
   }
 
-  const incoming = mapEbiHitsToRows(recoveredHits);
+  const incoming = mapEbiHitsToRows(recoveredHits, sourceDatabase);
   const keyOf = (row) => [row.target, row.hmm_score, row.evalue, row.description].map((x) => String(x ?? '')).join('|');
   const existingKey = new Set(rows.map((r) => keyOf(r)));
 
@@ -4753,10 +4915,12 @@ route.post('/api/hmm/build', async (req, res) => {
   });
 });
 
-route.get('/api/search/ebi/databases', async (_req, res) => {
+route.get('/api/search/ebi/databases', async (req, res) => {
   const now = Date.now();
+  const forceRefresh = req.query?.refresh === '1' || req.query?.refresh === 'true';
   if (
-    ebiDatabaseCache.databases.length > 0
+    !forceRefresh
+    && ebiDatabaseCache.databases.length > 0
     && now - ebiDatabaseCache.fetchedAt < ebiDatabaseCacheTtlMs
   ) {
     res.json({
@@ -4845,9 +5009,10 @@ route.post('/api/search/run', async (req, res) => {
 
       if (mode === 'ebi') {
         const { jobId, pageCount, allHits, failedPages } = await runEbiHmmsearch(hmmFile, database);
-        await writeEbiHitsCsv(allHits, hitsCsv);
+        await writeEbiHitsCsv(allHits, hitsCsv, database);
         await writeEbiDownloadMeta(workDir, {
           jobId,
+          database,
           pageCount,
           failedPages,
           updatedAt: new Date().toISOString(),
@@ -4912,7 +5077,10 @@ route.post('/api/search/ebi/monitor', async (req, res) => {
       finishRuntimeTask('search/ebi-monitor', true);
     } catch (err) {
       finishRuntimeTask('search/ebi-monitor', false);
-      jsonError(res, 'Failed to monitor EBI hmmsearch', err);
+      const message = Number(err?.status) === 502 || Number(err?.status) === 503
+        ? String(err?.message || 'EBI request failed. Please retry stage 1.')
+        : 'Failed to monitor EBI hmmsearch';
+      jsonError(res, message, err);
     }
   });
 });
@@ -4927,6 +5095,7 @@ route.post('/api/search/ebi/download', async (req, res) => {
       const { workDir } = await resolveWorkDirForReq(req);
       setRuntimeMeta({ taskId });
       const jobId = String(req.body?.jobId || '').trim();
+      const database = String(req.body?.database || '').trim();
       if (!jobId) {
         res.status(400).json({ ok: false, message: 'jobId is required' });
         finishRuntimeTask('search/ebi-download', false);
@@ -4935,9 +5104,10 @@ route.post('/api/search/ebi/download', async (req, res) => {
 
       const hitsCsv = path.join(workDir, 'hits_all.csv');
       const { pageCount, allHits, failedPages } = await downloadEbiHmmsearchResults(jobId);
-      await writeEbiHitsCsv(allHits, hitsCsv);
+      await writeEbiHitsCsv(allHits, hitsCsv, database);
       await writeEbiDownloadMeta(workDir, {
         jobId,
+        database,
         pageCount,
         failedPages,
         updatedAt: new Date().toISOString(),
@@ -4972,19 +5142,49 @@ route.post("/api/search/ebi/uniprot-fill", async (req, res) => {
       const { workDir } = await resolveWorkDirForReq(req);
       setRuntimeMeta({ taskId, uniprotProgress: 0, uniprotPhase: 'fetching' });
       const hitsCsv = path.join(workDir, "hits_all.csv");
-      pushRuntimeLine("[uniprot] Calling uniprot_fill.py to retrieve length/sequence...");
+      const downloadMeta = await readEbiDownloadMeta(workDir);
+      const jobId = String(req.body?.jobId || downloadMeta?.jobId || '').trim();
+      const database = String(req.body?.database || downloadMeta?.database || '').trim();
+      let ebiSequenceStats = null;
+
+      // UniProt cannot supply sequences for PDB, reduced-proteome, MGnify and
+      // other database-native identifiers. The EBI HMMER download API can, so
+      // always merge its full-length FASTA before optional UniProt enrichment.
+      if (jobId) {
+        setRuntimeMeta({ uniprotProgress: 5, uniprotPhase: 'ebi-fasta', taskId });
+        let fullFastaPath = '';
+        try {
+          fullFastaPath = await downloadEbiFullFasta(jobId, workDir);
+          ebiSequenceStats = await mergeEbiFullFastaIntoHits(hitsCsv, fullFastaPath, database);
+          pushRuntimeLine(`[ebi] full-length FASTA records=${ebiSequenceStats.downloaded} matched=${ebiSequenceStats.matched}/${ebiSequenceStats.total}`);
+        } finally {
+          if (fullFastaPath) await fs.rm(fullFastaPath, { force: true });
+        }
+      } else {
+        pushRuntimeLine('[ebi] no EBI job id found; skipping database-native FASTA download');
+      }
+
+      setRuntimeMeta({ uniprotProgress: 20, uniprotPhase: 'uniprot', taskId });
+      pushRuntimeLine("[uniprot] Calling uniprot_fill.py for available UniProt accessions...");
       await runCmd(pythonBin, [path.join(projectRoot, "scripts/uniprot_fill.py"), hitsCsv], projectRoot, {
         timeoutMs: uniprotFillTimeoutMs,
         onStderr: (text) => {
           const m = text.match(/(\d+)%\|/);
           if (m) {
-            setRuntimeMeta({ uniprotProgress: parseInt(m[1], 10), uniprotPhase: 'fetching', taskId });
+            const scriptProgress = parseInt(m[1], 10);
+            setRuntimeMeta({
+              uniprotProgress: 20 + Math.round(scriptProgress * 0.8),
+              uniprotPhase: 'uniprot',
+              taskId,
+            });
           }
         }
       });
       setRuntimeMeta({ uniprotProgress: 100, uniprotPhase: 'writing', taskId });
+      const { rows: completedRows } = await readCsvRows(hitsCsv);
+      const sequenceCount = completedRows.filter((row) => String(row.sequence || '').trim()).length;
       const preview = await readCsvPreview(hitsCsv, 30);
-      res.json({ ok: true, hitsCsv, preview });
+      res.json({ ok: true, hitsCsv, preview, ebiSequenceStats, sequenceCount, totalRows: completedRows.length });
       finishRuntimeTask("search/uniprot-fill", true);
     } catch (err) {
       finishRuntimeTask("search/uniprot-fill", false);
@@ -5035,7 +5235,7 @@ route.post('/api/search/ebi/retry-failed', async (req, res) => {
       }
 
       const { recoveredHits, stillFailedPages } = await retryFailedEbiPages({ jobId, failedPages });
-      const { inserted, total } = await mergeEbiRecoveredRows(hitsCsv, recoveredHits);
+      const { inserted, total } = await mergeEbiRecoveredRows(hitsCsv, recoveredHits, String(meta?.database || ''));
       await writeEbiDownloadMeta(workDir, {
         jobId,
         pageCount: Number(meta?.pageCount || 0) || null,
@@ -5492,6 +5692,7 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
       req.query?.alignment ? String(req.query.alignment) : null,
       workDir, path.join(workDir, 'scoring_input_auto.mafft.fasta'));
 
+    const collapseReferenceGaps = String(req.query?.collapseReferenceGaps || '').toLowerCase() === 'true';
     const startParam = Number(req.query?.start || 1);
     const requestedStart = Number.isFinite(startParam) ? Math.max(1, Math.floor(startParam)) : 1;
     const endParam = Number(req.query?.end || 120);
@@ -5502,7 +5703,6 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
     const limit = Number.isFinite(limitParam) ? Math.max(1, Math.min(200, Math.floor(limitParam))) : 40;
     const offsetParam = Number(req.query?.offset || 0);
     const offset = Number.isFinite(offsetParam) ? Math.max(0, Math.floor(offsetParam)) : 0;
-    const maxPreviewColumns = 240;
 
     const text = await fs.readFile(alignmentPath, 'utf-8');
     const records = parseFastaRecords(text);
@@ -5522,25 +5722,38 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
       (maxLength, record) => Math.max(maxLength, String(record?.seq || '').length),
       0,
     );
-    const start = alignmentLength > 0
-      ? Math.min(requestedStart, alignmentLength)
-      : requestedStart;
-    const availableEnd = Math.min(requestedEnd, alignmentLength);
-    const requestedWindowEnd = Math.min(availableEnd, start + maxPreviewColumns - 1);
+    const start = collapseReferenceGaps
+      ? 1
+      : alignmentLength > 0
+        ? Math.min(requestedStart, alignmentLength)
+        : requestedStart;
+    const to = collapseReferenceGaps
+      ? alignmentLength
+      : Math.min(requestedEnd, alignmentLength);
     const from = start - 1;
-    const to = Math.min(requestedWindowEnd, alignmentLength);
     const windowWidth = Math.max(0, to - from);
     const windowed = orderedRecords.slice(offset, offset + limit).map((r) => ({
       id: r.id,
       segment: String(r.seq || '').slice(from, to).padEnd(windowWidth, '-'),
       isReference: r === referenceRecord,
     }));
-    const referenceSegment = referenceRecord
-      ? String(referenceRecord.seq || '').slice(from, to).padEnd(windowWidth, '-')
+    const referenceSequence = referenceRecord ? String(referenceRecord.seq || '') : '';
+    const referenceSegment = referenceSequence
+      ? referenceSequence.slice(from, to).padEnd(windowWidth, '-')
       : '';
+    let referenceResidueNumber = 0;
+    const fullReferencePositions = Array.from(referenceSequence, (residue) => {
+      const normalized = String(residue || '-').toUpperCase();
+      if (normalized === '-' || normalized === '.') return null;
+      referenceResidueNumber += 1;
+      return referenceResidueNumber;
+    });
+    const referencePositions = fullReferencePositions.slice(from, to);
 
-    // Consensus and conservation use all sequences, not only the visible page,
-    // while the rendered DOM remains bounded to at most 200 x 240 residues.
+    // Consensus and conservation use all sequences, not only the visible page.
+    // Column windows are user-controlled when reference-gap collapsing is off;
+    // collapsed mode returns the complete alignment so every reference residue
+    // can be displayed with its native sequence number.
     const consensus = [];
     const conservation = [];
     for (let column = from; column < to; column += 1) {
@@ -5567,9 +5780,8 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
       alignment: alignmentPath,
       start,
       end: to,
-      requestedEnd,
-      maxPreviewColumns,
-      columnsTruncated: availableEnd > requestedWindowEnd,
+      requestedEnd: collapseReferenceGaps ? alignmentLength : requestedEnd,
+      collapseReferenceGaps,
       limit,
       offset,
       totalRecords,
@@ -5577,6 +5789,7 @@ route.get('/api/scoring/alignment-preview', async (req, res) => {
       referenceId: String(referenceRecord?.id || referenceRecord?.header || ''),
       referenceMatched,
       referenceSegment,
+      referencePositions,
       consensus: consensus.join(''),
       conservation,
       rows: windowed,

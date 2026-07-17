@@ -333,12 +333,12 @@ export function buildHmm(
   });
 }
 
-export function fetchEbiHmmDatabases() {
+export function fetchEbiHmmDatabases(forceRefresh = false) {
   return request<{
     databases: EbiHmmDatabase[];
     source: string;
     fetchedAt: string;
-  }>('/api/search/ebi/databases');
+  }>(`/api/search/ebi/databases${forceRefresh ? '?refresh=1' : ''}`);
 }
 
 export function runHmmSearch(
@@ -382,7 +382,7 @@ export function monitorEbiHmmSearch(hmmFile: string, database: string) {
   });
 }
 
-export function downloadEbiHmmSearchResults(jobId: string) {
+export function downloadEbiHmmSearchResults(jobId: string, database?: string) {
   return request<{
     mode?: 'ebi';
     jobId: string;
@@ -395,7 +395,7 @@ export function downloadEbiHmmSearchResults(jobId: string) {
   }>('/api/search/ebi/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobId }),
+    body: JSON.stringify({ jobId, database }),
   });
 }
 
@@ -655,21 +655,22 @@ export function loadScoringAlignmentPreview(opts?: {
   limit?: number;
   offset?: number;
   referenceId?: string;
+  collapseReferenceGaps?: boolean;
 }) {
   const params = new URLSearchParams();
   if (opts?.alignment) params.set('alignment', opts.alignment);
-  params.set('start', String(opts?.start ?? 1));
-  params.set('end', String(opts?.end ?? 120));
+  if (opts?.start != null) params.set('start', String(opts.start));
+  if (opts?.end != null) params.set('end', String(opts.end));
   params.set('limit', String(opts?.limit ?? 40));
   params.set('offset', String(opts?.offset ?? 0));
   if (opts?.referenceId) params.set('referenceId', opts.referenceId);
+  params.set('collapseReferenceGaps', String(Boolean(opts?.collapseReferenceGaps)));
   return request<{
     alignment: string;
     start: number;
     end: number;
     requestedEnd: number;
-    maxPreviewColumns: number;
-    columnsTruncated: boolean;
+    collapseReferenceGaps: boolean;
     limit: number;
     offset: number;
     totalRecords: number;
@@ -677,6 +678,7 @@ export function loadScoringAlignmentPreview(opts?: {
     referenceId: string;
     referenceMatched: boolean;
     referenceSegment: string;
+    referencePositions: Array<number | null>;
     consensus: string;
     conservation: number[];
     rows: Array<{ id: string; segment: string; isReference: boolean }>;

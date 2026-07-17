@@ -13,8 +13,11 @@ type AlignmentViewerProps = {
   totalRecords: number;
   referenceId?: string;
   referenceSegment?: string;
+  referencePositions?: Array<number | null>;
   consensus?: string;
   conservation?: number[];
+  collapseReferenceGaps: boolean;
+  onCollapseReferenceGapsChange: (value: boolean) => void;
 };
 
 const residuePalette: Record<string, { background: string; color: string; label: string }> = {
@@ -83,11 +86,13 @@ export default function AlignmentViewer({
   totalRecords,
   referenceId = '',
   referenceSegment = '',
+  referencePositions = [],
   consensus = '',
   conservation = [],
+  collapseReferenceGaps,
+  onCollapseReferenceGapsChange,
 }: AlignmentViewerProps) {
   const [colorResidues, setColorResidues] = useState(true);
-  const [collapseReferenceGaps, setCollapseReferenceGaps] = useState(true);
   const width = Math.max(
     referenceSegment.length,
     consensus.length,
@@ -100,6 +105,16 @@ export default function AlignmentViewer({
     () => Array.from({ length: width }, (_, column) => column),
     [width],
   );
+  const resolvedReferencePositions = useMemo(() => {
+    if (referencePositions.length === width) return referencePositions;
+    let position = 0;
+    return allColumns.map((column) => {
+      const residue = String(referenceSegment[column] || '-').toUpperCase();
+      if (residue === '-' || residue === '.') return null;
+      position += 1;
+      return position;
+    });
+  }, [allColumns, referencePositions, referenceSegment, width]);
   const visibleColumns = useMemo(() => {
     if (!collapseReferenceGaps || !referenceSegment) return allColumns;
     return allColumns.filter((column) => {
@@ -109,6 +124,12 @@ export default function AlignmentViewer({
   }, [allColumns, collapseReferenceGaps, referenceSegment]);
   const hiddenReferenceGapColumns = width - visibleColumns.length;
   const end = width > 0 ? Math.min(alignmentLength || start + width - 1, start + width - 1) : start;
+  const firstVisiblePosition = visibleColumns.length
+    ? (collapseReferenceGaps ? resolvedReferencePositions[visibleColumns[0]] : start + visibleColumns[0])
+    : null;
+  const lastVisiblePosition = visibleColumns.length
+    ? (collapseReferenceGaps ? resolvedReferencePositions[visibleColumns[visibleColumns.length - 1]] : start + visibleColumns[visibleColumns.length - 1])
+    : null;
   const gridTemplateColumns = visibleColumns.length > 0
     ? `minmax(12rem, 15rem) repeat(${visibleColumns.length}, 1rem)`
     : 'minmax(12rem, 15rem)';
@@ -124,6 +145,11 @@ export default function AlignmentViewer({
   const renderResidue = (residueRaw: string, column: number, rowId: string) => {
     const residue = String(residueRaw || '-').toUpperCase();
     const palette = residuePalette[residue] || { background: '#f1f5f9', color: '#334155', label: 'Other' };
+    const alignmentPosition = start + column;
+    const referencePosition = resolvedReferencePositions[column];
+    const positionLabel = collapseReferenceGaps && referencePosition
+      ? `reference position ${referencePosition} · alignment column ${alignmentPosition}`
+      : `alignment column ${alignmentPosition}`;
     return (
       <span
         key={`${rowId}-${column}`}
@@ -131,7 +157,7 @@ export default function AlignmentViewer({
         style={colorResidues
           ? { backgroundColor: palette.background, color: palette.color }
           : { backgroundColor: '#ffffff', color: '#334155' }}
-        title={`${rowId} · alignment position ${start + column} · ${residue} (${palette.label})`}
+        title={`${rowId} · ${positionLabel} · ${residue} (${palette.label})`}
       >
         {residue}
       </span>
@@ -144,7 +170,10 @@ export default function AlignmentViewer({
         <div className="min-w-0">
           <div className="text-sm font-semibold text-slate-800">Lightweight alignment viewer</div>
           <div className="text-xs text-slate-500">
-            Columns {start}–{end} · {rows.length} visible / {totalRecords} sequences · drag the bottom scrollbar horizontally
+            {collapseReferenceGaps
+              ? `Reference positions ${firstVisiblePosition ?? 0}–${lastVisiblePosition ?? 0}`
+              : `Alignment columns ${start}–${end}`}
+            {' · '}{rows.length} visible / {totalRecords} sequences · drag the bottom scrollbar horizontally
           </div>
           {referenceId && (
             <div className="mt-0.5 truncate text-[11px] text-indigo-700" title={referenceId}>
@@ -162,15 +191,15 @@ export default function AlignmentViewer({
             aria-checked={collapseReferenceGaps}
             disabled={!referenceSegment}
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={() => setCollapseReferenceGaps((value) => !value)}
+            onClick={() => onCollapseReferenceGapsChange(!collapseReferenceGaps)}
             title="Hide complete alignment columns where the designated reference sequence contains a gap"
           >
             <span
               aria-hidden="true"
-              className={`relative h-4 w-7 rounded-full transition-colors ${collapseReferenceGaps ? 'bg-indigo-600' : 'bg-slate-300'}`}
+              className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${collapseReferenceGaps ? 'bg-indigo-600' : 'bg-slate-300'}`}
             >
               <span
-                className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${collapseReferenceGaps ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+                className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${collapseReferenceGaps ? 'translate-x-3' : 'translate-x-0'}`}
               />
             </span>
             Collapse reference gaps
@@ -208,11 +237,13 @@ export default function AlignmentViewer({
             Sequence / position
           </div>
           {visibleColumns.map((column, visibleIndex) => {
-            const position = start + column;
-            const showLabel = visibleIndex === 0 || position % 10 === 0;
+            const position = collapseReferenceGaps
+              ? resolvedReferencePositions[column]
+              : start + column;
+            const showLabel = position != null && (visibleIndex === 0 || position % 10 === 0);
             return (
               <span
-                key={`position-${position}`}
+                key={`position-${column}`}
                 className="sticky top-0 z-20 flex h-7 w-4 items-end justify-center border-b border-slate-200 bg-slate-100 pb-1 font-mono text-[9px] text-slate-500"
               >
                 {showLabel && <span className="whitespace-nowrap">{position}</span>}
@@ -231,7 +262,7 @@ export default function AlignmentViewer({
                 key={`consensus-${column}`}
                 className="sticky top-7 z-10 flex h-6 w-4 items-center justify-center border-b border-r border-indigo-100 font-mono text-[10px] font-bold text-indigo-950 dark:text-indigo-100"
                 style={{ backgroundColor: `rgba(129, 140, 248, ${0.12 + conserved * 0.62})` }}
-                title={`Consensus at ${start + column}: ${residue}; conservation ${(conserved * 100).toFixed(1)}%`}
+                title={`Consensus at ${collapseReferenceGaps && resolvedReferencePositions[column] ? `reference position ${resolvedReferencePositions[column]} (alignment column ${start + column})` : `alignment column ${start + column}`}: ${residue}; conservation ${(conserved * 100).toFixed(1)}%`}
               >
                 {residue}
               </span>

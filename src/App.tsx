@@ -6,6 +6,7 @@ import {
   BookOpen,
   Box,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Database,
   FileText,
@@ -16,6 +17,7 @@ import {
   Moon,
   Network,
   Play,
+  RefreshCw,
   Search,
   Settings,
   Star,
@@ -89,6 +91,41 @@ const NetworkGraph = React.lazy(() => import('./NetworkGraph'));
 
 type View = 'dashboard' | 'reference' | 'hmm-build' | 'search-filter' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'prediction' | 'recommendation' | 'report';
 type BlastView = 'dashboard' | 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network' | 'prediction' | 'recommendation' | 'report';
+
+type PageNavigationItem<T extends string> = {
+  view: T;
+  label: string;
+};
+
+const HMM_PAGE_NAVIGATION: readonly PageNavigationItem<View>[] = [
+  { view: 'dashboard', label: 'Dashboard' },
+  { view: 'reference', label: 'Reference Input' },
+  { view: 'hmm-build', label: 'HMM Build' },
+  { view: 'search-filter', label: 'Search & Filter' },
+  { view: 'alignment', label: 'Alignment' },
+  { view: 'scoring', label: 'Scoring' },
+  { view: 'clustering', label: 'Clustering' },
+  { view: 'similarity', label: 'Similarity' },
+  { view: 'network', label: 'Similarity Network' },
+  { view: 'prediction', label: 'Property Prediction' },
+  { view: 'recommendation', label: 'Recommendation' },
+  { view: 'report', label: 'Task Report' },
+];
+
+const BLAST_PAGE_NAVIGATION: readonly PageNavigationItem<BlastView>[] = [
+  { view: 'dashboard', label: 'Dashboard' },
+  { view: 'reference', label: 'Reference Input' },
+  { view: 'blast-db', label: 'BLAST DB Setup' },
+  { view: 'blast-search', label: 'BLAST Search' },
+  { view: 'alignment', label: 'Alignment' },
+  { view: 'scoring', label: 'Scoring' },
+  { view: 'clustering', label: 'Clustering' },
+  { view: 'similarity', label: 'Similarity' },
+  { view: 'network', label: 'Similarity Network' },
+  { view: 'prediction', label: 'Property Prediction' },
+  { view: 'recommendation', label: 'Recommendation' },
+  { view: 'report', label: 'Task Report' },
+];
 type PipelineStepKey = 'reference' | 'hmm' | 'search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network-push' | 'recommendation';
 type BlastPipelineStepKey = 'reference' | 'blast-db' | 'blast-search' | 'alignment' | 'scoring' | 'clustering' | 'similarity' | 'network-push' | 'recommendation';
 type StepStatus = 'idle' | 'running' | 'success' | 'error';
@@ -99,6 +136,62 @@ type JobState = {
   message: string;
   error: string;
 };
+
+type ClusteringRunInfo = {
+  taskId?: string;
+  inputFasta: string;
+  outputFasta: string;
+  clusterFile: string;
+  inputCount: number;
+  outputCount: number;
+  deduplicatedCount: number;
+  clusters: number;
+};
+
+function restoreTaskClusteringRunInfo(
+  value: unknown,
+  taskId: string,
+  workDir: string,
+): ClusteringRunInfo | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<ClusteringRunInfo>;
+  const declaredTaskId = typeof raw.taskId === 'string' ? raw.taskId.trim() : '';
+  if (declaredTaskId && declaredTaskId !== taskId) return null;
+
+  const outputFasta = typeof raw.outputFasta === 'string' ? raw.outputFasta.trim() : '';
+  const clusterFile = typeof raw.clusterFile === 'string' ? raw.clusterFile.trim() : '';
+  const normalizedWorkDir = String(workDir || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  const isInsideTask = (filePath: string) => {
+    const normalizedPath = String(filePath || '').replace(/\\/g, '/');
+    return Boolean(normalizedWorkDir) && normalizedPath.startsWith(`${normalizedWorkDir}/`);
+  };
+  if (normalizedWorkDir && (!isInsideTask(outputFasta) || !isInsideTask(clusterFile))) return null;
+  if (!normalizedWorkDir && !declaredTaskId) return null;
+
+  const inputCount = Number(raw.inputCount);
+  const outputCount = Number(raw.outputCount);
+  const deduplicatedCount = Number(raw.deduplicatedCount);
+  const clusters = Number(raw.clusters);
+  if (
+    !outputFasta
+    || !clusterFile
+    || !Number.isFinite(inputCount)
+    || !Number.isFinite(outputCount)
+    || !Number.isFinite(deduplicatedCount)
+    || !Number.isFinite(clusters)
+  ) return null;
+
+  return {
+    taskId,
+    inputFasta: typeof raw.inputFasta === 'string' ? raw.inputFasta : '',
+    outputFasta,
+    clusterFile,
+    inputCount,
+    outputCount,
+    deduplicatedCount,
+    clusters,
+  };
+}
 
 type StepMetrics = {
   runs: number;
@@ -356,43 +449,16 @@ function defaultTaskReferenceFasta(_taskId: string) {
   return 'ref.fasta';
 }
 
-const peAaoScoringRules: ScoringRule[] = [
-  { pos: 36, allowed: ['G'], score: 1, label: 'M1_36_G' },
-  { pos: 38, allowed: ['G'], score: 1, label: 'M1_38_G' },
-  { pos: 41, allowed: ['G', 'A'], score: 1, label: 'M1_41_GA' },
-  { pos: 45, allowed: ['A'], score: 1, label: 'M1_45_A' },
-  { pos: 47, allowed: ['R'], score: 1, label: 'M1_47_R' },
-  { pos: 108, allowed: ['G', 'A'], score: 1, label: 'M2_108_GA' },
-  { pos: 109, allowed: ['R', 'K', 'Q', 'N'], score: 1, label: 'M2_109_RKQN' },
-  { pos: 111, allowed: ['L', 'V'], score: 1, label: 'M2_111_LV' },
-  { pos: 112, allowed: ['G'], score: 1, label: 'M2_112_G' },
-  { pos: 113, allowed: ['G'], score: 1, label: 'M2_113_G' },
-  { pos: 114, allowed: ['S', 'G', 'T'], score: 1, label: 'M2_114_SGT' },
-  { pos: 115, allowed: ['S', 'G', 'T'], score: 1, label: 'M2_115_SGT' },
-  { pos: 118, allowed: ['N', 'H'], score: 1, label: 'M2_118_NH' },
-  { pos: 295, allowed: ['V', 'I', 'L'], score: 1, label: 'M3_295_VIL' },
-  { pos: 299, allowed: ['A', 'G', 'S'], score: 1, label: 'M3_299_AGS' },
-  { pos: 300, allowed: ['G'], score: 1, label: 'M3_300_G' },
-  { pos: 304, allowed: ['S', 'T'], score: 1, label: 'M3_304_ST' },
-  { pos: 305, allowed: ['P', 'A'], score: 1, label: 'M3_305_PA' },
-  { pos: 308, allowed: ['L', 'I'], score: 1, label: 'M3_308_LI' },
-  { pos: 311, allowed: ['S'], score: 1, label: 'M3_311_S' },
-  { pos: 312, allowed: ['G'], score: 1, label: 'M3_312_G' },
-  { pos: 313, allowed: ['I', 'V'], score: 1, label: 'M3_313_IV' },
-  { pos: 314, allowed: ['G'], score: 1, label: 'M3_314_G' },
-  { pos: 340, allowed: ['H'], score: 2, label: 'M3_340_H' },
-  { pos: 529, allowed: ['H'], score: 4, label: 'CAT_529_H' },
-  { pos: 545, allowed: ['V', 'A'], score: 1, label: 'M4_545_VA' },
-  { pos: 547, allowed: ['D', 'G'], score: 1, label: 'M4_547_DG' },
-  { pos: 552, allowed: ['V', 'L', 'I'], score: 1, label: 'M4_552_VLI' },
-  { pos: 554, allowed: ['G'], score: 1, label: 'M4_554_G' },
-  { pos: 557, allowed: ['G', 'N', 'A', 'R'], score: 1, label: 'M4_557_GNAR' },
-  { pos: 559, allowed: ['R', 'K'], score: 1, label: 'M4_559_RK' },
-  { pos: 560, allowed: ['V', 'I'], score: 1, label: 'M4_560_VI' },
-  { pos: 564, allowed: ['S', 'A'], score: 1, label: 'M4_564_SA' },
-  { pos: 573, allowed: ['H'], score: 3, label: 'CAT_573_H' },
-  { pos: 583, allowed: ['K', 'E'], score: 2, label: 'M4_583_KE' },
-];
+const exampleScoringRule: ScoringRule = {
+  pos: 36,
+  allowed: ['G'],
+  score: 1,
+  label: 'Example_36_G',
+};
+
+function createExampleScoringRules(): ScoringRule[] {
+  return [{ ...exampleScoringRule, allowed: [...exampleScoringRule.allowed] }];
+}
 
 const legacyRuleLabels = new Set([
   'FAD_13_G',
@@ -408,10 +474,6 @@ const legacyRuleLabels = new Set([
   'PTS_662',
   'PTS_663',
 ]);
-
-function clonePeAaoScoringRules(): ScoringRule[] {
-  return peAaoScoringRules.map((r) => ({ ...r, allowed: [...r.allowed] }));
-}
 
 function looksLikeLegacyScoringRules(raw: unknown): boolean {
   if (!Array.isArray(raw) || raw.length !== 12) {
@@ -484,6 +546,108 @@ function parseAllowedInput(raw: string): string[] {
     ),
   );
 }
+
+type ScoringRuleEditorRowProps = {
+  rule: ScoringRule;
+  index: number;
+  onCommit: (index: number, patch: Partial<ScoringRule>) => void;
+  onDelete: (index: number) => void;
+};
+
+const ScoringRuleEditorRow = React.memo(function ScoringRuleEditorRow({
+  rule,
+  index,
+  onCommit,
+  onDelete,
+}: ScoringRuleEditorRowProps) {
+  const normalizedAllowed = rule.allowed.join(',');
+  const [posDraft, setPosDraft] = useState(String(rule.pos));
+  const [allowedDraft, setAllowedDraft] = useState(normalizedAllowed);
+  const [scoreDraft, setScoreDraft] = useState(String(rule.score));
+  const [labelDraft, setLabelDraft] = useState(rule.label);
+
+  // Keep local editor drafts in sync when a template/import/task switch replaces
+  // the rule. Keystrokes remain local, so editing one cell does not re-render the
+  // entire pipeline or restart an IME composition session.
+  useEffect(() => setPosDraft(String(rule.pos)), [rule.pos]);
+  useEffect(() => setAllowedDraft(normalizedAllowed), [normalizedAllowed]);
+  useEffect(() => setScoreDraft(String(rule.score)), [rule.score]);
+  useEffect(() => setLabelDraft(rule.label), [rule.label]);
+
+  const commitPos = () => {
+    const pos = Number(posDraft);
+    if (pos !== rule.pos) onCommit(index, { pos });
+  };
+
+  const commitAllowed = () => {
+    const allowed = parseAllowedInput(allowedDraft);
+    const normalized = allowed.join(',');
+    setAllowedDraft(normalized);
+    if (normalized !== normalizedAllowed) onCommit(index, { allowed });
+  };
+
+  const commitScore = () => {
+    const score = Number(scoreDraft);
+    if (score !== rule.score) onCommit(index, { score });
+  };
+
+  const commitLabel = () => {
+    if (labelDraft !== rule.label) onCommit(index, { label: labelDraft });
+  };
+
+  return (
+    <tr className="border-b last:border-b-0">
+      <td className="px-2 py-1.5">
+        <input
+          type="number"
+          className="w-24 p-1 border rounded"
+          value={posDraft}
+          aria-label={`Rule ${index + 1} position`}
+          onChange={(e) => setPosDraft(e.target.value)}
+          onBlur={commitPos}
+        />
+      </td>
+      <td className="px-2 py-1.5">
+        <input
+          className="w-full p-1 border rounded font-mono"
+          value={allowedDraft}
+          aria-label={`Rule ${index + 1} allowed residues`}
+          onChange={(e) => setAllowedDraft(e.target.value)}
+          onBlur={commitAllowed}
+        />
+      </td>
+      <td className="px-2 py-1.5">
+        <input
+          type="number"
+          step="0.1"
+          className="w-24 p-1 border rounded"
+          value={scoreDraft}
+          aria-label={`Rule ${index + 1} score`}
+          onChange={(e) => setScoreDraft(e.target.value)}
+          onBlur={commitScore}
+        />
+      </td>
+      <td className="px-2 py-1.5">
+        <input
+          className="w-full p-1 border rounded"
+          value={labelDraft}
+          aria-label={`Rule ${index + 1} label`}
+          onChange={(e) => setLabelDraft(e.target.value)}
+          onBlur={commitLabel}
+        />
+      </td>
+      <td className="px-2 py-1.5">
+        <button
+          type="button"
+          className="px-2 py-1 border rounded text-red-700 border-red-300 disabled:opacity-50"
+          onClick={() => onDelete(index)}
+        >
+          Delete
+        </button>
+      </td>
+    </tr>
+  );
+});
 
 const CHART_M = { top: 14, right: 20, bottom: 52, left: 64 } as const;
 function niceTickValues(min: number, max: number, maxTicks = 8): number[] {
@@ -859,8 +1023,9 @@ function PredictedMetricsPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastRunInfo, setLastRunInfo] = useState<{ count: number; recomputedCount: number } | null>(null);
+  const smilesStorageKey = `enzymeminer.smiles.${taskId}`;
   const [smiles, setSmiles] = useState(() => {
-    try { return localStorage.getItem('enzymeminer.smiles') || ''; } catch { return ''; }
+    try { return localStorage.getItem(smilesStorageKey) || ''; } catch { return ''; }
   });
   const [services, setServices] = useState<{ cataPro: boolean; solubility: boolean; ec: boolean; tm: boolean } | null>(null);
   const [predictProgress, setPredictProgress] = useState<PredictionProgress | null>(null);
@@ -889,10 +1054,11 @@ function PredictedMetricsPanel({
     }
   }, [taskId, smiles]);
 
-  // Persist SMILES to localStorage whenever it changes
+  // Keep the substrate scoped to this task. The panel is keyed by taskId, so
+  // switching tasks remounts it instead of carrying another task's input over.
   useEffect(() => {
-    try { localStorage.setItem('enzymeminer.smiles', smiles); } catch { /* ignore */ }
-  }, [smiles]);
+    try { localStorage.setItem(smilesStorageKey, smiles); } catch { /* ignore */ }
+  }, [smiles, smilesStorageKey]);
 
   // Checking the cache is read-only. Debounce SMILES edits so typing never
   // causes a burst of requests or a predictor run.
@@ -1418,7 +1584,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [retryIntervalMs, setRetryIntervalMs] = useState(900);
   const [metrics, setMetrics] = useState<Record<PipelineStepKey, StepMetrics>>(initialMetrics);
 
-  const [entrezEmail, setEntrezEmail] = useState(import.meta.env.VITE_DEFAULT_EMAIL || '');
+  const [entrezEmail, setEntrezEmail] = useState('');
   const [accessions, setAccessions] = useState('');
   const [referencePreview, setReferencePreview] = useState<Array<Record<string, string>>>([]);
   const [referencePage, setReferencePage] = useState(1);
@@ -1474,6 +1640,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [ebiDatabase, setEbiDatabase] = useState('refprot');
   const [ebiDatabaseOptions, setEbiDatabaseOptions] = useState<EbiHmmDatabase[]>(fallbackEbiHmmDatabases);
   const [ebiDatabaseMetadataStatus, setEbiDatabaseMetadataStatus] = useState<'idle' | 'loading' | 'live' | 'fallback'>('idle');
+  const ebiDatabaseRequestIdRef = useRef(0);
   const [ebiStageJobId, setEbiStageJobId] = useState('');
   const [ebiStagePageCount, setEbiStagePageCount] = useState<number | null>(null);
   const [ebiStageFailedPages, setEbiStageFailedPages] = useState<number | null>(null);
@@ -1535,13 +1702,20 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [refId, setRefId] = useState('');
   const [threshold, setThreshold] = useState(33.6);
   const [autoScoreFromFiltered, setAutoScoreFromFiltered] = useState(false);
-  const [scoringRules, setScoringRules] = useState<ScoringRule[]>([]);
+  const [scoringRules, setScoringRules] = useState<ScoringRule[]>(createExampleScoringRules);
   const [scoringPositionMode, setScoringPositionMode] = useState<ScoringPositionMode>('pre');
   const [preAlignmentAnchor, setPreAlignmentAnchor] = useState<PreAlignmentAnchor>('first');
   const [scoringRulesError, setScoringRulesError] = useState('');
   const [scoringRulesSuccess, setScoringRulesSuccess] = useState('');
-  const [scoringAllowedDrafts, setScoringAllowedDrafts] = useState<Record<number, string>>({});
   const rulesImportRef = useRef<HTMLInputElement | null>(null);
+  const updateScoringRule = useCallback((index: number, patch: Partial<ScoringRule>) => {
+    setScoringRules((prev) => prev.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
+    setScoringRulesSuccess('');
+  }, []);
+  const deleteScoringRule = useCallback((index: number) => {
+    setScoringRules((prev) => prev.filter((_, i) => i !== index));
+    setScoringRulesSuccess('');
+  }, []);
   const [scoringRows, setScoringRows] = useState<Array<Record<string, string>>>([]);
   const [scoringRunInfo, setScoringRunInfo] = useState<{
     csv?: string;
@@ -1576,21 +1750,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [alignmentPreviewConservation, setAlignmentPreviewConservation] = useState<number[]>([]);
   const [alignmentPreviewReferenceId, setAlignmentPreviewReferenceId] = useState('');
   const [alignmentPreviewReferenceSegment, setAlignmentPreviewReferenceSegment] = useState('');
-  const [alignmentPreviewColumnsTruncated, setAlignmentPreviewColumnsTruncated] = useState(false);
-  const [alignmentPreviewMaxColumns, setAlignmentPreviewMaxColumns] = useState(240);
+  const [alignmentPreviewReferencePositions, setAlignmentPreviewReferencePositions] = useState<Array<number | null>>([]);
+  const [alignmentCollapseReferenceGaps, setAlignmentCollapseReferenceGaps] = useState(true);
 
   const [candidateFasta, setCandidateFasta] = useState('');
   const [clusterIdentity, setClusterIdentity] = useState(0.85);
   const [clusterWordSize, setClusterWordSize] = useState(5);
-  const [clusteringRunInfo, setClusteringRunInfo] = useState<{
-    inputFasta: string;
-    outputFasta: string;
-    clusterFile: string;
-    inputCount: number;
-    outputCount: number;
-    deduplicatedCount: number;
-    clusters: number;
-  } | null>(null);
+  const [clusteringRunInfo, setClusteringRunInfo] = useState<ClusteringRunInfo | null>(null);
 
   const [networkStats, setNetworkStats] = useState({ nodes: 0, edges: 0 });
   const [cytoBaseUrl, setCytoBaseUrl] = useState('http://localhost:1234/v1');
@@ -1652,44 +1818,43 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     [ebiDatabase, ebiDatabaseOptions],
   );
 
+  const refreshEbiDatabaseOptions = useCallback(async (forceRefresh = false) => {
+    const requestId = ++ebiDatabaseRequestIdRef.current;
+    setEbiDatabaseMetadataStatus('loading');
+    try {
+      const data = await fetchEbiHmmDatabases(forceRefresh);
+      if (requestId !== ebiDatabaseRequestIdRef.current) return;
+      const databases = Array.isArray(data.databases)
+        ? data.databases.filter((entry) => entry.type === 'seq' && entry.status === 'enabled' && entry.id)
+        : [];
+      if (databases.length === 0) {
+        throw new Error('No enabled EBI HMMER sequence databases returned');
+      }
+      setEbiDatabaseOptions(databases);
+      setEbiDatabase((current) => (
+        databases.some((entry) => entry.id === current)
+          ? current
+          : (databases.find((entry) => entry.id === 'refprot')?.id || databases[0].id)
+      ));
+      setEbiDatabaseMetadataStatus('live');
+    } catch {
+      if (requestId !== ebiDatabaseRequestIdRef.current) return;
+      setEbiDatabaseOptions(fallbackEbiHmmDatabases);
+      setEbiDatabase((current) => (
+        fallbackEbiHmmDatabases.some((entry) => entry.id === current) ? current : 'refprot'
+      ));
+      setEbiDatabaseMetadataStatus('fallback');
+    }
+  }, []);
+
   useEffect(() => {
     if (searchMode !== 'ebi') {
+      ebiDatabaseRequestIdRef.current += 1;
       setEbiDatabaseMetadataStatus('idle');
       return;
     }
-
-    let cancelled = false;
-    setEbiDatabaseMetadataStatus('loading');
-    void fetchEbiHmmDatabases()
-      .then((data) => {
-        if (cancelled) return;
-        const databases = Array.isArray(data.databases)
-          ? data.databases.filter((entry) => entry.type === 'seq' && entry.status === 'enabled' && entry.id)
-          : [];
-        if (databases.length === 0) {
-          throw new Error('No enabled EBI HMMER sequence databases returned');
-        }
-        setEbiDatabaseOptions(databases);
-        setEbiDatabase((current) => (
-          databases.some((entry) => entry.id === current)
-            ? current
-            : (databases.find((entry) => entry.id === 'refprot')?.id || databases[0].id)
-        ));
-        setEbiDatabaseMetadataStatus('live');
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setEbiDatabaseOptions(fallbackEbiHmmDatabases);
-        setEbiDatabase((current) => (
-          fallbackEbiHmmDatabases.some((entry) => entry.id === current) ? current : 'refprot'
-        ));
-        setEbiDatabaseMetadataStatus('fallback');
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [searchMode]);
+    void refreshEbiDatabaseOptions();
+  }, [searchMode, refreshEbiDatabaseOptions]);
 
   const getDerivedEbiSearchStepStatus = (): StepStatus => {
     const { submit, download, enrich } = ebiSubStepState;
@@ -1782,7 +1947,8 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewConservation([]);
     setAlignmentPreviewReferenceId('');
     setAlignmentPreviewReferenceSegment('');
-    setAlignmentPreviewColumnsTruncated(false);
+    setAlignmentPreviewReferencePositions([]);
+    setAlignmentCollapseReferenceGaps(true);
     setNetworkStats({ nodes: 0, edges: 0 });
     setConsistencyStats(null);
     setRuntimeTask('idle');
@@ -1798,6 +1964,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setEbiSubStepState(initialEbiSubStepState);
     setReferenceFastaPath('');
     setCandidateFasta('');
+    setClusteringRunInfo(null);
     setRefId('');
     setNetworkSourceFasta('scored_passed.fasta');
     setNetworkReferenceFasta(defaultTaskReferenceFasta(selectedTaskId));
@@ -1806,6 +1973,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setSearchPage(1);
     setSearchTotalPages(1);
     setSearchSource('hits_all');
+    setEntrezEmail('');
     setAccessions('');
     // Reset parameters to defaults; hydration will restore saved values
     setScoreMin(200);
@@ -1839,8 +2007,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setCytoApplyStyle(true);
     setThresholdPreview(null);
     setCytoPushInfo(null);
-    setScoringRules([]);
-    setScoringAllowedDrafts({});
+    setScoringRules(createExampleScoringRules());
     setScoringRulesError('');
     setScoringRulesSuccess('');
     setSelectionBoxes([]);
@@ -1860,8 +2027,9 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       try {
         const data = await loadPipelineState('hmmer');
         const state = data.exists && data.state && typeof data.state === 'object' ? data.state : {};
-        if (cancelled) {
-          return;
+        if (cancelled) return;
+        if (data.taskId !== selectedTaskId) {
+          throw new Error(`Task state response mismatch: expected ${selectedTaskId}, received ${data.taskId}`);
         }
 
         if (state.currentView) setCurrentView(state.currentView as View);
@@ -1918,7 +2086,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         // Clustering parameters
         if (typeof state.clusterIdentity === 'number' && Number.isFinite(state.clusterIdentity)) setClusterIdentity(state.clusterIdentity);
         if (typeof state.clusterWordSize === 'number' && Number.isFinite(state.clusterWordSize)) setClusterWordSize(state.clusterWordSize);
-        if (state.clusteringRunInfo !== undefined) setClusteringRunInfo(state.clusteringRunInfo);
 
         // Network / Cytoscape parameters
         if (typeof state.networkPairwiseThresholdPct === 'number' && Number.isFinite(state.networkPairwiseThresholdPct)) setNetworkPairwiseThresholdPct(state.networkPairwiseThresholdPct);
@@ -1955,7 +2122,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         let artifactWorkDir = '';
         try {
           const artRes = await loadTaskArtifacts();
-          if (!cancelled) {
+          if (!cancelled && artRes.taskId === selectedTaskId) {
             artifacts = artRes.artifacts || {};
             artifactWorkDir = artRes.workDir || '';
           }
@@ -1963,6 +2130,11 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
           console.warn('[hydrate] loadTaskArtifacts failed:', artErr);
         }
         if (cancelled) return;
+        setClusteringRunInfo(restoreTaskClusteringRunInfo(
+          state.clusteringRunInfo,
+          selectedTaskId,
+          artifactWorkDir,
+        ));
 
         // Step 1: ref.csv → referencePreview
         if (artifacts['ref.csv']?.exists) {
@@ -2480,6 +2652,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     const created = data.task?.id;
     await refreshTasks();
     if (created) {
+      setEntrezEmail('');
       setSelectedTaskId(created);
     }
     setNewTaskId('');
@@ -2618,7 +2791,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     }
     setEbiSubStepState((prev) => ({ ...prev, submit: 'success', download: 'running' }));
     try {
-      let data = await downloadEbiHmmSearchResults(ebiStageJobId);
+      let data = await downloadEbiHmmSearchResults(ebiStageJobId, ebiDatabase);
 
       let retriesLeft = 3;
       while (data.failedPageNumbers && data.failedPageNumbers.length > 0 && retriesLeft > 0) {
@@ -2654,10 +2827,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     if (!selectedTaskId) return;
     try {
       setEbiSubStepState((prev) => ({ ...prev, submit: 'success', download: 'success', enrich: 'running' }));
-      setJob({ loading: true, message: 'Filling in UniProt data (fetching large amounts of sequence info, running concurrently on the backend)...', error: '' });
+      setJob({ loading: true, message: 'Fetching full-length sequences from EBI and enriching available UniProt records...', error: '' });
       const res = await fillUniProt(selectedTaskId);
       if (res.ok) {
-        setJob({ loading: true, message: 'UniProt fetch complete, running length consistency check...', error: '' });
+        setJob({ loading: true, message: 'Sequence fetch complete, running length consistency check...', error: '' });
         const consistency = await runSearchConsistencyCheck('hits_all');
         setConsistencyStats({
           total: consistency.total,
@@ -2690,7 +2863,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     if (ebiSubStepState.submit !== 'success') return 'submit';
     if (ebiSubStepState.download !== 'success') return 'download';
     if (ebiSubStepState.enrich !== 'success') return 'enrich';
-    return 'enrich';
+    return 'submit';
   };
 
   const runNextEbiSubStep = async () => {
@@ -2854,8 +3027,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
     const preview = await loadScoringAlignmentPreview({
       alignment: data.alignment,
-      start: alignmentPreviewStart,
-      end: alignmentPreviewEnd,
+      ...(alignmentCollapseReferenceGaps
+        ? {}
+        : {
+            start: alignmentPreviewStart,
+            end: alignmentPreviewEnd,
+          }),
+      collapseReferenceGaps: alignmentCollapseReferenceGaps,
       limit: alignmentPreviewLimit,
       offset: 0,
       referenceId: data.referenceId || refId || undefined,
@@ -2864,20 +3042,27 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewOffset(Number(preview.offset || 0));
     setAlignmentPreviewTotalRecords(Number(preview.totalRecords || 0));
     setAlignmentPreviewLength(Number(preview.alignmentLength || 0));
-    setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
+    setAlignmentPreviewActualStart(Number(preview.start || 1));
     setAlignmentPreviewConsensus(preview.consensus || '');
     setAlignmentPreviewConservation(preview.conservation || []);
     setAlignmentPreviewReferenceId(preview.referenceId || '');
     setAlignmentPreviewReferenceSegment(preview.referenceSegment || '');
-    setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
-    setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
+    setAlignmentPreviewReferencePositions(preview.referencePositions || []);
   };
 
-  const loadAlignmentPreviewPage = async (nextOffset: number) => {
+  const loadAlignmentPreviewPage = async (
+    nextOffset: number,
+    collapseReferenceGaps = alignmentCollapseReferenceGaps,
+  ) => {
     const preview = await loadScoringAlignmentPreview({
       alignment: alignmentPath,
-      start: alignmentPreviewStart,
-      end: alignmentPreviewEnd,
+      ...(collapseReferenceGaps
+        ? {}
+        : {
+            start: alignmentPreviewStart,
+            end: alignmentPreviewEnd,
+          }),
+      collapseReferenceGaps,
       limit: alignmentPreviewLimit,
       offset: Math.max(0, nextOffset),
       referenceId: alignmentPreviewReferenceId || refId || undefined,
@@ -2886,13 +3071,12 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewOffset(Number(preview.offset || 0));
     setAlignmentPreviewTotalRecords(Number(preview.totalRecords || 0));
     setAlignmentPreviewLength(Number(preview.alignmentLength || 0));
-    setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
+    setAlignmentPreviewActualStart(Number(preview.start || 1));
     setAlignmentPreviewConsensus(preview.consensus || '');
     setAlignmentPreviewConservation(preview.conservation || []);
     setAlignmentPreviewReferenceId(preview.referenceId || '');
     setAlignmentPreviewReferenceSegment(preview.referenceSegment || '');
-    setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
-    setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
+    setAlignmentPreviewReferencePositions(preview.referencePositions || []);
   };
 
   const downloadAlignmentFasta = async () => {
@@ -2914,6 +3098,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     }
     setNetworkStats({ nodes: 0, edges: 0 });
     setClusteringRunInfo({
+      taskId: selectedTaskId,
       inputFasta: preferredInput,
       outputFasta: data.outputFasta,
       clusterFile: data.clusterFile,
@@ -3187,6 +3372,11 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             <span>Pipeline</span>
             <ChevronRight className="w-4 h-4 mx-1" />
             <span className="font-medium text-slate-900 capitalize">{currentView.replace('-', ' ')}</span>
+            <AdjacentPageNavigation<View>
+              currentView={currentView}
+              pages={HMM_PAGE_NAVIGATION}
+              onNavigate={setCurrentView}
+            />
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -3554,7 +3744,19 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   </div>
                   {searchMode === 'ebi' ? (
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">EBI Database</label>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <label className="block text-xs text-slate-500">EBI Database</label>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={ebiDatabaseMetadataStatus === 'loading'}
+                          onClick={() => void refreshEbiDatabaseOptions(true)}
+                          title="Refresh EBI Database list"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${ebiDatabaseMetadataStatus === 'loading' ? 'animate-spin' : ''}`} />
+                          Refresh
+                        </button>
+                      </div>
                       <select
                         className="w-full p-2 border rounded bg-white text-sm"
                         value={ebiDatabase}
@@ -3604,7 +3806,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         {[
                           { key: 'submit' as EbiSubStepKey, title: '1. Submit task to server', desc: ebiStageJobId ? `Job ID: ${ebiStageJobId}` : 'Generate and submit EBI job' },
                           { key: 'download' as EbiSubStepKey, title: '2. Download HMMER results', desc: allHmmRows.length > 0 ? `Loaded ${allHmmRows.length}` : 'Paginated download and parse into hits_all' },
-                          { key: 'enrich' as EbiSubStepKey, title: '3. Fetch lengths & consistency fill', desc: consistencyStats ? `filled=${consistencyStats.filled}` : 'Run length consistency check after filling UniProt' },
+                          { key: 'enrich' as EbiSubStepKey, title: '3. Fetch sequences & consistency', desc: consistencyStats ? `filled=${consistencyStats.filled}` : 'Fetch EBI full-length sequences, then enrich available UniProt records' },
                         ].map((item, idx, arr) => {
                           const status = ebiSubStepState[item.key];
                           const isDone = status === 'success';
@@ -3650,7 +3852,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           const labelMap: Record<EbiSubStepKey, string> = {
                             submit: 'Stage 1: Submit task to server',
                             download: 'Stage 2: Download HMMER results',
-                            enrich: 'Stage 3: Fetch lengths & consistency fill',
+                            enrich: 'Stage 3: Fetch sequences & consistency',
                           };
                           const stepForProgress: PipelineStepKey | undefined = next === 'enrich' ? 'search' : undefined;
                           runAction(labelMap[next], runNextEbiSubStep, stepForProgress, undefined, `${labelMap[next]} Done`);
@@ -3658,8 +3860,10 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       >
                         <Play className="inline w-4 h-4 mr-1" />
                         {ebiSubStepState.submit === 'success' && ebiSubStepState.download === 'success' && ebiSubStepState.enrich === 'success'
-                          ? 'All three stages completed (stage 3 can be re-run)'
-                          : `Continue to next stage: ${getNextEbiSubStep() === 'submit' ? 'Submit task' : getNextEbiSubStep() === 'download' ? 'Download results' : 'Fetch lengths & fill'}`}
+                          ? 'All three stages completed (restart from stage 1)'
+                          : ebiSubStepState.submit === 'error'
+                            ? 'Retry stage 1: Submit task'
+                            : `Continue to next stage: ${getNextEbiSubStep() === 'submit' ? 'Submit task' : getNextEbiSubStep() === 'download' ? 'Download results' : 'Fetch sequences & fill'}`}
                       </button>
                     </div>
                   ) : (
@@ -4128,9 +4332,13 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 )}
 
                 <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(8rem,0.7fr)_minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(15rem,auto)] xl:items-end">
-                    <InputNum label="Column Start" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
-                    <InputNum label="Column End" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
+                  <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 xl:items-end ${alignmentCollapseReferenceGaps ? 'xl:grid-cols-[minmax(0,2fr)_minmax(15rem,auto)]' : 'xl:grid-cols-[minmax(8rem,0.7fr)_minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(15rem,auto)]'}`}>
+                    {!alignmentCollapseReferenceGaps && (
+                      <>
+                        <InputNum label="Column Start" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
+                        <InputNum label="Column End" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
+                      </>
+                    )}
                     <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2 xl:col-span-1">
                       <div className="font-medium text-slate-700">Alignment file</div>
                       <div className="mt-1 break-all font-mono">{alignmentPath || '(none)'}</div>
@@ -4153,7 +4361,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         Download MAFFT FASTA
                       </button>
                     </div>
-                    <div className="text-xs text-slate-500 sm:col-span-2 xl:col-span-4 xl:text-right">
+                    <div className={`text-xs text-slate-500 sm:col-span-2 xl:text-right ${alignmentCollapseReferenceGaps ? 'xl:col-span-2' : 'xl:col-span-4'}`}>
                       Rows: {alignmentPreviewRows.length} / {alignmentPreviewTotalRecords} · Alignment length: {alignmentPreviewLength}
                     </div>
                   </div>
@@ -4182,12 +4390,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     </span>
                   </div>
 
-                  {alignmentPreviewColumnsTruncated && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                      To keep the browser responsive, one preview window displays at most {alignmentPreviewMaxColumns} alignment columns. Change Column Start and refresh to inspect the next region.
-                    </div>
-                  )}
-
                   <AlignmentViewer
                     key={`hmmer-alignment-${selectedTaskId}-${alignmentPath}`}
                     rows={alignmentPreviewRows}
@@ -4196,8 +4398,21 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     totalRecords={alignmentPreviewTotalRecords}
                     referenceId={alignmentPreviewReferenceId}
                     referenceSegment={alignmentPreviewReferenceSegment}
+                    referencePositions={alignmentPreviewReferencePositions}
                     consensus={alignmentPreviewConsensus}
                     conservation={alignmentPreviewConservation}
+                    collapseReferenceGaps={alignmentCollapseReferenceGaps}
+                    onCollapseReferenceGapsChange={(nextValue) => {
+                      setAlignmentCollapseReferenceGaps(nextValue);
+                      if (alignmentPath) {
+                        void runAction(
+                          nextValue ? 'Show all reference positions' : 'Show alignment column window',
+                          async () => {
+                            await loadAlignmentPreviewPage(0, nextValue);
+                          },
+                        );
+                      }
+                    }}
                   />
                 </div>
                 {renderTailPanels('h-28')}
@@ -4291,91 +4506,19 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       </thead>
                       <tbody>
                         {scoringRules.map((rule, idx) => (
-                          <tr key={`${rule.label}-${idx}`} className="border-b last:border-b-0">
-                            <td className="px-2 py-1.5">
-                              <input
-                                type="number"
-                                className="w-24 p-1 border rounded"
-                                value={rule.pos}
-                                onChange={(e) => {
-                                  const pos = Number(e.target.value);
-                                  setScoringRules((prev) => prev.map((r, i) => (i === idx ? { ...r, pos } : r)));
-                                  setScoringRulesSuccess('');
-                                }}
-                              />
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <input
-                                className="w-full p-1 border rounded font-mono"
-                                value={scoringAllowedDrafts[idx] ?? rule.allowed.join(',')}
-                                onChange={(e) => {
-                                  const raw = e.target.value;
-                                  const allowed = parseAllowedInput(raw);
-                                  setScoringAllowedDrafts((prev) => ({ ...prev, [idx]: raw }));
-                                  setScoringRules((prev) => prev.map((r, i) => (i === idx ? { ...r, allowed } : r)));
-                                  setScoringRulesSuccess('');
-                                }}
-                                onBlur={(e) => {
-                                  const normalized = parseAllowedInput(e.target.value).join(',');
-                                  setScoringAllowedDrafts((prev) => ({ ...prev, [idx]: normalized }));
-                                }}
-                              />
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <input
-                                type="number"
-                                step="0.1"
-                                className="w-24 p-1 border rounded"
-                                value={rule.score}
-                                onChange={(e) => {
-                                  const score = Number(e.target.value);
-                                  setScoringRules((prev) => prev.map((r, i) => (i === idx ? { ...r, score } : r)));
-                                  setScoringRulesSuccess('');
-                                }}
-                              />
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <input
-                                className="w-full p-1 border rounded"
-                                value={rule.label}
-                                onChange={(e) => {
-                                  const label = e.target.value;
-                                  setScoringRules((prev) => prev.map((r, i) => (i === idx ? { ...r, label } : r)));
-                                  setScoringRulesSuccess('');
-                                }}
-                              />
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <button
-                                className="px-2 py-1 border rounded text-red-700 border-red-300 disabled:opacity-50"
-                                onClick={() => {
-                                  setScoringRules((prev) => prev.filter((_, i) => i !== idx));
-                                  setScoringAllowedDrafts({});
-                                  setScoringRulesSuccess('');
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </td>
-                          </tr>
+                          <ScoringRuleEditorRow
+                            key={idx}
+                            rule={rule}
+                            index={idx}
+                            onCommit={updateScoringRule}
+                            onDelete={deleteScoringRule}
+                          />
                         ))}
                       </tbody>
                     </table>
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      className="px-3 py-1.5 rounded border border-emerald-300 text-sm text-emerald-700 hover:bg-emerald-50"
-                      onClick={() => {
-                        setScoringRules(clonePeAaoScoringRules());
-                        setScoringAllowedDrafts({});
-                        setScoringRulesError('');
-                        const maxScore = peAaoScoringRules.reduce((s, r) => s + (r.score ?? 0), 0);
-                        setScoringRulesSuccess(`Applied PeAAO rule template: ${peAaoScoringRules.length} rules, max score ${maxScore}`);
-                      }}
-                    >
-                      Apply PeAAO Rule Template (Overwrite)
-                    </button>
                     <button
                       className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
                       onClick={() => {
@@ -4388,7 +4531,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                             label: `rule_${prev.length + 1}`,
                           },
                         ]);
-                        setScoringAllowedDrafts({});
                         setScoringRulesSuccess('');
                       }}
                     >
@@ -4424,7 +4566,6 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           const text = await file.text();
                           const parsed = parseScoringRulesInput(JSON.parse(text));
                           setScoringRules(parsed);
-                          setScoringAllowedDrafts({});
                           setScoringRulesError('');
                           const maxScore = parsed.reduce((s, r) => s + (r.score ?? 0), 0);
                           setScoringRulesSuccess(`Import successful, ${parsed.length} rules, max score ${maxScore}`);
@@ -4942,6 +5083,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   <p className="mt-1 text-sm text-slate-500">Run, reuse, and review cached biochemical property predictions before filtering or ranking candidates.</p>
                 </div>
                 <PredictedMetricsPanel
+                  key={selectedTaskId}
                   taskId={selectedTaskId}
                   subWeights={predictedSubWeights}
                   onSubWeightsChange={setPredictedSubWeights}
@@ -5187,7 +5329,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [metrics, setMetrics] = useState<Record<BlastPipelineStepKey, StepMetrics>>(initialBlastMetrics);
 
   // Step 1: Reference
-  const [entrezEmail, setEntrezEmail] = useState(import.meta.env.VITE_DEFAULT_EMAIL || '');
+  const [entrezEmail, setEntrezEmail] = useState('');
   const [accessions, setAccessions] = useState('');
   const [referencePreview, setReferencePreview] = useState<Array<Record<string, string>>>([]);
   const [referencePage, setReferencePage] = useState(1);
@@ -5246,13 +5388,20 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [refId, setRefId] = useState('');
   const [threshold, setThreshold] = useState(33.6);
   const [autoScoreFromFiltered, setAutoScoreFromFiltered] = useState(false);
-  const [scoringRules, setScoringRules] = useState<ScoringRule[]>([]);
+  const [scoringRules, setScoringRules] = useState<ScoringRule[]>(createExampleScoringRules);
   const [scoringPositionMode, setScoringPositionMode] = useState<ScoringPositionMode>('pre');
   const [preAlignmentAnchor, setPreAlignmentAnchor] = useState<PreAlignmentAnchor>('first');
   const [scoringRulesError, setScoringRulesError] = useState('');
   const [scoringRulesSuccess, setScoringRulesSuccess] = useState('');
-  const [scoringAllowedDrafts, setScoringAllowedDrafts] = useState<Record<number, string>>({});
   const rulesImportRef = useRef<HTMLInputElement | null>(null);
+  const updateScoringRule = useCallback((index: number, patch: Partial<ScoringRule>) => {
+    setScoringRules((prev) => prev.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)));
+    setScoringRulesSuccess('');
+  }, []);
+  const deleteScoringRule = useCallback((index: number) => {
+    setScoringRules((prev) => prev.filter((_, i) => i !== index));
+    setScoringRulesSuccess('');
+  }, []);
   const [scoringRows, setScoringRows] = useState<Array<Record<string, string>>>([]);
   const [scoringRunInfo, setScoringRunInfo] = useState<{
     csv?: string;
@@ -5287,21 +5436,13 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
   const [alignmentPreviewConservation, setAlignmentPreviewConservation] = useState<number[]>([]);
   const [alignmentPreviewReferenceId, setAlignmentPreviewReferenceId] = useState('');
   const [alignmentPreviewReferenceSegment, setAlignmentPreviewReferenceSegment] = useState('');
-  const [alignmentPreviewColumnsTruncated, setAlignmentPreviewColumnsTruncated] = useState(false);
-  const [alignmentPreviewMaxColumns, setAlignmentPreviewMaxColumns] = useState(240);
+  const [alignmentPreviewReferencePositions, setAlignmentPreviewReferencePositions] = useState<Array<number | null>>([]);
+  const [alignmentCollapseReferenceGaps, setAlignmentCollapseReferenceGaps] = useState(true);
 
   const [candidateFasta, setCandidateFasta] = useState('');
   const [clusterIdentity, setClusterIdentity] = useState(0.85);
   const [clusterWordSize, setClusterWordSize] = useState(5);
-  const [clusteringRunInfo, setClusteringRunInfo] = useState<{
-    inputFasta: string;
-    outputFasta: string;
-    clusterFile: string;
-    inputCount: number;
-    outputCount: number;
-    deduplicatedCount: number;
-    clusters: number;
-  } | null>(null);
+  const [clusteringRunInfo, setClusteringRunInfo] = useState<ClusteringRunInfo | null>(null);
 
   const [networkStats, setNetworkStats] = useState({ nodes: 0, edges: 0 });
   const [cytoBaseUrl, setCytoBaseUrl] = useState('http://localhost:1234/v1');
@@ -5390,7 +5531,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewConservation([]);
     setAlignmentPreviewReferenceId('');
     setAlignmentPreviewReferenceSegment('');
-    setAlignmentPreviewColumnsTruncated(false);
+    setAlignmentPreviewReferencePositions([]);
+    setAlignmentCollapseReferenceGaps(true);
     setNetworkStats({ nodes: 0, edges: 0 });
     setRuntimeTask('idle');
     setRuntimeMeta({});
@@ -5408,6 +5550,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setBlastSearchPage(1);
     setBlastSearchTotalPages(1);
     setBlastSearchSource('blast_hits_all');
+    setEntrezEmail('');
     setAccessions('');
 
     let cancelled = false;
@@ -5419,6 +5562,9 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         const data = await loadPipelineState('blast');
         const state = data.exists && data.state && typeof data.state === 'object' ? data.state : {};
         if (cancelled) return;
+        if (data.taskId !== selectedTaskId) {
+          throw new Error(`Task state response mismatch: expected ${selectedTaskId}, received ${data.taskId}`);
+        }
 
         if (state.blastCurrentView) setCurrentView(state.blastCurrentView as BlastView);
         if (state.blastStepState && typeof state.blastStepState === 'object') {
@@ -5462,7 +5608,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
         if (typeof state.preAlignmentAnchor === 'string') setPreAlignmentAnchor(state.preAlignmentAnchor as PreAlignmentAnchor);
         if (typeof state.clusterIdentity === 'number') setClusterIdentity(state.clusterIdentity);
         if (typeof state.clusterWordSize === 'number') setClusterWordSize(state.clusterWordSize);
-        if (state.clusteringRunInfo !== undefined) setClusteringRunInfo(state.clusteringRunInfo);
         if (typeof state.networkPairwiseThresholdPct === 'number') setNetworkPairwiseThresholdPct(state.networkPairwiseThresholdPct);
         if (typeof state.networkIncludeReferenceLinks === 'boolean') setNetworkIncludeReferenceLinks(state.networkIncludeReferenceLinks);
         if (typeof state.networkSimilarityMethod === 'string') setNetworkSimilarityMethod(state.networkSimilarityMethod as 'needleman-wunsch' | 'smith-waterman' | 'mmseqs2');
@@ -5491,11 +5636,20 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
         // Auto-load artifacts
         let artifacts: Record<string, any> = {};
+        let artifactWorkDir = '';
         try {
           const artRes = await loadTaskArtifacts();
-          if (!cancelled) artifacts = artRes.artifacts || {};
+          if (!cancelled && artRes.taskId === selectedTaskId) {
+            artifacts = artRes.artifacts || {};
+            artifactWorkDir = artRes.workDir || '';
+          }
         } catch { /* ignore */ }
         if (cancelled) return;
+        setClusteringRunInfo(restoreTaskClusteringRunInfo(
+          state.clusteringRunInfo,
+          selectedTaskId,
+          artifactWorkDir,
+        ));
 
         if (artifacts['ref.csv']?.exists) {
           try {
@@ -5503,9 +5657,8 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             if (!cancelled && refData.exists && refData.preview?.rows?.length) setReferencePreview(refData.preview.rows);
           } catch { /* ignore */ }
         }
-        if (artifacts['ref.fasta']?.exists) {
-          const artRes = await loadTaskArtifacts();
-          if (artRes.workDir && !state.referenceFastaPath) setReferenceFastaPath(artRes.workDir + '/ref.fasta');
+        if (artifacts['ref.fasta']?.exists && artifactWorkDir && !state.referenceFastaPath) {
+          setReferenceFastaPath(artifactWorkDir + '/ref.fasta');
         }
 
         // Load BLAST hits if present
@@ -5817,8 +5970,13 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
 
     const preview = await loadScoringAlignmentPreview({
       alignment: data.alignment,
-      start: alignmentPreviewStart,
-      end: alignmentPreviewEnd,
+      ...(alignmentCollapseReferenceGaps
+        ? {}
+        : {
+            start: alignmentPreviewStart,
+            end: alignmentPreviewEnd,
+          }),
+      collapseReferenceGaps: alignmentCollapseReferenceGaps,
       limit: alignmentPreviewLimit,
       offset: 0,
       referenceId: data.referenceId || refId || undefined,
@@ -5827,13 +5985,12 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewOffset(Number(preview.offset || 0));
     setAlignmentPreviewTotalRecords(Number(preview.totalRecords || 0));
     setAlignmentPreviewLength(Number(preview.alignmentLength || 0));
-    setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
+    setAlignmentPreviewActualStart(Number(preview.start || 1));
     setAlignmentPreviewConsensus(preview.consensus || '');
     setAlignmentPreviewConservation(preview.conservation || []);
     setAlignmentPreviewReferenceId(preview.referenceId || '');
     setAlignmentPreviewReferenceSegment(preview.referenceSegment || '');
-    setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
-    setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
+    setAlignmentPreviewReferencePositions(preview.referencePositions || []);
   }
 
   async function runScoringStep() {
@@ -5899,6 +6056,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setNetworkSourceFasta(data.outputFasta);
     setNetworkStats({ nodes: 0, edges: 0 });
     setClusteringRunInfo({
+      taskId: selectedTaskId,
       inputFasta: input,
       outputFasta: data.outputFasta,
       clusterFile: data.clusterFile,
@@ -5974,6 +6132,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     const data = await createTask(newTaskId || undefined, undefined, 'blast');
     setNewTaskId('');
     await refreshTasks();
+    setEntrezEmail('');
     setSelectedTaskId(data.task.id);
   }
 
@@ -5991,11 +6150,19 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     await refreshTasks();
   }
 
-  const loadAlignmentPreviewPage = async (nextOffset: number) => {
+  const loadAlignmentPreviewPage = async (
+    nextOffset: number,
+    collapseReferenceGaps = alignmentCollapseReferenceGaps,
+  ) => {
     const preview = await loadScoringAlignmentPreview({
       alignment: alignmentPath,
-      start: alignmentPreviewStart,
-      end: alignmentPreviewEnd,
+      ...(collapseReferenceGaps
+        ? {}
+        : {
+            start: alignmentPreviewStart,
+            end: alignmentPreviewEnd,
+          }),
+      collapseReferenceGaps,
       limit: alignmentPreviewLimit,
       offset: Math.max(0, nextOffset),
       referenceId: alignmentPreviewReferenceId || refId || undefined,
@@ -6004,13 +6171,12 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     setAlignmentPreviewOffset(Number(preview.offset || 0));
     setAlignmentPreviewTotalRecords(Number(preview.totalRecords || 0));
     setAlignmentPreviewLength(Number(preview.alignmentLength || 0));
-    setAlignmentPreviewActualStart(Number(preview.start || alignmentPreviewStart));
+    setAlignmentPreviewActualStart(Number(preview.start || 1));
     setAlignmentPreviewConsensus(preview.consensus || '');
     setAlignmentPreviewConservation(preview.conservation || []);
     setAlignmentPreviewReferenceId(preview.referenceId || '');
     setAlignmentPreviewReferenceSegment(preview.referenceSegment || '');
-    setAlignmentPreviewColumnsTruncated(Boolean(preview.columnsTruncated));
-    setAlignmentPreviewMaxColumns(Number(preview.maxPreviewColumns || 240));
+    setAlignmentPreviewReferencePositions(preview.referencePositions || []);
   };
 
   const downloadAlignmentFasta = async () => {
@@ -6121,6 +6287,11 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
             <span>BLAST Pipeline</span>
             <ChevronRight className="w-4 h-4 mx-1" />
             <span className="font-medium text-slate-900 capitalize">{currentView.replace(/-/g, ' ')}</span>
+            <AdjacentPageNavigation<BlastView>
+              currentView={currentView}
+              pages={BLAST_PAGE_NAVIGATION}
+              onNavigate={setCurrentView}
+            />
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -6679,9 +6850,13 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
               </div>
 
               <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(8rem,0.7fr)_minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(15rem,auto)] xl:items-end">
-                  <InputNum label="Column Start" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
-                  <InputNum label="Column End" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
+                <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 xl:items-end ${alignmentCollapseReferenceGaps ? 'xl:grid-cols-[minmax(0,2fr)_minmax(15rem,auto)]' : 'xl:grid-cols-[minmax(8rem,0.7fr)_minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(15rem,auto)]'}`}>
+                  {!alignmentCollapseReferenceGaps && (
+                    <>
+                      <InputNum label="Column Start" value={alignmentPreviewStart} step={10} onChange={(v) => setAlignmentPreviewStart(Math.max(1, Math.floor(v)))} />
+                      <InputNum label="Column End" value={alignmentPreviewEnd} step={10} onChange={(v) => setAlignmentPreviewEnd(Math.max(1, Math.floor(v)))} />
+                    </>
+                  )}
                   <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2 xl:col-span-1">
                     <div className="font-medium text-slate-700">Alignment file</div>
                     <div className="mt-1 break-all font-mono">{alignmentPath || '(none)'}</div>
@@ -6704,7 +6879,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       Download MAFFT FASTA
                     </button>
                   </div>
-                  <div className="text-xs text-slate-500 sm:col-span-2 xl:col-span-4 xl:text-right">
+                  <div className={`text-xs text-slate-500 sm:col-span-2 xl:text-right ${alignmentCollapseReferenceGaps ? 'xl:col-span-2' : 'xl:col-span-4'}`}>
                     Rows: {alignmentPreviewRows.length} / {alignmentPreviewTotalRecords} · Alignment length: {alignmentPreviewLength}
                   </div>
                 </div>
@@ -6733,12 +6908,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   </span>
                 </div>
 
-                {alignmentPreviewColumnsTruncated && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                    To keep the browser responsive, one preview window displays at most {alignmentPreviewMaxColumns} alignment columns. Change Column Start and refresh to inspect the next region.
-                  </div>
-                )}
-
                 <AlignmentViewer
                   key={`blast-alignment-${selectedTaskId}-${alignmentPath}`}
                   rows={alignmentPreviewRows}
@@ -6747,8 +6916,21 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                   totalRecords={alignmentPreviewTotalRecords}
                   referenceId={alignmentPreviewReferenceId}
                   referenceSegment={alignmentPreviewReferenceSegment}
+                  referencePositions={alignmentPreviewReferencePositions}
                   consensus={alignmentPreviewConsensus}
                   conservation={alignmentPreviewConservation}
+                  collapseReferenceGaps={alignmentCollapseReferenceGaps}
+                  onCollapseReferenceGapsChange={(nextValue) => {
+                    setAlignmentCollapseReferenceGaps(nextValue);
+                    if (alignmentPath) {
+                      void runAction(
+                        nextValue ? 'Show all reference positions' : 'Show alignment column window',
+                        async () => {
+                          await loadAlignmentPreviewPage(0, nextValue);
+                        },
+                      );
+                    }
+                  }}
                 />
               </div>
               {renderTailPanels('h-28')}
@@ -6843,90 +7025,19 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                     </thead>
                     <tbody>
                       {scoringRules.map((rule, idx) => (
-                        <tr key={`${rule.label}-${idx}`} className="border-b last:border-b-0">
-                          <td className="px-2 py-1.5">
-                            <input
-                              type="number"
-                              className="w-24 p-1 border rounded"
-                              value={rule.pos}
-                              onChange={(e) => {
-                                const pos = Number(e.target.value);
-                                setScoringRules((prev) => prev.map((r, i) => (i === idx ? { ...r, pos } : r)));
-                                setScoringRulesSuccess('');
-                              }}
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <input
-                              className="w-full p-1 border rounded font-mono"
-                              value={scoringAllowedDrafts[idx] ?? rule.allowed.join(',')}
-                              onChange={(e) => {
-                                const raw = e.target.value;
-                                const allowed = parseAllowedInput(raw);
-                                setScoringAllowedDrafts((prev) => ({ ...prev, [idx]: raw }));
-                                setScoringRules((prev) => prev.map((r, i) => (i === idx ? { ...r, allowed } : r)));
-                                setScoringRulesSuccess('');
-                              }}
-                              onBlur={(e) => {
-                                const normalized = parseAllowedInput(e.target.value).join(',');
-                                setScoringAllowedDrafts((prev) => ({ ...prev, [idx]: normalized }));
-                              }}
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <input
-                              type="number"
-                              step="0.1"
-                              className="w-24 p-1 border rounded"
-                              value={rule.score}
-                              onChange={(e) => {
-                                const score = Number(e.target.value);
-                                setScoringRules((prev) => prev.map((r, i) => (i === idx ? { ...r, score } : r)));
-                                setScoringRulesSuccess('');
-                              }}
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <input
-                              className="w-full p-1 border rounded"
-                              value={rule.label}
-                              onChange={(e) => {
-                                const label = e.target.value;
-                                setScoringRules((prev) => prev.map((r, i) => (i === idx ? { ...r, label } : r)));
-                                setScoringRulesSuccess('');
-                              }}
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <button
-                              className="px-2 py-1 border rounded text-red-700 border-red-300 disabled:opacity-50"
-                              onClick={() => {
-                                setScoringRules((prev) => prev.filter((_, i) => i !== idx));
-                                setScoringAllowedDrafts({});
-                                setScoringRulesSuccess('');
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
+                        <ScoringRuleEditorRow
+                          key={idx}
+                          rule={rule}
+                          index={idx}
+                          onCommit={updateScoringRule}
+                          onDelete={deleteScoringRule}
+                        />
                       ))}
                     </tbody>
                   </table>
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    className="px-3 py-1.5 rounded border border-emerald-300 text-sm text-emerald-700 hover:bg-emerald-50"
-                    onClick={() => {
-                      setScoringRules(clonePeAaoScoringRules());
-                      setScoringAllowedDrafts({});
-                      setScoringRulesError('');
-                      setScoringRulesSuccess(`Applied PeAAO rule template: ${peAaoScoringRules.length} rules`);
-                    }}
-                  >
-                    Apply PeAAO Rule Template (Overwrite)
-                  </button>
                   <button
                     className="px-3 py-1.5 rounded border border-slate-300 text-sm hover:bg-slate-50"
                     onClick={() => {
@@ -6939,7 +7050,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                           label: `rule_${prev.length + 1}`,
                         },
                       ]);
-                      setScoringAllowedDrafts({});
                       setScoringRulesSuccess('');
                     }}
                   >
@@ -6975,7 +7085,6 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         const text = await file.text();
                         const parsed = parseScoringRulesInput(JSON.parse(text));
                         setScoringRules(parsed);
-                        setScoringAllowedDrafts({});
                         setScoringRulesError('');
                         setScoringRulesSuccess(`Import successful, ${parsed.length} rules`);
                       } catch (err) {
@@ -7447,6 +7556,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                 <p className="mt-1 text-sm text-slate-500">Run, reuse, and review cached biochemical property predictions before filtering or ranking candidates.</p>
               </div>
               <PredictedMetricsPanel
+                key={selectedTaskId}
                 taskId={selectedTaskId}
                 subWeights={predictedSubWeights}
                 onSubWeightsChange={setPredictedSubWeights}
@@ -8464,6 +8574,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
             </h2>
             <p className="text-sm text-slate-600">Run, reuse, and review cached biochemical property predictions independently from candidate recommendation.</p>
             <PredictedMetricsPanel
+              key={selectedTaskId}
               taskId={selectedTaskId}
               subWeights={predictedSubWeights}
               onSubWeightsChange={setPredictedSubWeights}
@@ -8943,7 +9054,7 @@ function PipelineProgressPanel({
             {[
               { key: 'submit' as EbiSubStepKey, title: 'Submit' },
               { key: 'download' as EbiSubStepKey, title: 'Download' },
-              { key: 'enrich' as EbiSubStepKey, title: 'Fill + Consistency' },
+              { key: 'enrich' as EbiSubStepKey, title: 'Sequences + Consistency' },
             ].map((item, idx, arr) => {
               const status = ebiSubStepState[item.key];
               return (
@@ -9270,6 +9381,45 @@ function LogPanel({
           ))
         )}
       </div>
+    </div>
+  );
+}
+
+function AdjacentPageNavigation<T extends string>({
+  currentView,
+  pages,
+  onNavigate,
+}: {
+  currentView: T;
+  pages: readonly PageNavigationItem<T>[];
+  onNavigate: (view: T) => void;
+}) {
+  const currentIndex = pages.findIndex((page) => page.view === currentView);
+  const previousPage = currentIndex > 0 ? pages[currentIndex - 1] : null;
+  const nextPage = currentIndex >= 0 && currentIndex < pages.length - 1 ? pages[currentIndex + 1] : null;
+
+  return (
+    <div className="ml-3 flex items-center gap-1 border-l border-slate-200 pl-3" aria-label="Adjacent page navigation">
+      <button
+        type="button"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
+        disabled={!previousPage}
+        onClick={() => previousPage && onNavigate(previousPage.view)}
+        title={previousPage ? `Previous: ${previousPage.label}` : 'No previous page'}
+        aria-label={previousPage ? `Go to previous page: ${previousPage.label}` : 'No previous page'}
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
+        disabled={!nextPage}
+        onClick={() => nextPage && onNavigate(nextPage.view)}
+        title={nextPage ? `Next: ${nextPage.label}` : 'No next page'}
+        aria-label={nextPage ? `Go to next page: ${nextPage.label}` : 'No next page'}
+      >
+        <ChevronRight className="h-4 w-4" />
+      </button>
     </div>
   );
 }
