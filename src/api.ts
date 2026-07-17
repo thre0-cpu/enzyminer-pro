@@ -60,7 +60,28 @@ async function request<T>(url: string, init?: RequestInit): Promise<ApiResult<T>
   if (import.meta.env.VITE_API_KEY) {
     headers['x-api-key'] = import.meta.env.VITE_API_KEY;
   }
-  const response = await fetch(withTaskId(url), { ...init, headers });
+
+  const requestUrl = withTaskId(url);
+  const method = String(init?.method || 'GET').toUpperCase();
+  const maxAttempts = method === 'GET' || method === 'HEAD' ? 3 : 1;
+  let response: Response | null = null;
+  let networkError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      response = await fetch(requestUrl, { ...init, headers });
+      break;
+    } catch (err) {
+      networkError = err;
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => window.setTimeout(resolve, attempt * 250));
+      }
+    }
+  }
+  if (!response) {
+    const details = networkError instanceof Error ? networkError.message : String(networkError || 'network error');
+    throw new Error(`Backend API is unreachable. Confirm that the API service is running on port 8787, then retry. (${details})`);
+  }
+
   const payload = await parseJsonSafe(response);
   if (!response.ok || payload?.ok === false) {
     if (response.status === 409) {

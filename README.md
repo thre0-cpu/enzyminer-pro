@@ -152,9 +152,16 @@ export PIPELINE_PYTHON=~/miniconda3/envs/mining/bin/python
 bash start.sh
 ```
 
-该脚本会自动启动后端 API 和前端预览服务，启动后访问：
-- **前端**: http://localhost:3000
-- **后端**: http://localhost:8787/api/health
+该脚本会自动启动后端 API 和前端预览服务。前端模块使用独立 URL：
+
+- **Home**: http://localhost:3000/home
+- **HMMER**: http://localhost:3000/hmmer
+- **BLAST**: http://localhost:3000/blast
+- **Compare**: http://localhost:3000/compare
+- **Help & About**: http://localhost:3000/help
+- **后端健康检查**: http://localhost:8787/api/health
+
+访问旧根地址 `http://localhost:3000/` 时会自动规范化为 `/home`。模块之间采用完整页面导航，以清理上一模块遗留的轮询和任务加载状态；任务进度仍从任务目录和浏览器本地状态恢复。
 
 停止服务：
 
@@ -184,7 +191,19 @@ npm run dev:api
 npm run dev
 ```
 
-Vite 开发服务器默认仅监听 `http://127.0.0.1:3000`，并自动代理 `/api` 到 `http://127.0.0.1:8787`。
+Vite 开发服务器默认仅监听 `http://127.0.0.1:3000`，并自动代理 `/api` 到 `http://127.0.0.1:8787`。Vite 开发服务器和 `vite preview` 均支持直接打开 `/home`、`/hmmer`、`/blast`、`/compare`、`/help`。
+
+如果将 `dist/` 部署到 Nginx、Apache 或其他静态服务器，需要把这些前端路径回退到 `index.html`。Nginx 示例：
+
+```nginx
+location / {
+    try_files $uri $uri/ /index.html;
+}
+
+location /api/ {
+    proxy_pass http://127.0.0.1:8787;
+}
+```
 
 **可选环境变量：**
 
@@ -214,7 +233,7 @@ export ALLOWED_ORIGINS=http://192.168.1.20:3000
 ## 5. WSL 外部访问（Windows 浏览器）
 
 直接在 Windows 浏览器访问：
-- `http://localhost:3000` (Frontend)
+- `http://localhost:3000/home` (Frontend Home)
 - `http://localhost:8787/api/health` (Backend)
 
 若 localhost 不通，在 PowerShell (管理员) 中执行端口转发：

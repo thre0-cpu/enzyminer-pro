@@ -3148,7 +3148,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
     <div className="flex h-screen w-full overflow-hidden bg-slate-50 text-slate-900 font-sans">
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
-          <button onClick={onBack} className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 transition-colors" title="Back to home">
+          <button type="button" onClick={onBack} className="flex items-center gap-2 text-indigo-600 hover:text-indigo-800 transition-colors" title="Back to home">
             <Activity className="w-6 h-6" />
             <span className="font-semibold text-lg tracking-tight text-slate-900">EnzyMiner</span>
           </button>
@@ -6076,7 +6076,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm z-10">
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200">
-          <button onClick={onBack} className="flex items-center gap-2 text-emerald-600 hover:text-emerald-800 transition-colors" title="Back to home">
+          <button type="button" onClick={onBack} className="flex items-center gap-2 text-emerald-600 hover:text-emerald-800 transition-colors" title="Back to home">
             <Activity className="w-6 h-6" />
             <span className="font-semibold text-lg tracking-tight text-slate-900">EnzyMiner</span>
           </button>
@@ -8021,7 +8021,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
       <header className={`${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} border-b shadow-sm`}>
         <div className="max-w-6xl mx-auto px-8 min-h-16 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <div className="flex items-center gap-3 shrink-0">
-            <button onClick={onBack} className="text-sm text-slate-500 hover:text-slate-700 mr-2">← Back</button>
+            <button type="button" onClick={onBack} className="text-sm text-slate-500 hover:text-slate-700 mr-2">← Back</button>
             <GitCompareArrows className="w-6 h-6 text-amber-600" />
             <span className="text-xl font-bold tracking-tight">Network Comparison</span>
           </div>
@@ -8592,13 +8592,41 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
 
 type AppModule = 'home' | 'hmmer' | 'blast' | 'compare' | 'help';
 
-const appModules = new Set<AppModule>(['home', 'hmmer', 'blast', 'compare', 'help']);
+const APP_MODULE_PATHS: Record<AppModule, string> = {
+  home: '/home',
+  hmmer: '/hmmer',
+  blast: '/blast',
+  compare: '/compare',
+  help: '/help',
+};
+
+function appModuleFromPathname(pathname: string): AppModule {
+  const normalized = `/${String(pathname || '').split('?')[0].split('#')[0].split('/').filter(Boolean)[0] || ''}`.toLowerCase();
+  if (normalized === '/hmmer') return 'hmmer';
+  if (normalized === '/blast') return 'blast';
+  if (normalized === '/compare') return 'compare';
+  if (normalized === '/help') return 'help';
+  return 'home';
+}
+
+function navigateToModule(module: AppModule) {
+  if (typeof window === 'undefined') return;
+  const targetPath = APP_MODULE_PATHS[module];
+  window.localStorage.setItem('enzymeminer.activeModule', module);
+  if (window.location.pathname === targetPath) {
+    window.location.reload();
+    return;
+  }
+  // Module boundaries intentionally use a document navigation rather than only
+  // swapping React components. This resets request/polling state and prevents
+  // stale task hydration effects from leaking into the next module visit.
+  window.location.assign(targetPath);
+}
 
 export default function App() {
-  const [activeModule, setActiveModule] = useState<AppModule>(() => {
+  const [activeModule] = useState<AppModule>(() => {
     if (typeof window === 'undefined') return 'home';
-    const saved = window.localStorage.getItem('enzymeminer.activeModule') as AppModule | null;
-    return saved && appModules.has(saved) ? saved : 'home';
+    return appModuleFromPathname(window.location.pathname);
   });
   const [exampleLoading, setExampleLoading] = useState(false);
   const [exampleMessage, setExampleMessage] = useState('');
@@ -8618,6 +8646,10 @@ export default function App() {
 
   useEffect(() => {
     window.localStorage.setItem('enzymeminer.activeModule', activeModule);
+    const expectedPath = APP_MODULE_PATHS[activeModule];
+    if (window.location.pathname !== expectedPath) {
+      window.history.replaceState(null, '', expectedPath);
+    }
   }, [activeModule]);
 
   const loadExampleCase = async () => {
@@ -8631,7 +8663,7 @@ export default function App() {
       setActiveTaskId(taskId);
       window.localStorage.setItem('enzymeminer.hmmer.activeTaskId', taskId);
       setExampleMessage(`Example loaded as task ${taskId}.`);
-      setActiveModule('hmmer');
+      navigateToModule('hmmer');
     } catch (err) {
       setExampleError(String(err instanceof Error ? err.message : err));
     } finally {
@@ -8640,15 +8672,15 @@ export default function App() {
   };
 
   if (activeModule === 'hmmer') {
-    return <HmmerPipeline darkMode={darkMode} setDarkMode={setDarkMode} onBack={() => setActiveModule('home')} />;
+    return <HmmerPipeline darkMode={darkMode} setDarkMode={setDarkMode} onBack={() => navigateToModule('home')} />;
   }
 
   if (activeModule === 'blast') {
-    return <BlastPipeline darkMode={darkMode} setDarkMode={setDarkMode} onBack={() => setActiveModule('home')} />;
+    return <BlastPipeline darkMode={darkMode} setDarkMode={setDarkMode} onBack={() => navigateToModule('home')} />;
   }
 
   if (activeModule === 'compare') {
-    return <ComparePipeline darkMode={darkMode} setDarkMode={setDarkMode} onBack={() => setActiveModule('home')} />;
+    return <ComparePipeline darkMode={darkMode} setDarkMode={setDarkMode} onBack={() => navigateToModule('home')} />;
   }
 
   if (activeModule === 'help') {
@@ -8656,7 +8688,7 @@ export default function App() {
       <HelpAbout
         darkMode={darkMode}
         setDarkMode={setDarkMode}
-        onBack={() => setActiveModule('home')}
+        onBack={() => navigateToModule('home')}
         onLoadExample={loadExampleCase}
         exampleLoading={exampleLoading}
         exampleMessage={exampleMessage}
@@ -8677,7 +8709,7 @@ export default function App() {
           <div className="flex items-center gap-1 shrink-0">
             <button
               type="button"
-              onClick={() => setActiveModule('help')}
+              onClick={() => navigateToModule('help')}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-100 text-sm text-slate-600 hover:text-slate-800 transition-colors"
             >
               <BookOpen className="w-4 h-4" />
@@ -8719,7 +8751,7 @@ export default function App() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <button
             type="button"
-            onClick={() => setActiveModule('blast')}
+            onClick={() => navigateToModule('blast')}
             className="group text-left bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all duration-200"
           >
             <div className="flex items-center gap-3 mb-4">
@@ -8738,7 +8770,7 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => setActiveModule('hmmer')}
+            onClick={() => navigateToModule('hmmer')}
             className="group text-left bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-200"
           >
             <div className="flex items-center gap-3 mb-4">
@@ -8757,7 +8789,7 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => setActiveModule('compare')}
+            onClick={() => navigateToModule('compare')}
             className="group text-left bg-white border border-slate-200 rounded-2xl p-6 shadow-sm hover:shadow-md hover:border-amber-300 transition-all duration-200"
           >
             <div className="flex items-center gap-3 mb-4">
@@ -8780,7 +8812,7 @@ export default function App() {
             <div className="font-semibold text-slate-900">New in V1.1</div>
             <div className="text-sm text-slate-500 mt-1">Select and export network nodes, preserve layouts, filter the recommendation pool, and explore a fully offline example.</div>
           </div>
-          <button type="button" onClick={() => setActiveModule('help')} className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 shrink-0">
+          <button type="button" onClick={() => navigateToModule('help')} className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 shrink-0">
             Read Help & About <ArrowRight className="w-4 h-4" />
           </button>
         </div>
