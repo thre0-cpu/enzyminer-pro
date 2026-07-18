@@ -870,7 +870,7 @@ test('recommended CSV export merges sequence, source metadata, recommendation sc
   await fs.writeFile(
     path.join(taskDir, 'scored_results.csv'),
     [
-      'id,score',
+      'id,seq_score',
       'P12345,0.73',
     ].join('\n'),
   );
@@ -984,7 +984,7 @@ test('manual filtering supports five simulated candidate-screening scenarios', a
   await fs.writeFile(
     path.join(taskDir, 'scored_results.csv'),
     [
-      'id,score',
+      'id,seq_score',
       'candA,0.6',
       'candB,0.95',
       'candC,0.8',

@@ -7394,7 +7394,7 @@ async function loadRecommendedMetadata(workDir, ids) {
         // the Scoring-step value under a dedicated key so a HMM/BLAST score
         // loaded earlier cannot shadow it.
         const sourceRow = fileName === 'scored_results.csv'
-          ? { ...row, scoring_score: row.scoring_score || row.score }
+          ? { ...row, scoring_score: row.scoring_score || row.seq_score || row.score }
           : row;
         for (const requestedId of matchedIds) mergeNonEmptyFields(metadata.get(requestedId), sourceRow);
       }

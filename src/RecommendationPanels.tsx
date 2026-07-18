@@ -711,10 +711,10 @@ export function ManualFilteringPanel({
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full text-xs">
+            <table className="w-full min-w-[1280px] table-fixed text-xs">
               <thead className="sticky top-0 bg-slate-50">
                 <tr>
-                  <th className="px-2 py-2 text-left">
+                  <th className="w-9 px-2 py-2 text-left">
                     <input
                       type="checkbox"
                       aria-label="Select all filtered rows on current page"
@@ -722,19 +722,19 @@ export function ManualFilteringPanel({
                       onChange={(event) => event.target.checked ? addIds(rows.map((row) => row.id)) : removeIds(rows.map((row) => row.id))}
                     />
                   </th>
-                  <th className="px-2 py-2 text-left">#</th>
-                  <th className="px-2 py-2 text-left">ID</th>
-                  <th className="px-2 py-2 text-left">EC Top 1–3</th>
-                  <th className="px-2 py-2 text-right">kcat</th>
-                  <th className="px-2 py-2 text-right">Km</th>
-                  <th className="px-2 py-2 text-right">kcat/Km</th>
-                  <th className="px-2 py-2 text-right">Solubility</th>
-                  <th className="px-2 py-2 text-right">Tm</th>
-                  <th className="px-2 py-2 text-right">Pred. Score</th>
-                  <th className="px-2 py-2 text-right">Scoring Score</th>
-                  <th className="px-2 py-2 text-right">Length</th>
-                  <th className="px-2 py-2 text-left">Species</th>
-                  <th className="px-2 py-2 text-left">Description</th>
+                  <th className="w-12 px-2 py-2 text-left">#</th>
+                  <th className="w-44 px-2 py-2 text-left">ID</th>
+                  <th className="w-40 px-2 py-2 text-left">EC Top 1–3</th>
+                  <th className="w-20 px-2 py-2 text-right">kcat</th>
+                  <th className="w-20 px-2 py-2 text-right">Km</th>
+                  <th className="w-24 px-2 py-2 text-right">kcat/Km</th>
+                  <th className="w-24 px-2 py-2 text-right">Solubility</th>
+                  <th className="w-20 px-2 py-2 text-right">Tm</th>
+                  <th className="w-24 px-2 py-2 text-right">Pred. Score</th>
+                  <th className="w-28 px-2 py-2 text-right">Scoring Score</th>
+                  <th className="w-16 px-2 py-2 text-right">Length</th>
+                  <th className="w-36 px-2 py-2 text-left">Species</th>
+                  <th className="w-44 px-2 py-2 text-left">Description</th>
                 </tr>
               </thead>
               <tbody>
@@ -749,7 +749,7 @@ export function ManualFilteringPanel({
                       />
                     </td>
                     <td className="px-2 py-1.5 text-slate-400">{(page - 1) * pageSize + index + 1}</td>
-                    <td className="max-w-[210px] break-all px-2 py-1.5 font-mono">{row.id}</td>
+                    <td className="truncate whitespace-nowrap px-2 py-1.5 font-mono" title={row.id}>{row.id}</td>
                     <td className="min-w-[130px] px-2 py-1.5">
                       <div>{row.ec_top1 || '—'}</div>
                       {(row.ec_top2 || row.ec_top3) && <div className="text-[10px] text-slate-400">{[row.ec_top2, row.ec_top3].filter(Boolean).join(', ')}</div>}
@@ -762,8 +762,8 @@ export function ManualFilteringPanel({
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.predicted_score)}</td>
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.scoring_score)}</td>
                     <td className="px-2 py-1.5 text-right">{row.length ?? '—'}</td>
-                    <td className="max-w-[180px] px-2 py-1.5">{row.species || '—'}</td>
-                    <td className="max-w-[280px] truncate px-2 py-1.5" title={row.description}>{row.description || '—'}</td>
+                    <td className="truncate whitespace-nowrap px-2 py-1.5" title={row.species}>{row.species || '—'}</td>
+                    <td className="truncate whitespace-nowrap px-2 py-1.5" title={row.description}>{row.description || '—'}</td>
                   </tr>
                 ))}
                 {rows.length === 0 && (
