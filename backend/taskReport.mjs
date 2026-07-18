@@ -331,11 +331,11 @@ function recommendationRows(results, limit = 30) {
   return (Array.isArray(results) ? results : []).slice(0, limit).map((row, index) => [
     index + 1,
     row.id,
-    formatDecimal(row.score),
-    formatDecimal(row.avg_ref_similarity),
-    formatDecimal(row.max_ref_similarity),
-    row.cluster || '—',
-    formatDecimal(row.predicted_score),
+    formatDecimal(row.score ?? row.recommendation_score),
+    formatDecimal(row.avgRefSimilarity ?? row.avg_ref_similarity),
+    formatDecimal(row.maxRefSimilarity ?? row.max_ref_similarity),
+    row.cluster || row.networkComponent || row.network_component || '—',
+    formatDecimal(row.predictedScore ?? row.predicted_score),
     row.species || '—',
   ]);
 }
@@ -499,9 +499,9 @@ export async function buildTaskReport({ taskId, workDir, projectRoot, appVersion
   const scoredCsv = await scanCsv(scoredPath, {
     sampleLimit: 0,
     onRow(row) {
-      const score = finiteValue(row.score);
+      const score = finiteValue(row.seq_score ?? row.score);
       if (score !== null) scoredScores.push(score);
-      const passed = ['1', 'true', 'yes', 'pass', 'passed'].includes(String(row.passed || '').toLowerCase());
+      const passed = ['1', 'true', 'yes', 'pass', 'passed'].includes(String(row.pass_rule ?? row.passed ?? '').toLowerCase());
       if (passed) scoringPassedCount += 1;
       if (score !== null) {
         topScored.push({ id: row.id || row.target || '', score, passed, length: row.length || '' });

@@ -1387,7 +1387,7 @@ test('task reports export existing task results in Chinese, English, PDF-print, 
     fs.writeFile(path.join(taskDir, 'hits_all.csv'), 'id,hmm_score\ncandidate_A,90\ncandidate_B,80\ncandidate_C,70\n'),
     fs.writeFile(path.join(taskDir, 'hits_filtered.csv'), 'id,hmm_score\ncandidate_A,90\ncandidate_B,80\n'),
     fs.writeFile(path.join(taskDir, 'scoring_input_auto.mafft.fasta'), '>reference_A\nMAAAAA\n>candidate_A\nMAAAAT\n>candidate_B\nMAAATT\n'),
-    fs.writeFile(path.join(taskDir, 'scored_results.csv'), 'id,score,passed,length\ncandidate_A,8.5,true,6\ncandidate_B,7.2,true,6\n'),
+    fs.writeFile(path.join(taskDir, 'scored_results.csv'), 'id,seq_score,pass_rule,length\ncandidate_A,8.5,true,6\ncandidate_B,7.2,true,6\n'),
     fs.writeFile(path.join(taskDir, 'scored_passed.fasta'), '>candidate_A\nMAAAAT\n>candidate_B\nMAAATT\n'),
     fs.writeFile(path.join(taskDir, 'candidates_cdhit85.fasta'), '>candidate_A\nMAAAAT\n>candidate_B\nMAAATT\n'),
     fs.writeFile(path.join(taskDir, 'nodes.csv'), [
@@ -1430,7 +1430,15 @@ test('task reports export existing task results in Chinese, English, PDF-print, 
         filteredBySimilarity: 0,
       },
       recommendTopN: 1,
-      recommendResults: [{ id: 'candidate_A', score: 0.91, cluster: 'Cluster_1', species: 'Species alpha' }],
+      recommendResults: [{
+        id: 'candidate_A',
+        score: 0.91,
+        avgRefSimilarity: 0.87,
+        maxRefSimilarity: 0.96,
+        cluster: 'Cluster_1',
+        predictedScore: 0.76,
+        species: 'Species alpha',
+      }],
     }, null, 2)),
     fs.writeFile(path.join(otherTaskDir, 'task.json'), JSON.stringify({
       id: otherTaskId,
@@ -1454,6 +1462,8 @@ test('task reports export existing task results in Chinese, English, PDF-print, 
     assert.match(result.body, /### 详细打分规则/);
     assert.match(result.body, /\| Pos \| Allowed \(comma separated\) \| Score \| Label \|/);
     assert.match(result.body, /\| 41 \| G, A \| 2\.5 \| M1_41_GA \|/);
+    assert.match(result.body, /\| 1 \| candidate_A \| 0\.91 \| 0\.87 \| 0\.96 \| Cluster_1 \| 0\.76 \| Species alpha \|/);
+    assert.match(result.body, /\| 1 \| candidate_A \| 8\.5 \| 是 \| 6 \|/);
     assert.match(result.body, /candidate_A/);
     assert.doesNotMatch(result.body, /SHOULD_NOT_APPEAR_IN_PRIMARY_REPORT/);
     assert.equal(
