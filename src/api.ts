@@ -981,6 +981,7 @@ export type RecommendCandidate = {
   networkComponentSizeNorm: number;
   taxonomyDiversity: number;
   predictedScore: number;
+  propertyCoverage: number;
   score: number;
   refEdgeCount: number;
 };
@@ -1001,27 +1002,29 @@ export type PredictedSubWeights = {
 
 export type PredictedMetricsRow = {
   id: string;
-  kcat: number;
-  km: number;
-  solubility: number;
-  tm: number;
+  kcat: number | null;
+  km: number | null;
+  solubility: number | null;
+  tm: number | null;
   ec_top1: string;
-  ec_score1: number;
+  ec_score1: number | null;
   ec_top2: string;
-  ec_score2: number;
+  ec_score2: number | null;
   ec_top3: string;
-  ec_score3: number;
-  catalyticEfficiency: number;
-  catalyticEfficiencyNorm: number;
-  kcatNorm: number;
-  solubilityNorm: number;
-  tmNorm: number;
-  predictedScore: number;
+  ec_score3: number | null;
+  catalyticEfficiency: number | null;
+  catalyticEfficiencyNorm: number | null;
+  kcatNorm: number | null;
+  solubilityNorm: number | null;
+  tmNorm: number | null;
+  predictedScore: number | null;
+  propertyCoverage: number;
+  realPropertyCount: number;
   sources: {
-    cataPro: 'real' | 'mock';
-    solubility: 'real' | 'mock';
-    ec: 'real' | 'mock';
-    tm: 'real' | 'mock';
+    cataPro: 'real' | 'mock' | 'missing' | 'failed';
+    solubility: 'real' | 'mock' | 'missing' | 'failed';
+    ec: 'real' | 'mock' | 'missing' | 'failed';
+    tm: 'real' | 'mock' | 'missing' | 'failed';
   };
 };
 
@@ -1074,6 +1077,7 @@ export type ManualFilterRow = {
   ec_top3: string;
   ec_score3: number | null;
   predicted_score: number | null;
+  property_coverage: number;
   cataPro_source: string;
   solubility_source: string;
   tm_source: string;
@@ -1086,7 +1090,7 @@ export type PredictorProgress = {
   completedBatches: number;
   totalBatches: number;
   status: 'pending' | 'running' | 'done';
-  mode: 'real' | 'mock';
+  mode: 'real' | 'mock' | 'unavailable';
   elapsedMs: number;
   estimatedRemainingMs: number | null;
 };
@@ -1127,6 +1131,8 @@ export function loadCachedPredictionMetrics(opts?: {
     subWeights: PredictedSubWeights;
     smiles: string | null;
     services: { cataPro: boolean; solubility: boolean; ec: boolean; tm: boolean };
+    predictionMode?: 'production' | 'demo';
+    scientificWarning?: string;
     rows: PredictedMetricsRow[];
   }>(`/api/network/predicted-metrics${query ? `?${query}` : ''}`);
 }
@@ -1144,6 +1150,8 @@ export function predictNetworkMetrics(opts?: {
     subWeights: PredictedSubWeights;
     smiles: string | null;
     services: { cataPro: boolean; solubility: boolean; ec: boolean; tm: boolean };
+    predictionMode?: 'production' | 'demo';
+    scientificWarning?: string;
     rows: PredictedMetricsRow[];
   }>('/api/network/predict-metrics', {
     method: 'POST',

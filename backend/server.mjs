@@ -778,12 +778,12 @@ async function predictCataProBatch(items, smiles) {
   return resultMap;
 }
 
-// Fallback mock for kcat
+// Demo-only synthetic value for kcat.
 async function predictKcatMock(seq) {
   return Number((0.01 + hashSeqToUnit(seq, 'kcat') * 99.99).toFixed(3));
 }
 
-// Fallback mock for Km
+// Demo-only synthetic value for Km.
 async function predictKmMock(seq) {
   return Number((0.1 + hashSeqToUnit(seq, 'km') * 99.9).toFixed(3));
 }
@@ -811,7 +811,7 @@ async function predictSolubilityBatch(items) {
   return resultMap;
 }
 
-// Fallback mock for solubility (returns 0-1 probability)
+// Demo-only synthetic solubility value (0-1 probability).
 async function predictSolubilityMock(seq) {
   return Number(hashSeqToUnit(seq, 'solubility').toFixed(4));
 }
@@ -891,7 +891,7 @@ async function predictECBatch(items) {
   return resultMap;
 }
 
-// Fallback mock for EC
+// Demo-only synthetic EC value.
 async function predictECMock(seq) {
   const ecs = ['3.2.1.17', '1.1.1.1', '2.7.1.1', '4.2.1.1', '5.3.1.9'];
   const idx = Math.floor(hashSeqToUnit(seq, 'ec') * ecs.length);
@@ -899,7 +899,7 @@ async function predictECMock(seq) {
   return [{ ec: ecs[idx], score }];
 }
 
-function createPredictionProgressTracker(itemsByPredictor, modes) {
+function createPredictionProgressTracker(itemsByPredictor, modes, allowMock = false) {
   const predictorNames = ['cataPro', 'solubility', 'ec', 'tm'];
   const startedAt = Date.now();
   const emaMsPerItem = {};
@@ -923,7 +923,7 @@ function createPredictionProgressTracker(itemsByPredictor, modes) {
         completedBatches: 0,
         totalBatches: batchCount(name),
         status: totalItems ? 'pending' : 'done',
-        mode: modes[name] ? 'real' : 'mock',
+        mode: modes[name] ? 'real' : (allowMock ? 'mock' : 'unavailable'),
         elapsedMs: 0,
         estimatedRemainingMs: totalItems ? null : 0,
       }];
@@ -988,7 +988,7 @@ function createPredictionProgressTracker(itemsByPredictor, modes) {
   return { start, completeBatch, snapshot: () => JSON.parse(JSON.stringify(state)) };
 }
 
-async function runCataProPredictions(items, smiles, useReal, progress) {
+async function runCataProPredictions(items, smiles, useReal, allowMock, progress) {
   const output = new Map();
   progress.start('cataPro');
   const batches = useReal ? splitIntoBatches(items) : [items];
@@ -996,121 +996,74 @@ async function runCataProPredictions(items, smiles, useReal, progress) {
     const batch = batches[batchIndex];
     const batchStartedAt = Date.now();
     let realResults = new Map();
+    let requestFailed = false;
     if (useReal) {
-      try {
-        realResults = await predictCataProBatch(batch, smiles);
-      } catch (err) {
-        pushRuntimeLine(`[predict-metrics] kcat/Km batch ${batchIndex + 1}/${batches.length} failed; using mock fallback: ${err.message}`);
-      }
+      try { realResults = await predictCataProBatch(batch, smiles); }
+      catch (err) { requestFailed = true; pushRuntimeLine(`[predict-metrics] kcat/Km batch ${batchIndex + 1}/${batches.length} failed: ${err.message}`); }
     }
     let realCount = 0;
     for (const item of batch) {
       const real = realResults.get(item.id);
-      if (real) {
-        output.set(item.id, { ...real, source: 'real' });
-        realCount++;
-      } else {
-        const [kcat, km] = await Promise.all([
-          predictKcatMock(item.sequence),
-          predictKmMock(item.sequence),
-        ]);
+      if (real) { output.set(item.id, { ...real, source: 'real' }); realCount++; }
+      else if (allowMock) {
+        const [kcat, km] = await Promise.all([predictKcatMock(item.sequence), predictKmMock(item.sequence)]);
         output.set(item.id, { kcat, km, source: 'mock' });
-      }
+      } else output.set(item.id, { kcat: null, km: null, source: requestFailed || useReal ? 'failed' : 'missing' });
     }
     progress.completeBatch('cataPro', batch.length, Date.now() - batchStartedAt);
-    pushRuntimeLine(`[predict-metrics] kcat/Km batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} mock)`);
+    pushRuntimeLine(`[predict-metrics] kcat/Km batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} ${allowMock ? 'mock' : 'unavailable'})`);
   }
   return output;
 }
 
-async function runSolubilityPredictions(items, useReal, progress) {
-  const output = new Map();
-  progress.start('solubility');
+async function runSolubilityPredictions(items, useReal, allowMock, progress) {
+  const output = new Map(); progress.start('solubility');
   const batches = useReal ? splitIntoBatches(items) : [items];
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-    const batch = batches[batchIndex];
-    const batchStartedAt = Date.now();
-    let realResults = new Map();
-    if (useReal) {
-      try {
-        realResults = await predictSolubilityBatch(batch);
-      } catch (err) {
-        pushRuntimeLine(`[predict-metrics] solubility batch ${batchIndex + 1}/${batches.length} failed; using mock fallback: ${err.message}`);
-      }
-    }
+    const batch = batches[batchIndex]; const started = Date.now(); let realResults = new Map(); let requestFailed = false;
+    if (useReal) { try { realResults = await predictSolubilityBatch(batch); } catch (err) { requestFailed = true; pushRuntimeLine(`[predict-metrics] solubility batch ${batchIndex + 1}/${batches.length} failed: ${err.message}`); } }
     let realCount = 0;
     for (const item of batch) {
       const real = realResults.get(item.id);
-      if (real) {
-        output.set(item.id, { score: real.score, source: 'real' });
-        realCount++;
-      } else {
-        output.set(item.id, { score: await predictSolubilityMock(item.sequence), source: 'mock' });
-      }
+      if (real) { output.set(item.id, { score: real.score, source: 'real' }); realCount++; }
+      else if (allowMock) output.set(item.id, { score: await predictSolubilityMock(item.sequence), source: 'mock' });
+      else output.set(item.id, { score: null, source: requestFailed || useReal ? 'failed' : 'missing' });
     }
-    progress.completeBatch('solubility', batch.length, Date.now() - batchStartedAt);
-    pushRuntimeLine(`[predict-metrics] solubility batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} mock)`);
+    progress.completeBatch('solubility', batch.length, Date.now() - started);
+    pushRuntimeLine(`[predict-metrics] solubility batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} ${allowMock ? 'mock' : 'unavailable'})`);
   }
   return output;
 }
 
-async function runECPredictions(items, useReal, progress) {
-  const output = new Map();
-  progress.start('ec');
+async function runECPredictions(items, useReal, allowMock, progress) {
+  const output = new Map(); progress.start('ec');
   const batches = useReal ? splitIntoBatches(items) : [items];
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-    const batch = batches[batchIndex];
-    const batchStartedAt = Date.now();
-    let realResults = new Map();
-    if (useReal) {
-      try {
-        realResults = await predictECBatch(batch);
-      } catch (err) {
-        pushRuntimeLine(`[predict-metrics] EC batch ${batchIndex + 1}/${batches.length} failed; using mock fallback: ${err.message}`);
-      }
-    }
+    const batch = batches[batchIndex]; const started = Date.now(); let realResults = new Map(); let requestFailed = false;
+    if (useReal) { try { realResults = await predictECBatch(batch); } catch (err) { requestFailed = true; pushRuntimeLine(`[predict-metrics] EC batch ${batchIndex + 1}/${batches.length} failed: ${err.message}`); } }
     let realCount = 0;
     for (const item of batch) {
       const real = realResults.get(item.id);
-      if (real) {
-        output.set(item.id, { entries: real, source: 'real' });
-        realCount++;
-      } else {
-        output.set(item.id, { entries: await predictECMock(item.sequence), source: 'mock' });
-      }
+      if (real) { output.set(item.id, { entries: real, source: 'real' }); realCount++; }
+      else if (allowMock) output.set(item.id, { entries: await predictECMock(item.sequence), source: 'mock' });
+      else output.set(item.id, { entries: [], source: requestFailed || useReal ? 'failed' : 'missing' });
     }
-    progress.completeBatch('ec', batch.length, Date.now() - batchStartedAt);
-    pushRuntimeLine(`[predict-metrics] EC batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} mock)`);
+    progress.completeBatch('ec', batch.length, Date.now() - started);
+    pushRuntimeLine(`[predict-metrics] EC batch ${batchIndex + 1}/${batches.length} complete (${realCount} real, ${batch.length - realCount} ${allowMock ? 'mock' : 'unavailable'})`);
   }
   return output;
 }
 
-async function runTmPredictions(items, useReal, progress) {
-  const output = new Map();
-  progress.start('tm');
-  if (!useReal) {
-    const startedAt = Date.now();
-    for (const item of items) {
-      output.set(item.id, { value: await predictTmMock(item.sequence), source: 'mock' });
-    }
-    progress.completeBatch('tm', items.length, Date.now() - startedAt);
-    pushRuntimeLine(`[predict-metrics] Tm mock predictions complete (${items.length} item(s))`);
-    return output;
-  }
-
+async function runTmPredictions(items, useReal, allowMock, progress) {
+  const output = new Map(); progress.start('tm');
   for (let index = 0; index < items.length; index++) {
-    const item = items[index];
-    const startedAt = Date.now();
-    const real = await predictTmReal(item.sequence);
-    if (Number.isFinite(real)) {
-      output.set(item.id, { value: real, source: 'real' });
-    } else {
-      output.set(item.id, { value: await predictTmMock(item.sequence), source: 'mock' });
-    }
-    progress.completeBatch('tm', 1, Date.now() - startedAt);
-    if ((index + 1) % 5 === 0 || index + 1 === items.length) {
-      pushRuntimeLine(`[predict-metrics] Tm ${index + 1}/${items.length} complete`);
-    }
+    const item = items[index]; const started = Date.now();
+    const real = useReal ? await predictTmReal(item.sequence) : null;
+    if (Number.isFinite(real)) output.set(item.id, { value: real, source: 'real' });
+    else if (allowMock) output.set(item.id, { value: await predictTmMock(item.sequence), source: 'mock' });
+    else output.set(item.id, { value: null, source: useReal ? 'failed' : 'missing' });
+    progress.completeBatch('tm', 1, Date.now() - started);
+    if ((index + 1) % 5 === 0 || index + 1 === items.length) pushRuntimeLine(`[predict-metrics] Tm ${index + 1}/${items.length} complete`);
   }
   return output;
 }
@@ -1119,7 +1072,7 @@ function resolvePredictedMetricsPath(workDir) {
   return path.join(workDir, 'predicted_metrics.csv');
 }
 
-const PREDICTION_CACHE_VERSION = 2;
+const PREDICTION_CACHE_VERSION = 3;
 
 function resolvePredictedMetricsMetaPath(workDir) {
   return path.join(workDir, 'predicted_metrics.meta.json');
@@ -1129,7 +1082,7 @@ function sha256(value) {
   return createHash('sha256').update(String(value)).digest('hex');
 }
 
-function buildPredictionCacheContext({ candidateIds, seqLookup, smiles, modes }) {
+function buildPredictionCacheContext({ candidateIds, seqLookup, smiles, modes, allowMock = false }) {
   const sequences = candidateIds
     .map((id) => [id, seqLookup.get(id) ? sha256(seqLookup.get(id)) : null])
     .sort(([a], [b]) => a.localeCompare(b));
@@ -1138,10 +1091,10 @@ function buildPredictionCacheContext({ candidateIds, seqLookup, smiles, modes })
     smiles,
     sequences,
     predictors: {
-      cataPro: { mode: modes.cataPro ? 'real' : 'mock', url: CATAPRO_URL },
-      solubility: { mode: modes.solubility ? 'real' : 'mock', url: SOL_URL },
-      ec: { mode: modes.ec ? 'real' : 'mock', url: EC_URL },
-      tm: { mode: modes.tm ? 'real' : 'mock', url: TM_URL },
+      cataPro: { mode: modes.cataPro ? 'real' : (allowMock ? 'mock' : 'unavailable'), url: CATAPRO_URL },
+      solubility: { mode: modes.solubility ? 'real' : (allowMock ? 'mock' : 'unavailable'), url: SOL_URL },
+      ec: { mode: modes.ec ? 'real' : (allowMock ? 'mock' : 'unavailable'), url: EC_URL },
+      tm: { mode: modes.tm ? 'real' : (allowMock ? 'mock' : 'unavailable'), url: TM_URL },
     },
   };
   return { ...context, fingerprint: sha256(JSON.stringify(context)) };
@@ -1176,44 +1129,49 @@ function catalyticEfficiency(row) {
 // Log scaling prevents a single extreme catalytic-efficiency prediction from
 // dominating the min-max range. Tm is scored by closeness to `tmTarget`.
 function computePredictedNormalization(rows, subWeights, tmTarget) {
+  const realValue = (row, predictor, value) => isRealPrediction(row, predictor) && Number.isFinite(Number(value)) ? Number(value) : NaN;
   const minMaxScaler = (values) => {
-    const finite = values.filter((v) => Number.isFinite(v));
-    if (!finite.length) return () => 0.5;
-    const min = Math.min(...finite);
-    const max = Math.max(...finite);
-    const span = max - min;
-    return (v) => {
-      if (!Number.isFinite(v)) return 0;
-      return span > 1e-9 ? (v - min) / span : 0.5;
-    };
+    const finite = values.filter(Number.isFinite);
+    if (!finite.length) return () => null;
+    const min = Math.min(...finite); const max = Math.max(...finite); const span = max - min;
+    return (value) => Number.isFinite(value) ? (span > 1e-9 ? (value - min) / span : 0.5) : null;
   };
-
-  const efficiencyLogs = rows.map((r) => {
-    const efficiency = catalyticEfficiency(r);
+  const efficiencyLogs = rows.map((row) => {
+    if (!isRealPrediction(row, 'cataPro')) return NaN;
+    const efficiency = catalyticEfficiency(row);
     return efficiency > 0 ? Math.log10(efficiency) : NaN;
   });
+  const solValues = rows.map((row) => realValue(row, 'solubility', row.solubility));
+  const tmValues = rows.map((row) => {
+    const tm = realValue(row, 'tm', row.tm);
+    return Number.isFinite(tm) ? -Math.abs(tm - tmTarget) : NaN;
+  });
   const efficiencyScaler = minMaxScaler(efficiencyLogs);
-  const solubilityScaler = minMaxScaler(rows.map((r) => r.solubility));
-  const tmDiffScaler = minMaxScaler(rows.map((r) => -Math.abs(r.tm - tmTarget)));
-
-  const wSum = (subWeights.kcat + subWeights.solubility + subWeights.tm) || 1;
+  const solubilityScaler = minMaxScaler(solValues);
+  const tmDiffScaler = minMaxScaler(tmValues);
+  const totalWeight = subWeights.kcat + subWeights.solubility + subWeights.tm;
   const out = new Map();
-  rows.forEach((r, index) => {
-    const efficiency = catalyticEfficiency(r);
-    const efficiencyNorm = Number(efficiencyScaler(efficiencyLogs[index]).toFixed(4));
-    const solubilityNorm = Number(solubilityScaler(r.solubility).toFixed(4));
-    const tmNorm = Number(tmDiffScaler(-Math.abs(r.tm - tmTarget)).toFixed(4));
-    const predictedScore = Number((
-      (subWeights.kcat * efficiencyNorm + subWeights.solubility * solubilityNorm + subWeights.tm * tmNorm) / wSum
-    ).toFixed(4));
-    out.set(r.id, {
-      catalyticEfficiency: Number.isFinite(efficiency) ? efficiency : 0,
-      catalyticEfficiencyNorm: efficiencyNorm,
-      // Backward-compatible alias: this field now correctly represents kcat/Km.
-      kcatNorm: efficiencyNorm,
-      solubilityNorm,
-      tmNorm,
+  rows.forEach((row, index) => {
+    const efficiency = isRealPrediction(row, 'cataPro') ? catalyticEfficiency(row) : NaN;
+    const efficiencyNorm = efficiencyScaler(efficiencyLogs[index]);
+    const solubilityNorm = solubilityScaler(solValues[index]);
+    const tmNorm = tmDiffScaler(tmValues[index]);
+    const available = [
+      ['kcat', efficiencyNorm], ['solubility', solubilityNorm], ['tm', tmNorm],
+    ].filter(([key, value]) => subWeights[key] > 0 && Number.isFinite(value));
+    const availableWeight = available.reduce((sum, [key]) => sum + subWeights[key], 0);
+    const predictedScore = availableWeight > 0
+      ? Number((available.reduce((sum, [key, value]) => sum + subWeights[key] * value, 0) / availableWeight).toFixed(4))
+      : null;
+    out.set(row.id, {
+      catalyticEfficiency: Number.isFinite(efficiency) ? efficiency : null,
+      catalyticEfficiencyNorm: Number.isFinite(efficiencyNorm) ? Number(efficiencyNorm.toFixed(4)) : null,
+      kcatNorm: Number.isFinite(efficiencyNorm) ? Number(efficiencyNorm.toFixed(4)) : null,
+      solubilityNorm: Number.isFinite(solubilityNorm) ? Number(solubilityNorm.toFixed(4)) : null,
+      tmNorm: Number.isFinite(tmNorm) ? Number(tmNorm.toFixed(4)) : null,
       predictedScore,
+      propertyCoverage: totalWeight > 0 ? Number((availableWeight / totalWeight).toFixed(4)) : 0,
+      realPropertyCount: available.length,
     });
   });
   return out;
@@ -1224,16 +1182,16 @@ function formatPredictedMetricsRows(allRows, subWeights, tmTarget) {
   return allRows
     .map((row) => ({
       id: row.id,
-      kcat: row.kcat,
-      km: row.km ?? 0,
-      solubility: row.solubility,
-      tm: row.tm,
+      kcat: Number.isFinite(Number(row.kcat)) && row.kcat !== '' && row.kcat !== null ? Number(row.kcat) : null,
+      km: Number.isFinite(Number(row.km)) && row.km !== '' && row.km !== null ? Number(row.km) : null,
+      solubility: Number.isFinite(Number(row.solubility)) && row.solubility !== '' && row.solubility !== null ? Number(row.solubility) : null,
+      tm: Number.isFinite(Number(row.tm)) && row.tm !== '' && row.tm !== null ? Number(row.tm) : null,
       ec_top1: row.ec_top1 || '',
-      ec_score1: row.ec_score1 ?? 0,
+      ec_score1: row.ec_top1 ? finiteNumberOrNull(row.ec_score1) : null,
       ec_top2: row.ec_top2 || '',
-      ec_score2: row.ec_score2 ?? 0,
+      ec_score2: row.ec_top2 ? finiteNumberOrNull(row.ec_score2) : null,
       ec_top3: row.ec_top3 || '',
-      ec_score3: row.ec_score3 ?? 0,
+      ec_score3: row.ec_top3 ? finiteNumberOrNull(row.ec_score3) : null,
       sources: {
         cataPro: row.cataPro_source,
         solubility: row.solubility_source,
@@ -1242,7 +1200,7 @@ function formatPredictedMetricsRows(allRows, subWeights, tmTarget) {
       },
       ...normMap.get(row.id),
     }))
-    .sort((a, b) => b.predictedScore - a.predictedScore);
+    .sort((a, b) => (b.predictedScore ?? -1) - (a.predictedScore ?? -1));
 }
 
 function summarizePredictionServiceUsage(rows) {
@@ -1268,16 +1226,16 @@ async function loadPredictedMetricsMap(workDir) {
     for (const r of rows) {
       map.set(r.id, {
         id: r.id,
-        kcat: Number(r.kcat),
-        km: Number(r.km) || 0,
-        solubility: Number(r.solubility),
-        tm: Number(r.tm),
+        kcat: r.kcat === '' ? null : Number(r.kcat),
+        km: r.km === '' ? null : Number(r.km),
+        solubility: r.solubility === '' ? null : Number(r.solubility),
+        tm: r.tm === '' ? null : Number(r.tm),
         ec_top1: r.ec_top1 || '',
-        ec_score1: Number(r.ec_score1) || 0,
+        ec_score1: r.ec_score1 === '' ? null : finiteNumberOrNull(r.ec_score1),
         ec_top2: r.ec_top2 || '',
-        ec_score2: Number(r.ec_score2) || 0,
+        ec_score2: r.ec_score2 === '' ? null : finiteNumberOrNull(r.ec_score2),
         ec_top3: r.ec_top3 || '',
-        ec_score3: Number(r.ec_score3) || 0,
+        ec_score3: r.ec_score3 === '' ? null : finiteNumberOrNull(r.ec_score3),
         cataPro_source: r.cataPro_source || '',
         solubility_source: r.solubility_source || '',
         tm_source: r.tm_source || '',
@@ -1292,30 +1250,38 @@ async function loadPredictedMetricsMap(workDir) {
 
 const PREDICTION_NAMES = ['cataPro', 'solubility', 'ec', 'tm'];
 
-function hasValidPredictionSource(value) {
-  return value === 'real' || value === 'mock';
+function hasValidPredictionSource(value, { allowMock = false } = {}) {
+  return value === 'real' || (allowMock && value === 'mock');
 }
 
-function predictionRowHasValidValue(row, predictor) {
+function isRealPrediction(row, predictor) {
+  if (predictor === 'cataPro') return row?.cataPro_source === 'real';
+  if (predictor === 'solubility') return row?.solubility_source === 'real';
+  if (predictor === 'tm') return row?.tm_source === 'real';
+  if (predictor === 'ec') return row?.ec_source === 'real';
+  return false;
+}
+
+async function isDemoPredictionTask(workDir) {
+  try {
+    const meta = JSON.parse(await fs.readFile(path.join(workDir, 'task.json'), 'utf-8'));
+    return Boolean(meta?.exampleId);
+  } catch {
+    return false;
+  }
+}
+
+function predictionRowHasValidValue(row, predictor, { allowMock = false } = {}) {
   if (!row) return false;
-  if (predictor === 'cataPro') {
-    return hasValidPredictionSource(row.cataPro_source)
-      && Number.isFinite(Number(row.kcat))
-      && Number.isFinite(Number(row.km));
-  }
-  if (predictor === 'solubility') {
-    return hasValidPredictionSource(row.solubility_source)
-      && Number.isFinite(Number(row.solubility));
-  }
-  if (predictor === 'tm') {
-    return hasValidPredictionSource(row.tm_source)
-      && Number.isFinite(Number(row.tm));
-  }
-  if (predictor === 'ec') {
-    return hasValidPredictionSource(row.ec_source)
-      && Boolean(String(row.ec_top1 || '').trim())
-      && Number.isFinite(Number(row.ec_score1));
-  }
+  const source = predictor === 'cataPro' ? row.cataPro_source
+    : predictor === 'solubility' ? row.solubility_source
+      : predictor === 'tm' ? row.tm_source : row.ec_source;
+  if (source === 'failed' || source === 'missing') return true;
+  if (!hasValidPredictionSource(source, { allowMock })) return false;
+  if (predictor === 'cataPro') return Number.isFinite(Number(row.kcat)) && Number.isFinite(Number(row.km));
+  if (predictor === 'solubility') return Number.isFinite(Number(row.solubility));
+  if (predictor === 'tm') return Number.isFinite(Number(row.tm));
+  if (predictor === 'ec') return Boolean(String(row.ec_top1 || '').trim()) && Number.isFinite(Number(row.ec_score1));
   return false;
 }
 
@@ -1342,7 +1308,18 @@ function predictionInputContextMatches({
 
   const cachedUrl = String(cachedContext.predictors?.[predictor]?.url || '');
   const currentUrl = String(currentContext.predictors?.[predictor]?.url || '');
-  return Boolean(cachedUrl && currentUrl && cachedUrl === currentUrl);
+  const cachedMode = String(cachedContext.predictors?.[predictor]?.mode || '');
+  const currentMode = String(currentContext.predictors?.[predictor]?.mode || '');
+  if (!cachedUrl || !currentUrl || cachedUrl !== currentUrl) return false;
+
+  // A completed real prediction remains valid when the service later goes
+  // offline. Mode invalidation is deliberately asymmetric: unavailable/mock
+  // caches are retried when a real service becomes available, but temporary
+  // service loss must never erase or hide previously obtained real evidence.
+  if (cachedMode === 'real') return ['real', 'unavailable', 'mock'].includes(currentMode);
+  if (cachedMode === 'mock') return currentMode === 'mock';
+  if (cachedMode === 'unavailable') return currentMode === 'unavailable';
+  return false;
 }
 
 function predictionNeedsRecompute({
@@ -1364,7 +1341,9 @@ function predictionNeedsRecompute({
     currentContext,
     cachedSequenceHashes,
     currentSequenceHashes,
-  }) || !predictionRowHasValidValue(row, predictor);
+  }) || !predictionRowHasValidValue(row, predictor, {
+    allowMock: currentContext.predictors?.[predictor]?.mode === 'mock',
+  });
 }
 
 async function getPredictionArtifactStatus(workDir, { smiles = '' } = {}) {
@@ -1418,18 +1397,32 @@ async function getPredictionArtifactStatus(workDir, { smiles = '' } = {}) {
   const fastaText = await fs.readFile(sourceFasta, 'utf-8');
   const seqLookup = buildSequenceLookup(parseFastaRecords(fastaText));
   const normalizedSmiles = String(smiles || '').trim();
-  // Availability/mode does not invalidate a completed cache: normal runs must
-  // keep using mock results until the user explicitly chooses recomputation.
+  const allowMock = await isDemoPredictionTask(workDir);
+  const [loadedCachedMeta, existing] = await Promise.all([
+    loadPredictionCacheMeta(workDir),
+    loadPredictedMetricsMap(workDir),
+  ]);
+  const [cataProOnline, solubilityOnline, ecOnline, tmOnline] = await Promise.all([
+    checkServiceHealth(CATAPRO_URL),
+    checkServiceHealth(SOL_URL),
+    checkServiceHealth(EC_URL),
+    checkServiceHealth(TM_URL),
+  ]);
   const currentContext = buildPredictionCacheContext({
     candidateIds,
     seqLookup,
     smiles: normalizedSmiles,
-    modes: { cataPro: Boolean(normalizedSmiles), solubility: false, ec: false, tm: false },
+    modes: allowMock ? { cataPro: false, solubility: false, ec: false, tm: false } : {
+      cataPro: Boolean(cataProOnline && normalizedSmiles),
+      solubility: solubilityOnline,
+      ec: ecOnline,
+      tm: tmOnline,
+    },
+    allowMock,
   });
-  const [cachedMeta, existing] = await Promise.all([
-    loadPredictionCacheMeta(workDir),
-    loadPredictedMetricsMap(workDir),
-  ]);
+  // Bundled examples predate cache metadata. Treat their explicitly labelled
+  // mock CSV as a demo artifact; production/legacy tasks remain stale.
+  const cachedMeta = loadedCachedMeta || (allowMock && existing.size ? currentContext : null);
   const cachedSequenceHashes = sequenceHashMapFromCacheContext(cachedMeta);
   const currentSequenceHashes = sequenceHashMapFromCacheContext(currentContext);
   const pendingIds = new Set();
@@ -4171,6 +4164,7 @@ route.post('/api/examples/load', async (req, res) => {
       seqLookup,
       smiles: '',
       modes: { cataPro: false, solubility: false, ec: false, tm: false },
+      allowMock: true,
     });
     await writePredictionCacheMeta(taskDir, predictionContext);
 
@@ -6631,6 +6625,8 @@ route.get('/api/network/predicted-metrics', async (req, res) => {
       subWeights,
       smiles: smiles || null,
       services: summarizePredictionServiceUsage(allRows),
+      predictionMode: await isDemoPredictionTask(workDir) ? 'demo' : 'production',
+      scientificWarning: 'Only real predictor outputs are eligible for property scoring, filtering, and recommendation.',
       rows,
     });
   } catch (err) {
@@ -6651,6 +6647,7 @@ route.post('/api/network/predict-metrics', async (req, res) => {
       const tmTarget = Number.isFinite(Number(req.body?.tmTarget)) ? Number(req.body.tmTarget) : 60;
       const subWeights = normalizePredictedSubWeights(req.body?.subWeights);
       const smiles = String(req.body?.smiles || '').trim();
+      const allowMock = await isDemoPredictionTask(workDir);
 
       const [cataProOnline, solOnline, ecOnline, tmOnline] = await Promise.all([
         checkServiceHealth(CATAPRO_URL),
@@ -6666,8 +6663,8 @@ route.post('/api/network/predict-metrics', async (req, res) => {
         tm: tmOnline,
       };
 
-      pushRuntimeLine(`[predict-metrics] services: cataPro=${cataProOnline ? 'online' : 'offline'}${!smiles && cataProOnline ? ' (no SMILES provided, using mock kcat/Km)' : ''}, sol=${solOnline ? 'online' : 'offline'}, ec=${ecOnline ? 'online' : 'offline'}, tm=${tmOnline ? 'online' : 'offline'}`);
-      pushRuntimeLine(`[predict-metrics] mode: kcat/Km=${modes.cataPro ? 'real-preferred' : 'mock'}, sol=${modes.solubility ? 'real-preferred' : 'mock'}, ec=${modes.ec ? 'real-preferred' : 'mock'}, tm=${modes.tm ? 'real-preferred' : 'mock'}`);
+      pushRuntimeLine(`[predict-metrics] services: cataPro=${cataProOnline ? 'online' : 'offline'}${!smiles && cataProOnline ? ' (SMILES missing)' : ''}, sol=${solOnline ? 'online' : 'offline'}, ec=${ecOnline ? 'online' : 'offline'}, tm=${tmOnline ? 'online' : 'offline'}`);
+      pushRuntimeLine(`[predict-metrics] safety mode: ${allowMock ? 'demo (mock fallback allowed)' : 'production (mock disabled; unavailable values remain missing/failed)'}`);
 
       const { rows: nodeRows } = await readCsvRows(path.join(workDir, 'nodes.csv'));
       const candidateIds = nodeRows.filter((n) => String(n.is_reference) !== '1').map((n) => n.id);
@@ -6678,7 +6675,7 @@ route.post('/api/network/predict-metrics', async (req, res) => {
       const fastaText = await fs.readFile(candFastaPath, 'utf-8');
       const seqLookup = buildSequenceLookup(parseFastaRecords(fastaText));
 
-      const cacheContext = buildPredictionCacheContext({ candidateIds, seqLookup, smiles, modes });
+      const cacheContext = buildPredictionCacheContext({ candidateIds, seqLookup, smiles, modes, allowMock });
       const cachedMeta = forceRecompute ? null : await loadPredictionCacheMeta(workDir);
       const existing = forceRecompute ? new Map() : await loadPredictedMetricsMap(workDir);
       if (forceRecompute) {
@@ -6689,11 +6686,9 @@ route.post('/api/network/predict-metrics', async (req, res) => {
         pushRuntimeLine('[predict-metrics] prediction context changed; validating each cached predictor independently');
       }
 
-      // Cache each predictor independently. A cached mock is a completed result,
-      // not a failed cache entry: a normal Run must reuse it even if the service
-      // health check later reports online. Recompute All remains the explicit way
-      // to refresh predictions. Sequence changes invalidate all predictors for
-      // that sequence, while a SMILES change invalidates only CataPro.
+      // Cache each predictor independently. Production mock rows are invalidated.
+      // Failed/missing attempts are reusable while service mode is unchanged; when
+      // a service recovers its mode changes and the affected predictor is retried.
       const itemsByPredictor = Object.fromEntries(PREDICTION_NAMES.map((name) => [name, []]));
       const recomputeById = new Map();
       const cachedSequenceHashes = sequenceHashMapFromCacheContext(cachedMeta);
@@ -6732,19 +6727,19 @@ route.post('/api/network/predict-metrics', async (req, res) => {
       const predictorUnitCount = Object.values(predictorCounts).reduce((sum, count) => sum + count, 0);
       if (predictorUnitCount > 0) {
         pushRuntimeLine(`[predict-metrics] running ${predictorUnitCount} predictor unit(s) for ${recomputedCount} sequence(s), application batch size=${PREDICTION_BATCH_SIZE}: kcat/Km=${predictorCounts.cataPro}, sol=${predictorCounts.solubility}, EC=${predictorCounts.ec}, Tm=${predictorCounts.tm}`);
-        const progress = createPredictionProgressTracker(itemsByPredictor, modes);
+        const progress = createPredictionProgressTracker(itemsByPredictor, modes, allowMock);
         const [cataProResults, solubilityResults, ecResults, tmResults] = await Promise.all([
           itemsByPredictor.cataPro.length
-            ? runCataProPredictions(itemsByPredictor.cataPro, smiles, modes.cataPro, progress)
+            ? runCataProPredictions(itemsByPredictor.cataPro, smiles, modes.cataPro, allowMock, progress)
             : Promise.resolve(new Map()),
           itemsByPredictor.solubility.length
-            ? runSolubilityPredictions(itemsByPredictor.solubility, modes.solubility, progress)
+            ? runSolubilityPredictions(itemsByPredictor.solubility, modes.solubility, allowMock, progress)
             : Promise.resolve(new Map()),
           itemsByPredictor.ec.length
-            ? runECPredictions(itemsByPredictor.ec, modes.ec, progress)
+            ? runECPredictions(itemsByPredictor.ec, modes.ec, allowMock, progress)
             : Promise.resolve(new Map()),
           itemsByPredictor.tm.length
-            ? runTmPredictions(itemsByPredictor.tm, modes.tm, progress)
+            ? runTmPredictions(itemsByPredictor.tm, modes.tm, allowMock, progress)
             : Promise.resolve(new Map()),
         ]);
 
@@ -6752,14 +6747,14 @@ route.post('/api/network/predict-metrics', async (req, res) => {
           const row = { ...(existing.get(id) || {}), id };
           if (predictors.has('cataPro')) {
             const result = cataProResults.get(id);
-            row.kcat = result?.kcat ?? 0;
-            row.km = result?.km ?? 0;
-            row.cataPro_source = result?.source || 'mock';
+            row.kcat = result?.kcat ?? '';
+            row.km = result?.km ?? '';
+            row.cataPro_source = result?.source || 'failed';
           }
           if (predictors.has('solubility')) {
             const result = solubilityResults.get(id);
-            row.solubility = result?.score ?? 0;
-            row.solubility_source = result?.source || 'mock';
+            row.solubility = result?.score ?? '';
+            row.solubility_source = result?.source || 'failed';
           }
           if (predictors.has('ec')) {
             const result = ecResults.get(id);
@@ -6770,12 +6765,12 @@ route.post('/api/network/predict-metrics', async (req, res) => {
             row.ec_score2 = entries[1]?.score || 0;
             row.ec_top3 = entries[2]?.ec || '';
             row.ec_score3 = entries[2]?.score || 0;
-            row.ec_source = result?.source || 'mock';
+            row.ec_source = result?.source || 'failed';
           }
           if (predictors.has('tm')) {
             const result = tmResults.get(id);
-            row.tm = result?.value ?? 0;
-            row.tm_source = result?.source || 'mock';
+            row.tm = result?.value ?? '';
+            row.tm_source = result?.source || 'failed';
           }
           existing.set(id, row);
         }
@@ -6817,6 +6812,8 @@ route.post('/api/network/predict-metrics', async (req, res) => {
         subWeights,
         smiles: smiles || null,
         services: realServiceUsage,
+        predictionMode: allowMock ? 'demo' : 'production',
+        scientificWarning: allowMock ? 'Synthetic mock values are for demonstration only and are excluded from scientific scoring.' : 'Only real predictor outputs are eligible for property scoring, filtering, and recommendation.',
         rows,
       });
       finishRuntimeTask('network/predict-metrics', true);
@@ -6973,7 +6970,9 @@ route.post('/api/network/recommend-candidates', async (req, res) => {
         
         const classCount = componentClasses.get(rootId)?.size || 1;
         const taxonomyDiv = classCount / maxClassCount;
-        const predictedScore = predictedNormMap.get(node.id)?.predictedScore ?? 0;
+        const predictedMetrics = predictedNormMap.get(node.id);
+        const predictedScore = predictedMetrics?.predictedScore ?? 0;
+        const propertyCoverage = predictedMetrics?.propertyCoverage ?? 0;
 
         const score =
           weights.avgRefSimilarity * avgRefSim +
@@ -7003,6 +7002,7 @@ route.post('/api/network/recommend-candidates', async (req, res) => {
           networkComponentSizeNorm: Number(compSizeNorm.toFixed(4)),
           taxonomyDiversity: Number(taxonomyDiv.toFixed(4)),
           predictedScore: Number(predictedScore.toFixed(4)),
+          propertyCoverage: Number(propertyCoverage.toFixed(4)),
           score: Number(score.toFixed(4)),
           refEdgeCount: sims.length,
         });
@@ -7473,6 +7473,7 @@ function normalizeManualFilterConditions(rawConditions) {
 }
 
 function finiteNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -7576,18 +7577,19 @@ async function buildManualFilterRows(workDir, ids, predictedSubWeights, tmTarget
       genus: meta.genus || '',
       species: meta.species || '',
       description: meta.description || '',
-      kcat: finiteNumberOrNull(predicted.kcat),
-      km: finiteNumberOrNull(predicted.km),
+      kcat: isRealPrediction(predicted, 'cataPro') ? finiteNumberOrNull(predicted.kcat) : null,
+      km: isRealPrediction(predicted, 'cataPro') ? finiteNumberOrNull(predicted.km) : null,
       catalytic_efficiency: finiteNumberOrNull(normalized.catalyticEfficiency),
-      solubility: finiteNumberOrNull(predicted.solubility),
-      tm: finiteNumberOrNull(predicted.tm),
-      ec_top1: predicted.ec_top1 || '',
-      ec_score1: finiteNumberOrNull(predicted.ec_score1),
-      ec_top2: predicted.ec_top2 || '',
-      ec_score2: finiteNumberOrNull(predicted.ec_score2),
-      ec_top3: predicted.ec_top3 || '',
-      ec_score3: finiteNumberOrNull(predicted.ec_score3),
+      solubility: isRealPrediction(predicted, 'solubility') ? finiteNumberOrNull(predicted.solubility) : null,
+      tm: isRealPrediction(predicted, 'tm') ? finiteNumberOrNull(predicted.tm) : null,
+      ec_top1: isRealPrediction(predicted, 'ec') ? (predicted.ec_top1 || '') : '',
+      ec_score1: isRealPrediction(predicted, 'ec') ? finiteNumberOrNull(predicted.ec_score1) : null,
+      ec_top2: isRealPrediction(predicted, 'ec') ? (predicted.ec_top2 || '') : '',
+      ec_score2: isRealPrediction(predicted, 'ec') ? finiteNumberOrNull(predicted.ec_score2) : null,
+      ec_top3: isRealPrediction(predicted, 'ec') ? (predicted.ec_top3 || '') : '',
+      ec_score3: isRealPrediction(predicted, 'ec') ? finiteNumberOrNull(predicted.ec_score3) : null,
       predicted_score: finiteNumberOrNull(normalized.predictedScore),
+      property_coverage: finiteNumberOrNull(normalized.propertyCoverage),
       cataPro_source: predicted.cataPro_source || '',
       solubility_source: predicted.solubility_source || '',
       tm_source: predicted.tm_source || '',
@@ -7709,9 +7711,12 @@ route.post('/api/network/export-recommended-csv', async (req, res) => {
       'network_component_size_norm', 'taxonomy_diversity', 'recommendation_score',
       'kcat', 'km', 'catalytic_efficiency', 'solubility', 'tm',
       'ec_top1', 'ec_score1', 'ec_top2', 'ec_score2', 'ec_top3', 'ec_score3',
-      'catapro_source', 'solubility_source', 'tm_source', 'ec_source', 'predicted_score',
+      'catapro_source', 'solubility_source', 'tm_source', 'ec_source', 'predicted_score', 'property_coverage', 'scientific_eligibility',
     ];
-    const finiteOrBlank = (value) => Number.isFinite(Number(value)) ? Number(value) : '';
+    const finiteOrBlank = (value) => {
+      if (value === null || value === undefined || value === '') return '';
+      return Number.isFinite(Number(value)) ? Number(value) : '';
+    };
     const rows = ids.map((id) => {
       const rec = records.get(id);
       const meta = metadata.get(id) || {};
@@ -7760,16 +7765,21 @@ route.post('/api/network/export-recommended-csv', async (req, res) => {
         solubility: finiteOrBlank(predicted.solubility),
         tm: finiteOrBlank(predicted.tm),
         ec_top1: predicted.ec_top1 || '',
-        ec_score1: finiteOrBlank(predicted.ec_score1),
+        ec_score1: predicted.ec_top1 ? finiteOrBlank(predicted.ec_score1) : '',
         ec_top2: predicted.ec_top2 || '',
-        ec_score2: finiteOrBlank(predicted.ec_score2),
+        ec_score2: predicted.ec_top2 ? finiteOrBlank(predicted.ec_score2) : '',
         ec_top3: predicted.ec_top3 || '',
-        ec_score3: finiteOrBlank(predicted.ec_score3),
+        ec_score3: predicted.ec_top3 ? finiteOrBlank(predicted.ec_score3) : '',
         catapro_source: predicted.cataPro_source || '',
         solubility_source: predicted.solubility_source || '',
         tm_source: predicted.tm_source || '',
         ec_source: predicted.ec_source || '',
-        predicted_score: candidate.predictedScore ?? normalizedPredicted.predictedScore ?? '',
+        // Scientific property fields are always recomputed from the task's
+        // source-labelled prediction cache. Never trust browser-supplied
+        // recommendation state, which may predate the real-only policy.
+        predicted_score: normalizedPredicted.predictedScore ?? '',
+        property_coverage: normalizedPredicted.propertyCoverage ?? 0,
+        scientific_eligibility: (normalizedPredicted.propertyCoverage ?? 0) > 0 ? 'real-properties-only' : 'no-real-property-evidence',
       };
     });
     const csv = [headers.map(csvEscape).join(',')]

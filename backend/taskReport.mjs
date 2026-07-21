@@ -3,7 +3,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { createReadStream } from 'node:fs';
 
-const REPORT_SCHEMA_VERSION = '1.0';
+const REPORT_SCHEMA_VERSION = '1.1';
 
 // Tsinghua University visual identity primary purple: RGB 102/8/116 (#660874).
 const TSINGHUA_PURPLE = '#660874';
@@ -13,6 +13,18 @@ const DEFAULT_SCORING_RULES = [
   { pos: 18, allowed: ['G'], score: 5, label: 'FAD_18_G' },
   { pos: 660, allowed: ['Uni'], score: -0.1, label: 'PTS_660' },
 ];
+const DEFAULT_RECOMMEND_WEIGHTS = {
+  avgRefSimilarity: 0.28,
+  maxRefSimilarity: 0.20,
+  clusterSize: 0.24,
+  taxonomyDiversity: 0.08,
+  predictedScore: 0.20,
+};
+const DEFAULT_PREDICTED_SUB_WEIGHTS = {
+  kcat: 0.50,
+  solubility: 0.25,
+  tm: 0.25,
+};
 const TEMPLATE_FILES = {
   en: 'task-report.en.md',
   zh: 'task-report.zh.md',
@@ -122,6 +134,12 @@ function formatDecimal(value, digits = 4) {
   if (!Number.isFinite(number)) return '—';
   if (number !== 0 && (Math.abs(number) >= 100000 || Math.abs(number) < 0.001)) return number.toExponential(3);
   return number.toFixed(digits).replace(/\.?0+$/, '');
+}
+
+function formatFractionPercent(value, digits = 1) {
+  if (value === null || value === undefined || value === '') return '—';
+  const number = Number(value);
+  return Number.isFinite(number) ? `${formatDecimal(number * 100, digits)}%` : '—';
 }
 
 function formatBytes(value) {
@@ -317,6 +335,40 @@ function stepRowsFor(module, state, counts, t) {
   });
 }
 
+function methodologyOverview(module, language) {
+  if (language === 'zh') {
+    const workflow = module === 'blast'
+      ? '本任务先用参考序列执行 BLAST 同源搜索，再按 E-value、序列一致性、覆盖度和长度等保存的条件筛选候选序列。'
+      : module === 'compare'
+        ? '本任务从两个已有任务读取网络结果，按保存的集合操作合并或比较候选序列；它不会重新执行原始数据库搜索。'
+        : '本任务先由参考序列构建 HMM profile，再用 HMMER 搜索同源序列，并按 HMM 分数、长度和一致性等保存的条件筛选候选序列。';
+    return [
+      workflow,
+      '筛选后的序列随后可依次进入多序列比对、活性位点规则打分、去冗余/网络分组、性质预测、人工硬筛选和多指标推荐。后面的步骤只读取前一步保存的产物；本报告本身不会重新计算任何结果。',
+      '### 通用读数规则',
+      '- `—` 表示当前任务没有保存该值，不能按 0 解读。',
+      '- “数量”描述数据如何流经工作流，不等同于实验验证数量；去重、参考序列加入比对或缺失文件都可能使相邻步骤的数量不严格递减。',
+      '- 相似度、综合分和归一化指标只有在同一任务、同一参数下才适合直接比较。推荐分是排序分，不是成功概率、酶活预测值或实验结论。',
+      '- 报告中的“更高/更低更好”均指当前计算规则下的排序方向，仍需结合序列新颖性、实验目标和数据来源判断。',
+    ].join('\n\n');
+  }
+
+  const workflow = module === 'blast'
+    ? 'This task first uses the reference sequences for a BLAST homology search, then filters candidates using the saved E-value, identity, coverage, and length criteria.'
+    : module === 'compare'
+      ? 'This task reads network results from two existing tasks and compares or combines candidates using the saved set operation; it does not rerun the original database searches.'
+      : 'This task first builds an HMM profile from the reference sequences, searches for homologs with HMMER, and filters candidates using the saved HMM-score, length, and identity criteria.';
+  return [
+    workflow,
+    'Retained sequences may then pass through multiple sequence alignment, rule-based active-site scoring, deduplication/network grouping, property prediction, optional hard filtering, and multi-criteria recommendation. Each downstream step reads saved artifacts from earlier steps; generating this report does not recompute them.',
+    '### General reading rules',
+    '- `—` means that the value was not saved for this task; it must not be interpreted as zero.',
+    '- Counts describe data flow, not experimental validation. Deduplication, inclusion of references in an alignment, or missing artifacts can prevent adjacent counts from decreasing monotonically.',
+    '- Similarities, composite scores, and normalized metrics are directly comparable only within the same task and parameter settings. A recommendation score is a ranking score, not a probability of success, an activity prediction, or experimental proof.',
+    '- “Higher/lower is better” describes the direction of the current calculation only; sequence novelty, experimental objectives, and evidence provenance still require scientific judgment.',
+  ].join('\n\n');
+}
+
 function conditionDescription(condition, language) {
   const labels = language === 'zh'
     ? { contains: '包含', equals: '等于', gte: '≥', lte: '≤', gt: '>', lt: '<', between: '介于' }
@@ -332,10 +384,13 @@ function recommendationRows(results, limit = 30) {
     index + 1,
     row.id,
     formatDecimal(row.score ?? row.recommendation_score),
-    formatDecimal(row.avgRefSimilarity ?? row.avg_ref_similarity),
-    formatDecimal(row.maxRefSimilarity ?? row.max_ref_similarity),
+    formatFractionPercent(row.avgRefSimilarity ?? row.avg_ref_similarity),
+    formatFractionPercent(row.maxRefSimilarity ?? row.max_ref_similarity),
     row.cluster || row.networkComponent || row.network_component || '—',
+    row.networkComponentSize ?? row.cluster_size ?? '—',
+    formatDecimal(row.taxonomyDiversity ?? row.taxonomy_diversity),
     formatDecimal(row.predictedScore ?? row.predicted_score),
+    formatFractionPercent(row.propertyCoverage ?? row.property_coverage),
     row.species || '—',
   ]);
 }
@@ -553,10 +608,14 @@ export async function buildTaskReport({ taskId, workDir, projectRoot, appVersion
   const predictionCsv = await scanCsv(predictionsPath, {
     sampleLimit: 0,
     onRow(row) {
-      const kcat = finiteValue(row.kcat);
-      const km = finiteValue(row.km);
-      const solubility = finiteValue(row.solubility);
-      const tm = finiteValue(row.tm);
+      const cataProReal = String(row.cataPro_source || '') === 'real';
+      const solubilityReal = String(row.solubility_source || '') === 'real';
+      const tmReal = String(row.tm_source || '') === 'real';
+      const ecReal = String(row.ec_source || '') === 'real';
+      const kcat = cataProReal ? finiteValue(row.kcat) : null;
+      const km = cataProReal ? finiteValue(row.km) : null;
+      const solubility = solubilityReal ? finiteValue(row.solubility) : null;
+      const tm = tmReal ? finiteValue(row.tm) : null;
       if (kcat !== null) predictionValues.kcat.push(kcat);
       if (km !== null) predictionValues.km.push(km);
       if (kcat !== null && km !== null && km !== 0) predictionValues.efficiency.push(kcat / km);
@@ -567,14 +626,14 @@ export async function buildTaskReport({ taskId, workDir, projectRoot, appVersion
         predictionSources[key].set(source, (predictionSources[key].get(source) || 0) + 1);
       }
       const score = kcat !== null && km !== null && km !== 0 ? kcat / km : -Infinity;
-      topPredictions.push({ id: row.id || '', ec: [row.ec_top1, row.ec_top2, row.ec_top3].filter(Boolean).join(', '), kcat, km, efficiency: score, solubility, tm });
+      topPredictions.push({ id: row.id || '', ec: ecReal ? [row.ec_top1, row.ec_top2, row.ec_top3].filter(Boolean).join(', ') : '', kcat, km, efficiency: score, solubility, tm });
       topPredictions.sort((a, b) => b.efficiency - a.efficiency);
       if (topPredictions.length > 10) topPredictions.pop();
     },
   });
 
   const recommendFilter = state?.recommendFilter || {};
-  const recommendMeta = state?.recommendMeta || {};
+  const recommendMeta = state?.recommendMeta && typeof state.recommendMeta === 'object' ? state.recommendMeta : null;
   const recommendResults = Array.isArray(state?.recommendResults) ? state.recommendResults : [];
   const conditions = Array.isArray(recommendFilter?.conditions) ? recommendFilter.conditions : [];
   const counts = {
@@ -608,7 +667,10 @@ export async function buildTaskReport({ taskId, workDir, projectRoot, appVersion
   }
   const predictionSourceNames = Object.values(predictionSources).flatMap((sources) => Array.from(sources.keys()));
   if (predictionSourceNames.includes('mock')) {
-    warnings.push(language === 'zh' ? '性质预测结果中包含 Mock 模拟数据。' : 'The property prediction results include Mock data.');
+    warnings.push(language === 'zh' ? '性质预测结果中包含 Mock 合成数据；这些值仅用于演示，已从归一化、筛选和推荐的科学评分中排除，不得作为生物学结论。' : 'Property predictions include synthetic Mock data. These values are demo-only, are excluded from scientific normalization/filtering/recommendation, and must not be interpreted biologically.');
+  }
+  if (predictionSourceNames.some((source) => source === 'failed' || source === 'missing' || source === 'unknown')) {
+    warnings.push(language === 'zh' ? '部分性质预测失败或缺失；相应指标不参与该候选序列的性质评分，报告中的性质统计仅使用来源为 real 的值。' : 'Some property predictions failed or are missing. Those metrics do not contribute to candidate property scores, and report statistics use real-source values only.');
   }
   if (!nodesPath && (counts.clustered || counts.predicted)) {
     warnings.push(language === 'zh' ? '未找到 nodes.csv，无法完成网络候选序列一致性检查。' : 'nodes.csv is missing, so network candidate consistency could not be verified.');
@@ -774,22 +836,85 @@ export async function buildTaskReport({ taskId, workDir, projectRoot, appVersion
       ? `没有有效的人工筛选条件。Recommendation 默认从全部网络候选序列构建候选池。\n\n${markdownTable([t.metric, t.count], [[t.predicted, counts.predicted], [t.networkCandidates, counts.networkCandidates]])}`
       : `No active manual filter conditions were saved. Recommendation therefore uses all network candidates as its initial pool.\n\n${markdownTable([t.metric, t.count], [[t.predicted, counts.predicted], [t.networkCandidates, counts.networkCandidates]])}`);
 
-  const recommendationParameters = [
-    ['Top N', state?.recommendTopN], ['Minimum cluster size', state?.recommendMinClusterSize], ['Minimum similarity', state?.recommendMinSimilarity],
-    ['Connectivity threshold', state?.recommendNetworkConnectivityThreshold], ['Diversity mode', state?.recommendDiversityMode], ['Temperature', state?.recommendTemperature],
-  ].filter(([, value]) => value !== null && value !== undefined && value !== '');
-  const weightRows = Object.entries(state?.recommendWeights || {}).map(([key, value]) => [key, formatDecimal(value)]);
+  const savedRecommendWeights = state?.recommendWeights && typeof state.recommendWeights === 'object'
+    ? state.recommendWeights
+    : (recommendMeta?.weights && typeof recommendMeta.weights === 'object' ? recommendMeta.weights : {});
+  const recommendationWeights = { ...DEFAULT_RECOMMEND_WEIGHTS, ...savedRecommendWeights };
+  const savedPredictedSubWeights = state?.predictedSubWeights && typeof state.predictedSubWeights === 'object'
+    ? state.predictedSubWeights
+    : (recommendMeta?.predictedSubWeights && typeof recommendMeta.predictedSubWeights === 'object' ? recommendMeta.predictedSubWeights : {});
+  const predictedSubWeights = { ...DEFAULT_PREDICTED_SUB_WEIGHTS, ...savedPredictedSubWeights };
+  const predictedTmTarget = state?.predictedTmTarget ?? recommendMeta?.predictedTmTarget ?? 60;
+  const diversityMode = state?.recommendDiversityMode ?? recommendMeta?.diversityMode;
+  const diversityModeDisplay = diversityMode === 'round-robin'
+    ? (language === 'zh' ? 'round-robin（轮询）' : 'round-robin')
+    : diversityMode === 'proportional'
+      ? (language === 'zh' ? 'proportional（按比例）' : 'proportional')
+      : t.notAvailable;
+  const percentageParameter = (value) => value === null || value === undefined || value === '' ? t.notAvailable : `${formatDecimal(value)}%`;
+  const recommendationParameters = language === 'zh'
+    ? [
+      ['Top N', state?.recommendTopN ?? recommendMeta?.topN, '最终最多保留的候选数，是全局上限。', '增大可得到更长名单；不会改变单条候选的评分。'],
+      ['最小连通分量大小', state?.recommendMinClusterSize ?? recommendMeta?.minClusterSize, '候选所在网络连通分量的节点数下限；分量由 Connectivity Threshold 定义。', '调高会排除小分量和孤立序列，结果更保守但可能损失新颖序列。'],
+      ['最小参考相似度', percentageParameter(state?.recommendMinSimilarity ?? recommendMeta?.minSimilarity), '候选与最相似参考序列的相似度下限（百分比）。', '调高更偏向已知家族；调低可保留更远缘候选。'],
+      ['网络连通阈值', percentageParameter(state?.recommendNetworkConnectivityThreshold ?? recommendMeta?.networkConnectivityThreshold), '只有相似度达到该百分比的边才用于构建推荐所用的连通分量。', '调高通常使网络更碎、分量更小；调低通常合并更多序列。'],
+      ['多样化模式', diversityModeDisplay, '决定 Top N 名额如何在不同连通分量之间分配。', diversityMode === 'round-robin' ? '轮流从各分量选取，强调跨分量覆盖。' : '按各分量的合格候选数分配名额，大分量通常获得更多名额。'],
+      ['Temperature', state?.recommendTemperature ?? recommendMeta?.temperature, '控制分量内部选取的随机性，不改变评分公式。', '0 为确定性地优先高分；大于 0 使用 softmax 抽样，值越大选择越随机。'],
+    ]
+    : [
+      ['Top N', state?.recommendTopN ?? recommendMeta?.topN, 'Global maximum number of candidates retained in the final list.', 'Increasing it lengthens the list but does not change individual scores.'],
+      ['Minimum component size', state?.recommendMinClusterSize ?? recommendMeta?.minClusterSize, 'Minimum node count of the network component containing a candidate; components are defined by the connectivity threshold.', 'A higher value removes small components and singletons, making selection more conservative but potentially losing novel sequences.'],
+      ['Minimum reference similarity', percentageParameter(state?.recommendMinSimilarity ?? recommendMeta?.minSimilarity), 'Minimum similarity, in percent, between a candidate and its most similar reference.', 'A higher value favors known-family proximity; a lower value retains more distant candidates.'],
+      ['Network connectivity threshold', percentageParameter(state?.recommendNetworkConnectivityThreshold ?? recommendMeta?.networkConnectivityThreshold), 'Only edges at or above this percentage are used to construct recommendation components.', 'A higher value usually fragments the network; a lower value usually merges more sequences.'],
+      ['Diversity mode', diversityModeDisplay, 'Controls how Top N slots are allocated across network components.', diversityMode === 'round-robin' ? 'Rotates across components to emphasize cross-component coverage.' : 'Allocates slots in proportion to eligible component size, so large components usually receive more slots.'],
+      ['Temperature', state?.recommendTemperature ?? recommendMeta?.temperature, 'Controls randomness within each component without changing the scoring formula.', '0 deterministically favors the highest scores; values above 0 use softmax sampling, with larger values producing more randomness.'],
+    ];
+  const weightDefinitions = language === 'zh'
+    ? {
+      avgRefSimilarity: ['平均参考相似度', '候选与全部可用参考序列比较结果的平均值，归一化到 0–1。', '越高越增加推荐分，表示整体更接近参考集合；过高也可能意味着新颖性较低。'],
+      maxRefSimilarity: ['最大参考相似度', '候选与最相似参考序列的相似度，归一化到 0–1。', '越高越增加推荐分，表示至少与一条参考序列很接近。'],
+      clusterSize: ['连通分量大小', '评分实际使用 clusterSizeNorm：所在分量节点数 ÷ 当前最大分量节点数。', '越高越增加推荐分，偏向网络中证据更密集的大分量；它不等于实验可靠性。'],
+      taxonomyDiversity: ['分类多样性', '所在分量中不同 class 数 ÷ 当前所有分量中的最大 class 数。', '越高越增加推荐分，偏向分类来源更丰富的分量；它是分量级指标，不是单条序列自身的多样性。'],
+      predictedScore: ['性质预测综合分', '仅由来源为 real 的 kcat/Km、Solubility 和与目标 Tm 的接近程度归一化后合成。', '越高越增加推荐分；无真实性质证据时该项按 0 贡献，不能把高分当成实验活性。'],
+    }
+    : {
+      avgRefSimilarity: ['Average reference similarity', 'Mean similarity to all available reference comparisons, normalized to 0–1.', 'Higher values increase the score and indicate overall proximity to the reference set; very high values may also imply less novelty.'],
+      maxRefSimilarity: ['Maximum reference similarity', 'Similarity to the single most similar reference, normalized to 0–1.', 'Higher values increase the score and indicate that at least one close reference exists.'],
+      clusterSize: ['Network component size', 'The formula uses clusterSizeNorm: nodes in the component divided by nodes in the largest current component.', 'Higher values increase the score and favor densely represented components; this is not experimental reliability.'],
+      taxonomyDiversity: ['Taxonomic diversity', 'Distinct classes in the component divided by the maximum class count among current components.', 'Higher values increase the score and favor taxonomically broader components; this is a component-level property, not diversity of one sequence.'],
+      predictedScore: ['Composite property score', 'Combines normalized real-source kcat/Km, solubility, and closeness to the target Tm.', 'Higher values increase the score. With no real property evidence this component contributes 0; it is not experimental activity.'],
+    };
+  const weightRows = Object.keys(DEFAULT_RECOMMEND_WEIGHTS).map((key) => {
+    const [label, meaning, direction] = weightDefinitions[key];
+    return [`${key} (${label})`, formatDecimal(recommendationWeights[key]), meaning, direction];
+  });
+  const predictedScoreRows = language === 'zh'
+    ? [
+      ['kcat/Km', formatDecimal(predictedSubWeights.kcat), '先取 log10，再在当前候选池中做 min-max 归一化。', '越高越好；必须同时有 real kcat 和 real Km。'],
+      ['Solubility', formatDecimal(predictedSubWeights.solubility), '在当前候选池的 real 值中做 min-max 归一化。', '越高越好。'],
+      ['Tm', formatDecimal(predictedSubWeights.tm), `按与目标 ${formatDecimal(predictedTmTarget)} °C 的接近程度归一化。`, '越接近目标越好，并非 Tm 越高越好。'],
+    ]
+    : [
+      ['kcat/Km', formatDecimal(predictedSubWeights.kcat), 'log10 transform followed by min-max normalization within the current candidate pool.', 'Higher is better; both kcat and Km must have real provenance.'],
+      ['Solubility', formatDecimal(predictedSubWeights.solubility), 'Min-max normalization over real-source values in the current candidate pool.', 'Higher is better.'],
+      ['Tm', formatDecimal(predictedSubWeights.tm), `Normalized by closeness to the ${formatDecimal(predictedTmTarget)} °C target.`, 'Closer to the target is better; simply higher Tm is not always better.'],
+    ];
   const recommendationSection = counts.recommended || recommendMeta || recommendResults.length
     ? [
+      language === 'zh'
+        ? '推荐先对每条候选计算五维加权分，再按网络连通分量执行多样化选取。公式为：`Score = w1×avgRefSimilarity + w2×maxRefSimilarity + w3×clusterSizeNorm + w4×taxonomyDiversity + w5×predictedScore`。五个输入均按 0–1 使用，因此在权重非负时，**总分越高表示越符合当前设置的偏好**；总分不是成功概率。'
+        : 'Recommendation first calculates a five-component weighted score for every eligible candidate, then performs diversity-aware selection across network components. The formula is: `Score = w1×avgRefSimilarity + w2×maxRefSimilarity + w3×clusterSizeNorm + w4×taxonomyDiversity + w5×predictedScore`. All five inputs are used on a 0–1 scale, so with non-negative weights, **a higher total score means a better match to the current preferences**; it is not a probability of success.',
       markdownTable([t.metric, t.count], [
         [t.networkCandidates, counts.networkCandidates], [t.manualFiltered, counts.manualFiltered], [t.recommendationPool, counts.recommendationPool],
         [language === 'zh' ? '被最小聚类大小排除' : 'Excluded by minimum cluster size', Number(recommendMeta?.filteredByClusterSize || 0)],
         [language === 'zh' ? '被相似度阈值排除' : 'Excluded by similarity threshold', Number(recommendMeta?.filteredBySimilarity || 0)],
         [t.recommended, counts.recommended],
       ]),
-      recommendationParameters.length ? `### ${language === 'zh' ? '推荐参数' : 'Recommendation parameters'}\n\n${markdownTable([t.parameter, t.value], recommendationParameters)}` : '',
-      weightRows.length ? `### ${language === 'zh' ? '推荐权重' : 'Recommendation weights'}\n\n${markdownTable([language === 'zh' ? '评分项' : 'Score component', language === 'zh' ? '权重' : 'Weight'], weightRows)}` : '',
-      recommendResults.length ? `### ${language === 'zh' ? '推荐序列（最多显示 30 条）' : 'Recommended candidates (up to 30)'}\n\n${markdownTable(['#', 'ID', language === 'zh' ? '总分' : 'Score', language === 'zh' ? '平均参考相似度' : 'Avg ref sim.', language === 'zh' ? '最大参考相似度' : 'Max ref sim.', language === 'zh' ? '聚类' : 'Cluster', language === 'zh' ? '性质预测分' : 'Predicted score', language === 'zh' ? '物种' : 'Species'], recommendationRows(recommendResults))}` : '',
+      `### ${language === 'zh' ? '推荐参数及其影响' : 'Recommendation parameters and effects'}\n\n${markdownTable([t.parameter, t.value, language === 'zh' ? '控制什么' : 'What it controls', language === 'zh' ? '如何解读/调节' : 'How to interpret or tune'], recommendationParameters)}`,
+      `### ${language === 'zh' ? '推荐权重及指标方向' : 'Recommendation weights and metric direction'}\n\n${language === 'zh' ? '权重表示各指标对总分的相对影响：权重越大，该指标对排序越重要；权重为 0 表示忽略该指标。' : 'Weights express relative influence on the total score: a larger weight makes that component more important to ranking, while a weight of 0 ignores it.'}\n\n${markdownTable([language === 'zh' ? '评分项' : 'Score component', language === 'zh' ? '当前权重' : 'Current weight', language === 'zh' ? '具体含义' : 'Definition', language === 'zh' ? '方向与注意事项' : 'Direction and caveat'], weightRows)}`,
+      `### ${language === 'zh' ? 'predictedScore 的计算方法' : 'How predictedScore is calculated'}\n\n${markdownTable([language === 'zh' ? '子指标' : 'Submetric', language === 'zh' ? '子权重' : 'Subweight', language === 'zh' ? '处理方法' : 'Processing', language === 'zh' ? '方向' : 'Direction'], predictedScoreRows)}\n\n${language === 'zh' ? '`predictedScore` 只使用来源为 `real` 的值。某候选缺少一个子指标时，只在其余可用真实指标之间重新归一化子权重；`propertyCoverage` 表示原始子权重中有多少得到真实预测支持。' : '`predictedScore` uses only values with `real` provenance. If a candidate lacks a submetric, subweights are renormalized over its remaining real metrics; `propertyCoverage` reports how much of the original subweight mass is supported by real predictions.'}`,
+      `### ${language === 'zh' ? '多样化模式说明' : 'Diversity mode details'}\n\n${language === 'zh' ? '- **proportional（按比例）**：按每个连通分量中的合格候选数分配 Top N 名额。大分量获得更多名额，小分量可能为 0，适合希望结果仍反映总体数据分布时使用。\n- **round-robin（轮询）**：按分量轮流选 1 条，再开始下一轮，直到达到 Top N 或候选耗尽。它强调跨分量覆盖，因此可能选入总分低于某些未入选候选的序列。\n- 分量内部在 Temperature=0 时按分数从高到低选取；Temperature>0 时按 softmax 概率抽样。' : '- **proportional**: allocates Top N slots according to the eligible candidate count in each component. Large components receive more slots and small components may receive zero; use it when the result should reflect the overall data distribution.\n- **round-robin**: takes one candidate from each component in turn, then starts another round until Top N is reached or candidates are exhausted. It emphasizes cross-component coverage, so a selected candidate can have a lower score than an unselected candidate from another component.\n- Within each component, Temperature=0 selects by descending score; Temperature>0 samples using softmax probabilities.'}`,
+      recommendResults.length ? `### ${language === 'zh' ? '推荐序列（最多显示 30 条）' : 'Recommended candidates (up to 30)'}\n\n${markdownTable(['#', 'ID', language === 'zh' ? '总分' : 'Score', language === 'zh' ? '平均参考相似度' : 'Avg ref sim.', language === 'zh' ? '最大参考相似度' : 'Max ref sim.', language === 'zh' ? '连通分量' : 'Component', language === 'zh' ? '分量大小' : 'Component size', language === 'zh' ? '分类多样性' : 'Tax. diversity', language === 'zh' ? '性质预测分' : 'Predicted score', language === 'zh' ? '性质覆盖度' : 'Property coverage', language === 'zh' ? '物种' : 'Species'], recommendationRows(recommendResults))}\n\n${language === 'zh' ? '> 相似度显示为百分比；分类多样性和性质预测分范围为 0–1。若旧任务没有保存某列，显示为 `—`。最终表按总分排序，但入选集合仍受多样化模式和 Temperature 影响。' : '> Similarities are displayed as percentages; taxonomic diversity and predicted score range from 0 to 1. `—` indicates that an older task did not save the field. The final table is sorted by total score, but membership is still affected by diversity mode and Temperature.'}` : '',
     ].filter(Boolean).join('\n\n')
     : t.noData;
 
@@ -840,6 +965,7 @@ export async function buildTaskReport({ taskId, workDir, projectRoot, appVersion
     report_metadata_table: reportMetadataTable,
     executive_summary: bulletList(summaryItems),
     workflow_funnel_table: markdownTable([t.metric, t.count], funnelRows.map(([metric, count]) => [metric, formatNumber(count)])),
+    methodology_overview: methodologyOverview(module, language),
     workflow_status_table: markdownTable([t.step, t.status, t.input, t.output], stepRows),
     reference_section: referenceSection,
     search_section: searchSection || t.noData,

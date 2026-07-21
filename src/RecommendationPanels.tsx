@@ -194,6 +194,7 @@ export function SystemRecommendationResults({
               <th className="px-2 py-2 text-left">ID</th>
               <th className="px-2 py-2 text-right">Score</th>
               <th className="px-2 py-2 text-right">Predicted Score</th>
+              <th className="px-2 py-2 text-right">Property Coverage</th>
               <th className="px-2 py-2 text-right">Avg Ref Sim</th>
               <th className="px-2 py-2 text-right">Max Ref Sim</th>
               <th className="px-2 py-2 text-right">Ref Edges</th>
@@ -219,7 +220,8 @@ export function SystemRecommendationResults({
                   <td className="px-2 py-1.5 text-slate-400">{absoluteIndex + 1}</td>
                   <td className="max-w-[220px] break-all px-2 py-1.5 font-mono">{candidate.id}</td>
                   <td className="px-2 py-1.5 text-right font-semibold">{candidate.score.toFixed(4)}</td>
-                  <td className="px-2 py-1.5 text-right">{candidate.predictedScore.toFixed(4)}</td>
+                  <td className="px-2 py-1.5 text-right">{candidate.propertyCoverage > 0 ? candidate.predictedScore.toFixed(4) : '—'}</td>
+                  <td className="px-2 py-1.5 text-right">{`${((candidate.propertyCoverage || 0) * 100).toFixed(0)}%`}</td>
                   <td className="px-2 py-1.5 text-right">{(candidate.avgRefSimilarity * 100).toFixed(1)}%</td>
                   <td className="px-2 py-1.5 text-right">{(candidate.maxRefSimilarity * 100).toFixed(1)}%</td>
                   <td className="px-2 py-1.5 text-right">{candidate.refEdgeCount}</td>
@@ -731,6 +733,7 @@ export function ManualFilteringPanel({
                   <th className="w-24 px-2 py-2 text-right">Solubility</th>
                   <th className="w-20 px-2 py-2 text-right">Tm</th>
                   <th className="w-24 px-2 py-2 text-right">Pred. Score</th>
+                  <th className="w-20 px-2 py-2 text-right">Coverage</th>
                   <th className="w-28 px-2 py-2 text-right">Scoring Score</th>
                   <th className="w-16 px-2 py-2 text-right">Length</th>
                   <th className="w-36 px-2 py-2 text-left">Species</th>
@@ -760,6 +763,7 @@ export function ManualFilteringPanel({
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.solubility)}</td>
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.tm, 2)}</td>
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.predicted_score)}</td>
+                    <td className="px-2 py-1.5 text-right">{`${((row.property_coverage || 0) * 100).toFixed(0)}%`}</td>
                     <td className="px-2 py-1.5 text-right">{formatMetric(row.scoring_score)}</td>
                     <td className="px-2 py-1.5 text-right">{row.length ?? '—'}</td>
                     <td className="truncate whitespace-nowrap px-2 py-1.5" title={row.species}>{row.species || '—'}</td>
@@ -767,7 +771,7 @@ export function ManualFilteringPanel({
                   </tr>
                 ))}
                 {rows.length === 0 && (
-                  <tr><td colSpan={14} className="px-3 py-8 text-center text-sm text-slate-500">No candidates match the current filters.</td></tr>
+                  <tr><td colSpan={15} className="px-3 py-8 text-center text-sm text-slate-500">No candidates match the current filters.</td></tr>
                 )}
               </tbody>
             </table>

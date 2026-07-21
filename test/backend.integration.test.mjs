@@ -44,11 +44,12 @@ const fakeStats = {
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let fakeHealthOnline = true;
 
 const fakePredictor = http.createServer(async (req, res) => {
   if (req.url?.endsWith('/docs')) {
-    res.writeHead(200, { 'content-type': 'text/plain' });
-    res.end('ok');
+    res.writeHead(fakeHealthOnline ? 200 : 503, { 'content-type': 'text/plain' });
+    res.end(fakeHealthOnline ? 'ok' : 'offline');
     return;
   }
 
@@ -696,7 +697,7 @@ test('prediction uses kcat/Km, calls real Tm, and invalidates cache context', as
   assert.equal(fakeStats.tmItems, beforeSequenceChange.tm + 1);
 
   const meta = JSON.parse(await fs.readFile(path.join(taskDir, 'predicted_metrics.meta.json'), 'utf-8'));
-  assert.equal(meta.version, 2);
+  assert.equal(meta.version, 3);
   assert.equal(meta.smiles, 'CCC');
   assert.equal(meta.predictors.tm.mode, 'real');
   assert.equal(fakeStats.legacyPredictCalls, 0);
@@ -704,7 +705,7 @@ test('prediction uses kcat/Km, calls real Tm, and invalidates cache context', as
 });
 
 
-test('normal Run reuses a cached EC mock fallback instead of retrying EC', async () => {
+test('production Run records a failed EC result without mock fallback and reuses the attempted result', async () => {
   const taskId = 'ec-mock-cache-task';
   const taskDir = path.join(tasksRoot, taskId);
   await fs.mkdir(taskDir, { recursive: true });
@@ -727,7 +728,9 @@ test('normal Run reuses a cached EC mock fallback instead of retrying EC', async
   const first = await requestPrediction();
   assert.equal(first.response.status, 200);
   assert.equal(first.body.recomputedCount, 1);
-  assert.equal(first.body.rows[0].sources.ec, 'mock');
+  assert.equal(first.body.predictionMode, 'production');
+  assert.equal(first.body.rows[0].sources.ec, 'failed');
+  assert.equal(first.body.rows[0].ec_top1, '');
   assert.deepEqual(counts(), {
     cataPro: beforeFirst.cataPro + 1,
     solubility: beforeFirst.solubility + 1,
@@ -739,8 +742,8 @@ test('normal Run reuses a cached EC mock fallback instead of retrying EC', async
   const cached = await requestPrediction();
   assert.equal(cached.response.status, 200);
   assert.equal(cached.body.recomputedCount, 0);
-  assert.equal(cached.body.rows[0].sources.ec, 'mock');
-  assert.equal(cached.body.rows[0].ec_top1, first.body.rows[0].ec_top1);
+  assert.equal(cached.body.rows[0].sources.ec, 'failed');
+  assert.equal(cached.body.rows[0].ec_top1, '');
   assert.deepEqual(counts(), afterFirst, 'ordinary Run must not call any predictor when cache inputs match');
 
   const forced = await requestPrediction(true);
@@ -754,7 +757,80 @@ test('normal Run reuses a cached EC mock fallback instead of retrying EC', async
   });
 });
 
-test('prediction batches requests, reports real progress and ETA, and falls back per invalid item', async () => {
+test('real prediction cache remains usable when services later go offline', async () => {
+  const taskId = 'real-cache-offline-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  await fs.writeFile(path.join(taskDir, 'nodes.csv'), 'id,is_reference\nofflineSafe,0\n');
+  await fs.writeFile(path.join(taskDir, 'candidates.fasta'), '>offlineSafe\nAAAAAAAAAA\n');
+
+  const requestPrediction = () => api(`/api/network/predict-metrics?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ smiles: 'CCO' }),
+  });
+  const counts = () => ({
+    cataPro: fakeStats.cataProBatches.length,
+    solubility: fakeStats.solubilityBatches.length,
+    ec: fakeStats.ecBatches.length,
+    tm: fakeStats.tmItems,
+  });
+
+  const first = await requestPrediction();
+  assert.equal(first.response.status, 200);
+  assert.ok(Object.values(first.body.rows[0].sources).every((source) => source === 'real'));
+  const afterRealPrediction = counts();
+
+  fakeHealthOnline = false;
+  try {
+    const status = await api(`/api/network/prediction-status?taskId=${taskId}&smiles=CCO`);
+    assert.equal(status.response.status, 200);
+    assert.equal(status.body.state, 'ready');
+    assert.equal(status.body.cachedCount, 1);
+
+    const cachedRows = await api(`/api/network/predicted-metrics?taskId=${taskId}&smiles=CCO`);
+    assert.equal(cachedRows.response.status, 200);
+    assert.ok(Object.values(cachedRows.body.rows[0].sources).every((source) => source === 'real'));
+
+    const reused = await requestPrediction();
+    assert.equal(reused.response.status, 200);
+    assert.equal(reused.body.recomputedCount, 0);
+    assert.ok(Object.values(reused.body.rows[0].sources).every((source) => source === 'real'));
+    assert.deepEqual(counts(), afterRealPrediction, 'offline services must not replace valid real cache entries');
+  } finally {
+    fakeHealthOnline = true;
+  }
+});
+
+test('legacy production mock cache is stale and is replaced by real predictor results', async () => {
+  const taskId = 'legacy-production-mock-task';
+  const taskDir = path.join(tasksRoot, taskId);
+  await fs.mkdir(taskDir, { recursive: true });
+  await fs.writeFile(path.join(taskDir, 'task.json'), JSON.stringify({ id: taskId, module: 'hmmer' }));
+  await fs.writeFile(path.join(taskDir, 'nodes.csv'), 'id,is_reference\nlegacyA,0\n');
+  await fs.writeFile(path.join(taskDir, 'candidates.fasta'), '>legacyA\nAAAAAAAAAA\n');
+  await fs.writeFile(path.join(taskDir, 'predicted_metrics.csv'), [
+    'id,kcat,km,solubility,tm,ec_top1,ec_score1,cataPro_source,solubility_source,tm_source,ec_source',
+    'legacyA,99,99,0.99,99,1.1.1.1,0.99,mock,mock,mock,mock',
+  ].join('\n'));
+  await fs.writeFile(path.join(taskDir, 'predicted_metrics.meta.json'), JSON.stringify({ version: 2, smiles: 'CCO', predictors: {}, sequences: [] }));
+
+  const status = await api(`/api/network/prediction-status?taskId=${taskId}&smiles=CCO`);
+  assert.equal(status.response.status, 200);
+  assert.equal(status.body.state, 'stale');
+  assert.equal(status.body.pendingPredictorUnits, 4);
+
+  const refreshed = await api(`/api/network/predict-metrics?taskId=${taskId}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ smiles: 'CCO' }),
+  });
+  assert.equal(refreshed.response.status, 200);
+  assert.equal(refreshed.body.predictionMode, 'production');
+  assert.ok(Object.values(refreshed.body.rows[0].sources).every((source) => source === 'real'));
+  assert.equal(refreshed.body.rows[0].propertyCoverage, 1);
+  assert.notEqual(refreshed.body.rows[0].kcat, 99);
+});
+
+test('prediction batches requests, reports real progress and ETA, and marks invalid items failed without mock fallback', async () => {
   const taskId = 'batch-progress-task';
   const taskDir = path.join(tasksRoot, taskId);
   await fs.mkdir(taskDir, { recursive: true });
@@ -797,7 +873,9 @@ test('prediction batches requests, reports real progress and ETA, and falls back
   assert.equal(fakeStats.legacyPredictCalls, 0);
 
   const invalidSolRow = responseResult.body.rows.find((row) => row.id === 'batchX');
-  assert.equal(invalidSolRow.sources.solubility, 'mock');
+  assert.equal(invalidSolRow.sources.solubility, 'failed');
+  assert.equal(invalidSolRow.solubility, null);
+  assert.equal(invalidSolRow.propertyCoverage, 0.6667);
   assert.equal(invalidSolRow.sources.cataPro, 'real');
   assert.equal(invalidSolRow.sources.ec, 'real');
 
@@ -955,10 +1033,65 @@ test('recommended CSV export merges sequence, source metadata, recommendation sc
   assert.equal(row.solubility, '0.82');
   assert.equal(row.tm, '68.5');
   assert.equal(row.ec_top1, '1.1.1.1');
-  assert.equal(row.predicted_score, '0.81');
+  // Scientific property fields are recomputed from the source-labelled cache
+  // rather than trusting the browser-supplied recommendation object.
+  assert.equal(row.predicted_score, '0.5');
+  assert.equal(row.property_coverage, '1');
+  assert.equal(row.scientific_eligibility, 'real-properties-only');
+
+  await fs.writeFile(
+    path.join(taskDir, 'predicted_metrics.csv'),
+    [
+      'id,kcat,km,solubility,tm,ec_top1,ec_score1,ec_top2,ec_score2,ec_top3,ec_score3,cataPro_source,solubility_source,tm_source,ec_source',
+      'P12345,999,0.01,0.99,99,9.9.9.9,0.99,,,,,mock,mock,mock,mock',
+    ].join('\n'),
+  );
+  const provenanceOnly = await api(`/api/network/export-recommended-csv?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ids: [candidate.id],
+      candidates: [{ ...candidate, predictedScore: 0.99, propertyCoverage: 1 }],
+    }),
+  });
+  assert.equal(provenanceOnly.response.status, 200);
+  const [mockHeaderLine, mockRowLine] = provenanceOnly.body.csv.split('\n');
+  const mockHeaders = parseLine(mockHeaderLine);
+  const mockValues = parseLine(mockRowLine);
+  const mockRow = Object.fromEntries(mockHeaders.map((header, index) => [header, mockValues[index]]));
+  assert.equal(mockRow.catapro_source, 'mock');
+  assert.equal(mockRow.predicted_score, '');
+  assert.equal(mockRow.property_coverage, '0');
+  assert.equal(mockRow.scientific_eligibility, 'no-real-property-evidence');
+
+  await fs.writeFile(
+    path.join(taskDir, 'predicted_metrics.csv'),
+    [
+      'id,kcat,km,solubility,tm,ec_top1,ec_score1,ec_top2,ec_score2,ec_top3,ec_score3,cataPro_source,solubility_source,tm_source,ec_source',
+      'P12345,,,,,,,,,,,missing,failed,missing,failed',
+    ].join('\n'),
+  );
+  const unavailableExport = await api(`/api/network/export-recommended-csv?taskId=${taskId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids: [candidate.id], candidates: [candidate] }),
+  });
+  assert.equal(unavailableExport.response.status, 200);
+  const [unavailableHeaderLine, unavailableRowLine] = unavailableExport.body.csv.split('\n');
+  const unavailableHeaders = parseLine(unavailableHeaderLine);
+  const unavailableValues = parseLine(unavailableRowLine);
+  const unavailableRow = Object.fromEntries(unavailableHeaders.map((header, index) => [header, unavailableValues[index]]));
+  assert.equal(unavailableRow.kcat, '');
+  assert.equal(unavailableRow.km, '');
+  assert.equal(unavailableRow.solubility, '');
+  assert.equal(unavailableRow.tm, '');
+  assert.equal(unavailableRow.ec_score1, '');
+  assert.equal(unavailableRow.predicted_score, '');
+  assert.equal(unavailableRow.property_coverage, '0');
+  assert.equal(unavailableRow.scientific_eligibility, 'no-real-property-evidence');
 });
 
-test('manual filtering supports five simulated candidate-screening scenarios', async (t) => {
+test('manual filtering supports six simulated candidate-screening scenarios', async (t) => {
   const taskId = 'manual-filter-task';
   const taskDir = path.join(tasksRoot, taskId);
   await fs.mkdir(taskDir, { recursive: true });
@@ -1076,6 +1209,20 @@ test('manual filtering supports five simulated candidate-screening scenarios', a
     assert.equal(secondPage.body.rows[0].id, 'candA');
     assert.deepEqual(firstPage.body.matchingIds, ['candB', 'candA']);
     assert.deepEqual(secondPage.body.matchingIds, ['candB', 'candA']);
+  });
+
+  await t.test('scenario 6: mock values are provenance-only and cannot satisfy scientific property filters', async () => {
+    const all = await filter({ conditions: [], sort: { field: 'id', direction: 'asc' } });
+    const mockRow = all.body.rows.find((row) => row.id === 'candD');
+    assert.equal(mockRow.cataPro_source, 'mock');
+    assert.equal(mockRow.kcat, null);
+    assert.equal(mockRow.solubility, null);
+    assert.equal(mockRow.predicted_score, null);
+    assert.equal(mockRow.property_coverage, 0);
+
+    const result = await filter({ conditions: [{ field: 'kcat', operator: 'gt', value: 0 }] });
+    assert.equal(result.body.filteredCount, 3);
+    assert.equal(result.body.matchingIds.includes('candD'), false);
   });
 
   // A blank numeric field is ignored rather than accidentally excluding every row.
@@ -1233,10 +1380,10 @@ test('recommendation uses the same optional filtered candidate pool as manual fi
     path.join(taskDir, 'predicted_metrics.csv'),
     [
       'id,kcat,km,solubility,tm,ec_top1,ec_score1,ec_top2,ec_score2,ec_top3,ec_score3,cataPro_source,solubility_source,tm_source,ec_source',
-      'candA,20,2,0.8,65,1.1.3.1,0.9,2.2.2.2,0.1,3.3.3.3,0.05,mock,mock,mock,mock',
-      'candB,30,10,0.7,70,4.4.4.4,0.8,1.1.3.2,0.7,5.5.5.5,0.1,mock,mock,mock,mock',
-      'candC,5,0.5,0.9,55,6.6.6.6,0.8,7.7.7.7,0.2,1.1.3.3,0.6,mock,mock,mock,mock',
-      'candD,1,1,0.2,40,8.8.8.8,0.9,9.9.9.9,0.1,0.0.0.0,0.05,mock,mock,mock,mock',
+      'candA,20,2,0.8,65,1.1.3.1,0.9,2.2.2.2,0.1,3.3.3.3,0.05,real,real,real,real',
+      'candB,30,10,0.7,70,4.4.4.4,0.8,1.1.3.2,0.7,5.5.5.5,0.1,real,real,real,real',
+      'candC,5,0.5,0.9,55,6.6.6.6,0.8,7.7.7.7,0.2,1.1.3.3,0.6,real,real,real,real',
+      'candD,1,1,0.2,40,8.8.8.8,0.9,9.9.9.9,0.1,0.0.0.0,0.05,real,real,real,real',
     ].join('\n'),
   );
 
@@ -1334,6 +1481,12 @@ test('bundled V1.1 example loads precomputed artifacts without starting expensiv
   assert.equal(predictionStatus.body.state, 'ready');
   assert.equal(predictionStatus.body.candidateCount, 12);
 
+  const demoPredictions = await api(`/api/network/predicted-metrics?taskId=${taskId}`);
+  assert.equal(demoPredictions.response.status, 200);
+  assert.ok(demoPredictions.body.rows.every((row) => row.predictedScore === null));
+  assert.ok(demoPredictions.body.rows.every((row) => row.propertyCoverage === 0));
+  assert.ok(demoPredictions.body.rows.every((row) => Object.values(row.sources).every((source) => source === 'mock')));
+
   const graph = await api(`/api/network/browser-graph?taskId=${taskId}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -1430,13 +1583,30 @@ test('task reports export existing task results in Chinese, English, PDF-print, 
         filteredBySimilarity: 0,
       },
       recommendTopN: 1,
+      recommendMinClusterSize: 2,
+      recommendMinSimilarity: 70,
+      recommendNetworkConnectivityThreshold: 80,
+      recommendDiversityMode: 'round-robin',
+      recommendTemperature: 0,
+      recommendWeights: {
+        avgRefSimilarity: 0.28,
+        maxRefSimilarity: 0.20,
+        clusterSize: 0.24,
+        taxonomyDiversity: 0.08,
+        predictedScore: 0.20,
+      },
+      predictedSubWeights: { kcat: 0.5, solubility: 0.25, tm: 0.25 },
+      predictedTmTarget: 60,
       recommendResults: [{
         id: 'candidate_A',
         score: 0.91,
         avgRefSimilarity: 0.87,
         maxRefSimilarity: 0.96,
         cluster: 'Cluster_1',
+        networkComponentSize: 2,
+        taxonomyDiversity: 0.5,
         predictedScore: 0.76,
+        propertyCoverage: 0.75,
         species: 'Species alpha',
       }],
     }, null, 2)),
@@ -1459,10 +1629,18 @@ test('task reports export existing task results in Chinese, English, PDF-print, 
     assert.match(result.body, /report-export-task/);
     assert.match(result.body, /Oxidase report example/);
     assert.match(result.body, /性质预测/);
+    assert.match(result.body, /Mock 合成数据/);
+    assert.match(result.body, /不得作为生物学结论/);
     assert.match(result.body, /### 详细打分规则/);
     assert.match(result.body, /\| Pos \| Allowed \(comma separated\) \| Score \| Label \|/);
     assert.match(result.body, /\| 41 \| G, A \| 2\.5 \| M1_41_GA \|/);
-    assert.match(result.body, /\| 1 \| candidate_A \| 0\.91 \| 0\.87 \| 0\.96 \| Cluster_1 \| 0\.76 \| Species alpha \|/);
+    assert.match(result.body, /## 2\. 方法概览与阅读指南/);
+    assert.match(result.body, /avgRefSimilarity \(平均参考相似度\)/);
+    assert.match(result.body, /越高越增加推荐分/);
+    assert.match(result.body, /round-robin（轮询）/);
+    assert.match(result.body, /轮流从各分量选取/);
+    assert.match(result.body, /越接近目标越好，并非 Tm 越高越好/);
+    assert.match(result.body, /\| 1 \| candidate_A \| 0\.91 \| 87% \| 96% \| Cluster_1 \| 2 \| 0\.5 \| 0\.76 \| 75% \| Species alpha \|/);
     assert.match(result.body, /\| 1 \| candidate_A \| 8\.5 \| 是 \| 6 \|/);
     assert.match(result.body, /candidate_A/);
     assert.doesNotMatch(result.body, /SHOULD_NOT_APPEAR_IN_PRIMARY_REPORT/);
@@ -1484,6 +1662,9 @@ test('task reports export existing task results in Chinese, English, PDF-print, 
     assert.match(result.body, /Detailed scoring rules/);
     assert.match(result.body, /M1_36_G/);
     assert.match(result.body, /Candidate Recommendation/);
+    assert.match(result.body, /Recommendation weights and metric direction/);
+    assert.match(result.body, /round-robin/);
+    assert.match(result.body, /Closer to the target is better/);
   });
 
   await t.test('PDF option returns a print-friendly HTML document without running calculations', async () => {

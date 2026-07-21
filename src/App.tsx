@@ -969,6 +969,11 @@ function RecommendationSettingsControls({
 // per candidate. The sub-weights and Tm target are lifted to the parent view
 // so the same values can be reused as the predicted-score component in the
 // recommendation module below.
+function PredictionSourceBadge({ source }: { source: PredictedMetricsRow['sources']['cataPro'] }) {
+  const styles = source === 'real' ? 'bg-emerald-100 text-emerald-800' : source === 'mock' ? 'bg-purple-100 text-purple-800' : source === 'failed' ? 'bg-red-100 text-red-800' : 'bg-slate-100 text-slate-600';
+  return <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${styles}`}>{source || 'missing'}</span>;
+}
+
 function EcTooltip({ r }: { r: PredictedMetricsRow }) {
   const [hover, setHover] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -990,16 +995,16 @@ function EcTooltip({ r }: { r: PredictedMetricsRow }) {
       onMouseLeave={() => setHover(false)}
     >
       {r.ec_top1 || '—'}
-      {r.ec_score1 > 0 && <span className="text-slate-400 ml-0.5">({(r.ec_score1 * 100).toFixed(0)}%)</span>}
+      {(r.ec_score1 ?? 0) > 0 && <span className="text-slate-400 ml-0.5">({((r.ec_score1 ?? 0) * 100).toFixed(0)}%)</span>}
       {hover && r.ec_top1 && (
         <div
           className="fixed z-[9999] bg-slate-800 text-white text-[10px] rounded px-2 py-1.5 whitespace-nowrap shadow-lg border border-slate-600 pointer-events-none"
           style={{ left: pos.x, top: pos.y - 8, transform: 'translate(-50%, -100%)' }}
         >
           <div className="font-semibold text-slate-300 mb-0.5">Top-3 EC Predictions</div>
-          <div>1. {r.ec_top1} — {(r.ec_score1 * 100).toFixed(1)}%</div>
-          {r.ec_top2 && <div>2. {r.ec_top2} — {(r.ec_score2 * 100).toFixed(1)}%</div>}
-          {r.ec_top3 && <div>3. {r.ec_top3} — {(r.ec_score3 * 100).toFixed(1)}%</div>}
+          <div>1. {r.ec_top1} — {((r.ec_score1 ?? 0) * 100).toFixed(1)}%</div>
+          {r.ec_top2 && <div>2. {r.ec_top2} — {((r.ec_score2 ?? 0) * 100).toFixed(1)}%</div>}
+          {r.ec_top3 && <div>3. {r.ec_top3} — {((r.ec_score3 ?? 0) * 100).toFixed(1)}%</div>}
         </div>
       )}
     </span>
@@ -1194,9 +1199,11 @@ function PredictedMetricsPanel({
         )}
       </div>
       <p className="text-sm text-slate-600">
-        Runs kcat/Km, solubility, EC number, and Tm predictors on every candidate sequence. Real APIs are used when available;
-        otherwise falls back to mock predictions. Results are cached per task.
+        Runs kcat/Km, solubility, EC number, and Tm predictors on every candidate sequence. In normal tasks, unavailable or failed predictors remain missing and never fall back to synthetic values. Mock values are restricted to bundled Demo tasks and are excluded from scientific scoring.
       </p>
+      <div className="rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <b>Scientific safety:</b> only values labelled <b>real</b> participate in normalization, property filters, and recommendation. Mock, missing, and failed values are displayed only for provenance and contribute no property evidence.
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
         <div>
           <label className="block text-xs text-slate-500 mb-1">Substrate SMILES (for kcat/Km prediction)</label>
@@ -1204,7 +1211,7 @@ function PredictedMetricsPanel({
             placeholder="e.g. C(CC(C(=O)O)N)CN=C(N)N"
             value={smiles}
             onChange={(e) => setSmiles(e.target.value)} />
-          <p className="text-[10px] text-slate-400 mt-1">Required for CataPro kcat/Km. Leave empty to use mock values.</p>
+          <p className="text-[10px] text-slate-400 mt-1">Required for CataPro kcat/Km. In normal tasks, leaving it empty marks kcat/Km as missing.</p>
         </div>
         <div>
           <label className="block text-xs text-slate-500 mb-1">Tm Target (°C)</label>
@@ -1339,9 +1346,14 @@ function PredictedMetricsPanel({
                 <th className="px-2 py-2 text-right">kcat (s⁻¹)</th>
                 <th className="px-2 py-2 text-right">Km (mM)</th>
                 <th className="px-2 py-2 text-right">kcat/Km</th>
+                <th className="px-2 py-2 text-left">Source</th>
                 <th className="px-2 py-2 text-right">Solubility</th>
+                <th className="px-2 py-2 text-left">Source</th>
                 <th className="px-2 py-2 text-right">EC Number</th>
+                <th className="px-2 py-2 text-left">Source</th>
                 <th className="px-2 py-2 text-right">Tm (°C)</th>
+                <th className="px-2 py-2 text-left">Source</th>
+                <th className="px-2 py-2 text-right">Coverage</th>
                 <th className="px-2 py-2 text-right">Predicted Score</th>
               </tr>
             </thead>
@@ -1350,15 +1362,22 @@ function PredictedMetricsPanel({
                 <tr key={r.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                   <td className="px-2 py-1.5 text-slate-400">{i + 1}</td>
                   <td className="px-2 py-1.5 font-mono text-xs break-all max-w-[200px]">{r.id}</td>
-                  <td className="px-2 py-1.5 text-right">{r.kcat.toFixed(3)}</td>
-                  <td className="px-2 py-1.5 text-right">{r.km.toFixed(3)}</td>
-                  <td className="px-2 py-1.5 text-right">{r.catalyticEfficiency.toFixed(3)}</td>
-                  <td className="px-2 py-1.5 text-right">{(r.solubility * 100).toFixed(1)}%</td>
+                  <td className="px-2 py-1.5 text-right">{r.kcat == null ? '—' : r.kcat.toFixed(3)}</td>
+                  <td className="px-2 py-1.5 text-right">{r.km == null ? '—' : r.km.toFixed(3)}</td>
+                  <td className="px-2 py-1.5 text-right">{r.catalyticEfficiency == null ? '—' : r.catalyticEfficiency.toFixed(3)}
+                  </td>
+                  <td className="px-2 py-1.5 text-left"><PredictionSourceBadge source={r.sources.cataPro} /></td>
+                  <td className="px-2 py-1.5 text-right">{r.solubility == null ? '—' : `${(r.solubility * 100).toFixed(1)}%`}
+                  </td>
+                  <td className="px-2 py-1.5 text-left"><PredictionSourceBadge source={r.sources.solubility} /></td>
                   <td className="px-2 py-1.5 text-right">
                     <EcTooltip r={r} />
                   </td>
-                  <td className="px-2 py-1.5 text-right">{r.tm.toFixed(1)}</td>
-                  <td className="px-2 py-1.5 text-right font-semibold">{r.predictedScore.toFixed(4)}</td>
+                  <td className="px-2 py-1.5 text-left"><PredictionSourceBadge source={r.sources.ec} /></td>
+                  <td className="px-2 py-1.5 text-right">{r.tm == null ? '—' : r.tm.toFixed(1)}</td>
+                  <td className="px-2 py-1.5 text-left"><PredictionSourceBadge source={r.sources.tm} /></td>
+                  <td className="px-2 py-1.5 text-right">{(r.propertyCoverage * 100).toFixed(0)}%</td>
+                  <td className="px-2 py-1.5 text-right font-semibold">{r.predictedScore == null ? '—' : r.predictedScore.toFixed(4)}</td>
                 </tr>
               ))}
             </tbody>
@@ -5144,7 +5163,7 @@ function HmmerPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                         <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
                         <li><b>clusterSizeNorm</b>: size of the candidate's network component at the selected connectivity threshold ÷ the largest component size, range [0, 1]</li>
                         <li><b>taxDiv</b>: number of distinct classes in the candidate's network component ÷ the maximum number of classes, range [0, 1]</li>
-                        <li><b>predictedScore</b>: normalized weighted combination of kcat/Km, solubility, and Tm; contributes 0 when predictions are unavailable</li>
+                        <li><b>predictedScore</b>: uses only real kcat/Km, solubility, and Tm values; per-candidate subweights are renormalized over available real metrics, coverage reports the supported original weight, and mock/missing/failed metrics never contribute</li>
                       </ul>
                       <p><b>Component Source</b>: connected components derived from edges_similarity.csv at the selected connectivity threshold.</p>
                       <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>
@@ -7616,7 +7635,7 @@ function BlastPipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean; s
                       <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
                       <li><b>clusterSizeNorm</b>: size of the candidate's network component at the selected connectivity threshold ÷ the largest component size, range [0, 1]</li>
                       <li><b>taxDiv</b>: number of distinct classes in the candidate's network component ÷ the maximum number of classes, range [0, 1]</li>
-                        <li><b>predictedScore</b>: normalized weighted combination of kcat/Km, solubility, and Tm; contributes 0 when predictions are unavailable</li>
+                        <li><b>predictedScore</b>: uses only real kcat/Km, solubility, and Tm values; per-candidate subweights are renormalized over available real metrics, coverage reports the supported original weight, and mock/missing/failed metrics never contribute</li>
                     </ul>
                     <p><b>Component Source</b>: connected components derived from edges_similarity.csv at the selected connectivity threshold.</p>
                     <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>
@@ -8629,7 +8648,7 @@ function ComparePipeline({ darkMode, setDarkMode, onBack }: { darkMode: boolean;
                   <li><b>maxRefSim</b>: similarity of the candidate to its most similar reference sequence ÷ 100, range [0, 1]</li>
                   <li><b>clusterSizeNorm</b>: size of the candidate's network component at the selected connectivity threshold ÷ the largest component size, range [0, 1]</li>
                   <li><b>taxDiv</b>: number of distinct classes in the candidate's network component ÷ the maximum number of classes, range [0, 1]</li>
-                        <li><b>predictedScore</b>: normalized weighted combination of kcat/Km, solubility, and Tm; contributes 0 when predictions are unavailable</li>
+                        <li><b>predictedScore</b>: uses only real kcat/Km, solubility, and Tm values; per-candidate subweights are renormalized over available real metrics, coverage reports the supported original weight, and mock/missing/failed metrics never contribute</li>
                 </ul>
                 <p><b>Component Source</b>: connected components derived from edges_similarity.csv at the selected connectivity threshold.</p>
                 <p><b>Similarity Data Source</b>: edges in edges_similarity.csv between candidates and reference nodes (is_reference=1).</p>

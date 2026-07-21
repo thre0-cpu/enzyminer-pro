@@ -2,3 +2,4 @@ pandas
 biopython
 requests
 tqdm
+python-docx
