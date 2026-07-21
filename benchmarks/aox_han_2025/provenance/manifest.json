@@ -1,0 +1,34 @@
+{
+  "source_repository": "enzyme-mining-aox",
+  "paper_doi": "10.1016/j.synbio.2025.04.014",
+  "source_path_used": "/tmp/enzyme-mining-aox",
+  "source_commit": "01a96d96b5bc7f87ff696ee50ab445555c49e6bf",
+  "source_commit_date": "2026-01-16",
+  "source_license": "Apache-2.0",
+  "generated_files": {
+    "data/labels/high_activity_targets_6.tsv": "08747f6643606137e97607f7078255ec9b8c86015a5ce59d6279aecd213583dc",
+    "data/labels/primary_novel_tested_23.tsv": "1cf6c94b5f021b164b851d5cadfd2dde3cc4a6d850f13004c75f1205db5f6e8d",
+    "data/labels/workflow_tested_31.tsv": "a7b874a0fddaabb4c2242aa5eb7da901436bd0be18840fa985612e77a24973f3",
+    "data/metadata/author_graph_358_metadata.tsv": "b260dc935ee2ae97fad06900b9eb3800afae7149a5eb811b5ec6dfa0650e0bfb",
+    "data/network/edges_similarity.csv": "57bc2a4a740a2f6653cf0a062877967adcbf14bd09e9611639c3595440d3c887",
+    "data/network/nodes.csv": "822e08e10b925e04587fd100fc19162f27aa83f714023129208bd215e40e5e79",
+    "data/references/author_graph_19_reference_nodes.fasta": "ca89534ffeb2acf7ee0fd290b918035b6ffc8753f1c5e6ae357e277a909bae67",
+    "data/references/han_21_active_aox.fasta": "aafb0e2d310ab81c8a2a310fcb0313edc7cc0b34460ea83a83a8fe9123766538",
+    "data/references/han_21_reference_metadata.tsv": "1d0dfe2b279b37d406456f9fdb1ef0357e5acb9b53b4e1262db1f5cfe8d3e105",
+    "data/universe/author_graph_339_candidates.fasta": "1ca1bcf31fae5d35c632df23d115a88240670f6b772aa6364a2ea0bb8ecbe3b4",
+    "data/universe/author_graph_358_all.fasta": "1ae58c5a31ef625ccb985cd1471a4dc37b1bc1c15615f7bd8a2434a43a8c2ce0",
+    "data/universe/author_post_domain_search_context_393.fasta": "e25396f3eed233347532b72d015ac23bfef864f9e3935bddc1aa2f13c36254bb"
+  },
+  "counts": {
+    "input_references": 21,
+    "author_graph_nodes": 358,
+    "reference_nodes_in_graph": 19,
+    "recommendable_candidates": 339,
+    "restricted_network_edges": 63903,
+    "controlled_search_context": 393,
+    "workflow_tested": 31,
+    "primary_novel_tested": 23,
+    "high_activity_targets": 6
+  },
+  "known_reproducibility_warning": "The current author repository graph has 358 nodes and its all-pairs edge table has 360 sequence IDs, whereas the paper reports 357 final candidates. This benchmark preserves and names the concrete artifacts instead of silently forcing the count to 357."
+}

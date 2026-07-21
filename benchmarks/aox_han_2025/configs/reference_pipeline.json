@@ -1,0 +1,42 @@
+{
+  "hmm_build": {
+    "identity": 0.9,
+    "word_size": 5,
+    "coverage_long": 0.0,
+    "coverage_short": 0.0,
+    "identity_lower_bound": 0.0
+  },
+  "search_filter": {
+    "score_min": 0.0,
+    "length_min": 600,
+    "length_max": 700
+  },
+  "residue_scoring": {
+    "reference_id": "AAB57849.1",
+    "threshold": 33.5,
+    "position_mode": "pre",
+    "pre_alignment_anchor": "refid",
+    "rules": [
+      {"pos": 13, "allowed": ["G"], "score": 5.0, "label": "FAD_13_G"},
+      {"pos": 15, "allowed": ["G"], "score": 5.0, "label": "FAD_15_G"},
+      {"pos": 18, "allowed": ["G"], "score": 5.0, "label": "FAD_18_G"},
+      {"pos": 98, "allowed": ["F", "W", "Y"], "score": 5.0, "label": "Sub_98_FWY"},
+      {"pos": 417, "allowed": ["F", "W", "Y"], "score": 2.0, "label": "Sub_417_FWY"},
+      {"pos": 566, "allowed": ["F", "W", "Y"], "score": 2.0, "label": "Sub_566_FWY"},
+      {"pos": 567, "allowed": ["H"], "score": 5.0, "label": "Cat_567_H"},
+      {"pos": 616, "allowed": ["H", "N", "P"], "score": 5.0, "label": "Cat_616_HNP"},
+      {"pos": 660, "allowed": ["-"], "score": -0.1, "label": "PTS_660"},
+      {"pos": 661, "allowed": ["-"], "score": -0.1, "label": "PTS_661"},
+      {"pos": 662, "allowed": ["-"], "score": -0.1, "label": "PTS_662"},
+      {"pos": 663, "allowed": ["-"], "score": -0.1, "label": "PTS_663"}
+    ]
+  },
+  "candidate_clustering": {
+    "identity": 0.85,
+    "word_size": 5
+  },
+  "network": {
+    "include_reference_links": true,
+    "similarity_method": "mmseqs2"
+  }
+}

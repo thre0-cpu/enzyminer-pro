@@ -1,0 +1,68 @@
+{
+  "methods": [
+    {
+      "id": "product_default",
+      "description": "Current product defaults, including minimum component size 2",
+      "weights": {"avgRefSimilarity": 0.28, "maxRefSimilarity": 0.20, "clusterSize": 0.24, "taxonomyDiversity": 0.08, "predictedScore": 0.20},
+      "min_cluster_size": 2,
+      "min_similarity": 0,
+      "diversity_mode": "proportional"
+    },
+    {
+      "id": "default_no_hard_cluster_filter",
+      "description": "Current weights with singleton candidates retained",
+      "weights": {"avgRefSimilarity": 0.28, "maxRefSimilarity": 0.20, "clusterSize": 0.24, "taxonomyDiversity": 0.08, "predictedScore": 0.20},
+      "min_cluster_size": 1,
+      "min_similarity": 0,
+      "diversity_mode": "proportional"
+    },
+    {
+      "id": "no_properties",
+      "description": "Ablation: predicted property score removed; remaining weights renormalized",
+      "weights": {"avgRefSimilarity": 0.35, "maxRefSimilarity": 0.25, "clusterSize": 0.30, "taxonomyDiversity": 0.10, "predictedScore": 0.0},
+      "min_cluster_size": 1,
+      "min_similarity": 0,
+      "diversity_mode": "proportional"
+    },
+    {
+      "id": "no_cluster_size",
+      "description": "Ablation: network component size removed; remaining weights renormalized",
+      "weights": {"avgRefSimilarity": 0.3684210526, "maxRefSimilarity": 0.2631578947, "clusterSize": 0.0, "taxonomyDiversity": 0.1052631579, "predictedScore": 0.2631578947},
+      "min_cluster_size": 1,
+      "min_similarity": 0,
+      "diversity_mode": "proportional"
+    },
+    {
+      "id": "no_taxonomy_diversity",
+      "description": "Ablation: component taxonomy diversity removed; remaining weights renormalized",
+      "weights": {"avgRefSimilarity": 0.3043478261, "maxRefSimilarity": 0.2173913043, "clusterSize": 0.2608695652, "taxonomyDiversity": 0.0, "predictedScore": 0.2173913043},
+      "min_cluster_size": 1,
+      "min_similarity": 0,
+      "diversity_mode": "proportional"
+    },
+    {
+      "id": "similarity_only",
+      "description": "Reference-similarity-only baseline using the current average/max ratio",
+      "weights": {"avgRefSimilarity": 0.5833333333, "maxRefSimilarity": 0.4166666667, "clusterSize": 0.0, "taxonomyDiversity": 0.0, "predictedScore": 0.0},
+      "min_cluster_size": 1,
+      "min_similarity": 0,
+      "diversity_mode": "proportional"
+    },
+    {
+      "id": "properties_only",
+      "description": "Real property prediction score only",
+      "weights": {"avgRefSimilarity": 0.0, "maxRefSimilarity": 0.0, "clusterSize": 0.0, "taxonomyDiversity": 0.0, "predictedScore": 1.0},
+      "min_cluster_size": 1,
+      "min_similarity": 0,
+      "diversity_mode": "proportional"
+    },
+    {
+      "id": "default_round_robin",
+      "description": "Current weights with strict component round-robin selection",
+      "weights": {"avgRefSimilarity": 0.28, "maxRefSimilarity": 0.20, "clusterSize": 0.24, "taxonomyDiversity": 0.08, "predictedScore": 0.20},
+      "min_cluster_size": 1,
+      "min_similarity": 0,
+      "diversity_mode": "round-robin"
+    }
+  ]
+}

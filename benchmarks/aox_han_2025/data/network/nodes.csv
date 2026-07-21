@@ -1,0 +1,359 @@
+id,cluster,representative,is_reference,kingdom,phylum,class,order,family,genus,species,taxonomy_id,length,hmm_score,evalue,scoring_score
+A0A010RMG6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum fioriniae PJ7,1445577,656,1251.1,0.0,33.599999999999994
+A0A017SR18,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus ruber CBS 135680,1388766,664,1262.6,0.0,33.9
+A0A060SVX6,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Trametes cinnabarina,5643,644,1135.0,0.0,33.599999999999994
+A0A066X5A7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum sublineola,1173701,656,1241.7,0.0,33.599999999999994
+A0A067N510,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Pleurotus ostreatus PC15,1137138,647,1061.4,6.4e-316,33.599999999999994
+A0A067PQ89,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Jaapia argillacea MUCL 33604,933084,643,1099.9,0.0,33.599999999999994
+A0A067SV84,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Galerina marginata CBS 339.88,685588,638,983.5,1.8e-292,33.599999999999994
+A0A072PRU7,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Exophiala aquamarina CBS 119918,1182545,659,1245.1,0.0,33.599999999999994
+A0A074S3I4,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Rhizoctonia solani 123E,1423351,641,1021.3,6.6e-304,33.599999999999994
+A0A074W4F7,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Aureobasidium melanogenum CBS 110374,1043003,652,1210.1,0.0,34.0
+A0A074WF13,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Aureobasidium namibiae CBS 147.97,1043004,665,1258.4,0.0,34.0
+A0A074XWT8,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Aureobasidium pullulans EXF-150,1043002,665,1266.7,0.0,34.0
+A0A074YNW2,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Aureobasidium subglaciale EXF-2481,1043005,674,1240.2,0.0,34.0
+A0A084GCK7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Scedosporium apiospermum,563466,654,1238.7,0.0,33.599999999999994
+A0A090CAV9,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Podospora anserina S mat+,515849,658,1199.8,0.0,33.599999999999994
+A0A0A2K2L2,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium expansum,27334,665,1278.6,0.0,33.9
+A0A0A2L8C1,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium italicum,40296,665,1278.9,0.0,33.9
+A0A0B7F5J3,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Rhizoctonia solani AG-1 IB,1108050,628,1022.6,2.6e-304,33.599999999999994
+A0A0C3NHS8,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Phlebiopsis gigantea 11061_1 CR5-6,745531,645,1144.6,0.0,33.599999999999994
+A0A0C4E9L8,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Magnaporthiopsis poae ATCC 64411,644358,655,1233.8,0.0,33.599999999999994
+A0A0C9T329,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Plicaturopsis crispa FD-325 SS-3,944288,636,1079.4,0.0,33.599999999999994
+A0A0C9T9D2,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Plicaturopsis crispa FD-325 SS-3,944288,638,1106.8,0.0,33.599999999999994
+A0A0D0CSB1,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Collybiopsis luxurians FD-317 M1,944289,639,1135.7,0.0,33.599999999999994
+A0A0D1ZSC5,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Exophiala mesophila,212818,658,1243.5,0.0,33.599999999999994
+A0A0D2AFJ7,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Verruconis gallopava,253628,664,1293.1,0.0,33.9
+A0A0D2BJ30,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Exophiala spinifera,91928,666,1235.5,0.0,33.9
+A0A0D2CX58,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Phialophora americana,5601,666,1232.6,0.0,33.9
+A0A0D2CY69,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Cladophialophora immunda,569365,666,1236.4,0.0,33.9
+A0A0D2DMY6,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Exophiala oligosperma,215243,666,1233.0,0.0,33.9
+A0A0D2EK50,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Fonsecaea pedrosoi CBS 271.37,1442368,666,1239.1,0.0,33.9
+A0A0D2F3N4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Exophiala xenobiotica,348802,666,1226.0,0.0,33.9
+A0A0D2JCG4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Rhinocladiella mackenziei CBS 650.93,1442369,665,1232.6,0.0,33.9
+A0A0D2L0R8,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Fonsecaea multimorphosa CBS 102226,1442371,666,1243.2,0.0,33.9
+A0A0D2NCE0,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Hypholoma sublateritium FD-334 SS-4,945553,646,1095.6,0.0,33.599999999999994
+A0A0D2YGJ6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium oxysporum f. sp. lycopersici 4287,426428,656,1237.9,0.0,33.599999999999994
+A0A0D7BBW7,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Cylindrobasidium torrendii FP15055 ss-10,1314674,641,1118.5,0.0,33.599999999999994
+A0A0E0SDM0,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium graminearum PH-1,229533,655,1236.4,0.0,33.599999999999994
+A0A0F0IAE6,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus parasiticus SU-1,1403190,665,1290.4,0.0,33.9
+A0A0F4G7F6,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Zymoseptoria brevis,1047168,664,1269.9,0.0,33.9
+A0A0F8U238,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus rambellii,308745,665,1271.5,0.0,33.9
+A0A0F9XM87,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma harzianum,5544,654,1231.4,0.0,33.599999999999994
+A0A0G2EW25,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Diplodia seriata,420778,666,1248.2,0.0,34.0
+A0A0G2G1B8,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Diaporthe ampelina,1214573,656,1231.5,0.0,33.599999999999994
+A0A0G4KKU1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Verticillium longisporum,100787,651,1210.6,0.0,33.599999999999994
+A0A0G4PTH8,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium camemberti FM 013,1429867,665,1278.7,0.0,33.9
+A0A0H2RJ10,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Schizopora paradoxa,27342,647,1092.2,0.0,33.599999999999994
+A0A0L1IYH5,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus nomiae NRRL 13137,1509407,665,1286.0,0.0,33.9
+A0A0L6X0R2,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Termitomyces sp. J132,1306850,651,1082.9,0.0,33.599999999999994
+A0A0M9WC58,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium nordicum,229535,665,1277.8,0.0,33.9
+A0A0N0NJ30,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Phialophora attinorum,1664694,664,1223.8,0.0,33.699999999999996
+A0A0U5FTQ5,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus calidoustus,454130,665,1288.3,0.0,33.9
+A0A101MG75,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium freii,48697,665,1277.1,0.0,33.9
+A0A135LT87,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium griseofulvum,5078,665,1278.8,0.0,33.9
+A0A135V8D0,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum salicis,1209931,666,1235.5,0.0,33.599999999999994
+A0A136J8S2,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Microdochium bolleyi,196109,654,1231.9,0.0,33.599999999999994
+A0A139GXZ0,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Pseudocercospora musae,113226,659,1241.8,0.0,33.8
+A0A150V9F0,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Acidomyces richmondensis BFW,766039,666,1257.9,0.0,34.0
+A0A162IAZ2,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Niveomyces insectorum RCEF 264,1081102,659,1225.9,0.0,33.599999999999994
+A0A162MZU6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum incanum,1573173,656,1249.1,0.0,33.599999999999994
+A0A163E1X7,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Ascochyta rabiei,5454,667,1256.1,0.0,34.0
+A0A164WSN9,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Sistotremastrum niveocremeum HHB9708,1314777,639,1093.3,0.0,33.599999999999994
+A0A165CTU6,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Exidia glandulosa HHB12029,1314781,634,1023.2,1.8e-304,33.599999999999994
+A0A165F0M1,author_graph,1,0,Fungi,Basidiomycota,Dacrymycetes,,,,Calocera cornea HHB12733,1353952,639,1105.2,0.0,33.599999999999994
+A0A165ILZ5,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Laetiporus sulphureus 93-53,1314785,639,1120.5,0.0,33.599999999999994
+A0A165U9X1,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Daedalea quercina L-15889,1314783,640,1116.9,0.0,33.599999999999994
+A0A165VRV2,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Neolentinus lepideus HHB14362 ss-1,1314782,643,1125.7,0.0,33.599999999999994
+A0A166DDH7,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Sistotremastrum suecicum HHB10207 ss-3,1314776,639,1094.1,0.0,33.599999999999994
+A0A166GS67,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Peniophora sp. CONT,1314672,637,1083.9,0.0,33.599999999999994
+A0A166RI72,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum tofieldiae,708197,656,1245.6,0.0,33.599999999999994
+A0A167P4E4,author_graph,1,0,Fungi,Basidiomycota,Dacrymycetes,,,,Calocera viscosa TUFC12733,1330018,643,1107.2,0.0,33.599999999999994
+A0A175W4Q6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Madurella mycetomatis,100816,655,1238.2,0.0,33.599999999999994
+A0A177CWT1,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Paraphaeosphaeria sporulosa,1460663,665,1280.3,0.0,34.0
+A0A177D705,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Alternaria alternata,5599,665,1277.7,0.0,34.0
+A0A178DM25,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Pyrenochaeta sp. DS3sAY3a,765867,665,1271.2,0.0,34.0
+A0A178ZH86,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Fonsecaea erecta,1367422,666,1240.5,0.0,33.9
+A0A194UX87,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Valsa mali var. pyri (nom. inval.),694573,653,1235.3,0.0,33.599999999999994
+A0A194XNF4,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Mollisia scopiformis,149040,655,1268.8,0.0,33.599999999999994
+A0A1B7NGS0,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Rhizopogon vinicolor AM-OR11-026,1314800,641,1122.6,0.0,33.599999999999994
+A0A1B8AE72,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium poae,36050,657,1241.1,0.0,33.599999999999994
+A0A1C1C6C4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Cladophialophora carrionii,86049,684,1211.9,0.0,33.9
+A0A1E1KHE7,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Rhynchosporium commune,914237,655,1253.1,0.0,33.599999999999994
+A0A1E3BR69,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus cristatus,573508,664,1269.2,0.0,33.9
+A0A1E4SXY7,author_graph,1,0,Fungi,Ascomycota,Saccharomycetes,,,,[Candida] arabinofermentans NRRL YB-2248,983967,664,1297.3,0.0,34.0
+A0A1E4SZH3,author_graph,1,0,Fungi,Ascomycota,Saccharomycetes,,,,[Candida] arabinofermentans NRRL YB-2248,983967,664,1296.6,0.0,34.0
+A0A1E4T6V9,author_graph,1,0,Fungi,Ascomycota,Saccharomycetes,,,,[Candida] arabinofermentans NRRL YB-2248,983967,665,1297.9,0.0,34.0
+A0A1F7ZTY3,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus bombycis,109264,665,1285.8,0.0,33.9
+A0A1G4BGG5,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum orchidophilum,1209926,656,1249.5,0.0,33.599999999999994
+A0A1J7JQ54,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Coniochaeta ligniaria NRRL 30616,1408157,656,1256.0,0.0,33.599999999999994
+A0A1J8PQ85,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Rhizopogon vesiculosus,180088,643,1125.0,0.0,33.599999999999994
+A0A1J9PEQ4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Emergomyces pasteurianus Ep9510,1447872,664,1261.7,0.0,33.9
+A0A1J9QW67,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Diplodia corticola,236234,666,1245.3,0.0,34.0
+A0A1L7WVX5,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Phialocephala subalpina,576137,655,1270.7,0.0,33.599999999999994
+A0A1L9NM57,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus tubingensis CBS 134.48,767770,662,1277.5,0.0,33.599999999999994
+A0A1L9P564,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus versicolor CBS 583.65,1036611,665,1279.6,0.0,33.9
+A0A1L9RP90,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus wentii DTO 134E9,1073089,664,1275.8,0.0,33.9
+A0A1L9SKB6,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicilliopsis zonata CBS 506.65,1073090,671,1261.9,0.0,33.9
+A0A1L9TT25,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus sydowii CBS 593.65,1036612,665,1280.9,0.0,33.9
+A0A1L9UG76,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus brasiliensis CBS 101740,767769,662,1273.9,0.0,33.599999999999994
+A0A1L9W0D4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus glaucus CBS 516.65,1160497,664,1261.5,0.0,33.9
+A0A1L9X343,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus aculeatus ATCC 16872,690307,665,1269.0,0.0,33.9
+A0A1M2VA28,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Trametes pubescens,154538,625,1106.0,0.0,33.599999999999994
+A0A1Q3EBI7,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Lentinula edodes,5353,643,1119.8,0.0,33.599999999999994
+A0A1Q8RSU2,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum chlorophyti,708187,656,1268.0,0.0,33.599999999999994
+A0A1R3RRE5,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus carbonarius ITEM 5010,602072,662,1268.5,0.0,33.599999999999994
+A0A1S9D6N2,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus oryzae,5062,665,1291.6,0.0,33.9
+A0A1V1TC36,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Xylariales sp. No.14919,1813822,654,1240.9,0.0,33.599999999999994
+A0A1V6N6L8,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium polonicum,60169,665,1275.7,0.0,33.9
+A0A1V6R3E4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium solitum,60172,665,1272.5,0.0,33.9
+A0A1V6S025,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium vulpinum,29845,665,1277.0,0.0,33.9
+A0A1V6TRI2,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium flavigenum,254877,665,1276.8,0.0,33.9
+A0A1V6TTI6,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium steckii,303698,665,1280.9,0.0,33.9
+A0A1V6UEN6,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium coprophilum,36646,684,1257.9,0.0,33.9
+A0A1V6Y250,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium nalgiovense,60175,665,1278.1,0.0,33.9
+A0A1W2TQY8,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Rosellinia necatrix,77044,654,1250.0,0.0,33.599999999999994
+A0A1X6MWH7,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Postia placenta MAD-698-R-SB12,670580,641,1121.2,0.0,33.599999999999994
+A0A1X7RVT7,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Zymoseptoria tritici ST99CH_3D7,1276538,664,1271.7,0.0,33.9
+A0A1Y1Y8W2,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Clohesyomyces aquaticus,1231657,665,1278.2,0.0,34.0
+A0A1Y2BZ16,author_graph,1,0,Fungi,Basidiomycota,Microbotryomycetes,,,,Leucosporidium creatinivorum,106004,631,982.7,3.1e-292,33.599999999999994
+A0A1Y2EKH6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Pseudomassariella vexata,1141098,654,1248.1,0.0,33.599999999999994
+A0A1Y2IML5,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Trametes coccinea BRFM310,1353009,645,1134.0,0.0,33.599999999999994
+A0A1Y2UY51,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Hypoxylon sp. CO27-5,1001938,654,1246.3,0.0,33.599999999999994
+A0A1Y2VR85,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Hypoxylon sp. CI-4A,1001833,654,1240.4,0.0,33.599999999999994
+A0A1Y2WV54,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Daldinia sp. EC12,1001832,654,1241.8,0.0,33.599999999999994
+A0A1Z5TFN5,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Hortaea werneckii EXF-2000,1157616,665,1274.2,0.0,34.0
+A0A1Z5TU80,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Hortaea werneckii EXF-2000,1157616,665,1275.0,0.0,34.0
+A0A218ZHE2,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Marssonina coronariae,503106,655,1165.1,0.0,33.599999999999994
+A0A284QYF0,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Armillaria ostoyae,47428,642,1094.7,0.0,34.0
+A0A286U5Q1,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Pyrrhoderma noxium,2282107,648,1116.5,0.0,33.699999999999996
+A0A2A9N9H1,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Amanita thiersii Skay4041,703135,646,1118.5,0.0,33.599999999999994
+A0A2B7XYC7,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Helicocarpus griseus UAMH5409,1447875,664,1265.9,0.0,33.9
+A0A2B7Z2F3,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Polytolypa hystricis UAMH7299,1447883,663,1265.5,0.0,33.8
+A0A2G7FIX8,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus arachidicola,656916,665,1286.3,0.0,33.9
+A0A2G8SRN5,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Ganoderma sinense ZZ0214-1,1077348,640,1115.2,0.0,33.599999999999994
+A0A2H3BQD5,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Armillaria solidipes,1076256,651,1135.9,0.0,34.0
+A0A2H3ETP7,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Armillaria gallica,47427,650,1135.7,0.0,33.9
+A0A2H3H306,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium oxysporum f. sp. radicis-cucumerinum,327505,656,1237.9,0.0,33.599999999999994
+A0A2H3JSG5,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Wolfiporia cocos MD-104 SS10,742152,648,1123.0,0.0,33.8
+A0A2I0RJV3,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Cercospora zeina,348901,665,1239.7,0.0,33.9
+A0A2I2F6L9,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus candidus,41067,667,1263.5,0.0,33.9
+A0A2I2G1Y8,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus steynii IBT 23096,1392250,665,1281.7,0.0,33.9
+A0A2J6PTI5,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Hyaloscypha hepaticicola,2082293,656,1271.5,0.0,33.599999999999994
+A0A2J6S5S8,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Hyaloscypha variabilis F,1149755,655,1273.3,0.0,33.599999999999994
+A0A2J6T8G8,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Hyaloscypha bicolor E,1095630,655,1270.8,0.0,33.599999999999994
+A0A2K0WVU4,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium nygamai,42673,654,1239.3,0.0,33.599999999999994
+A0A2K1QGL6,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Sphaceloma murrayae,2082308,665,1255.4,0.0,34.0
+A0A2L2SPC1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium venenatum,56646,654,1220.8,0.0,33.599999999999994
+A0A2N3N139,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Lomentospora prolificans,41688,654,1231.6,0.0,33.599999999999994
+A0A2P4ZJM8,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma gamsii,398673,653,1232.7,0.0,33.599999999999994
+A0A2P5HRC7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Diaporthe helianthi,158607,654,1230.0,0.0,33.599999999999994
+A0A2P7ZE34,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Elsinoe australis,40998,665,1242.0,0.0,34.0
+A0A2S6C2B0,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Cercospora berteroae,357750,665,1256.3,0.0,33.9
+A0A2S7P6M0,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Rutstroemia sp. NJR-2017a BVV2,2070413,675,1233.3,0.0,33.599999999999994
+A0A2S7QS87,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Rutstroemia sp. NJR-2017a WRK4,2070412,620,1237.9,0.0,33.599999999999994
+A0A2T2NH42,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Corynespora cassiicola Philippines,1448308,665,1276.4,0.0,34.0
+A0A2T3AAA4,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Coniella lustricola,2025994,654,1226.8,0.0,33.599999999999994
+A0A2T3AX85,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Amorphotheca resinae ATCC 22711,857342,660,1270.1,0.0,33.599999999999994
+A0A2T3YX01,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma asperellum CBS 433.97,1042311,654,1228.4,0.0,33.599999999999994
+A0A2T3ZV55,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma harzianum CBS 226.95,983964,654,1232.1,0.0,33.599999999999994
+A0A2T4BTG5,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma longibrachiatum ATCC 18648,983965,654,1239.4,0.0,33.599999999999994
+A0A2T4H210,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium culmorum,5516,655,1236.4,0.0,33.599999999999994
+A0A2V1C0J1,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Cadophora sp. DSE1049,1485229,655,1266.9,0.0,33.599999999999994
+A0A2V1DZ69,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Periconia macrospinosa,97972,665,1279.1,0.0,34.0
+A0A2V5HC18,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus violaceofuscus CBS 115571,1450538,665,1268.8,0.0,33.9
+A0A317VRS8,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus heteromorphus CBS 117.55,1448321,661,1276.1,0.0,33.599999999999994
+A0A317VU31,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus sclerotioniger CBS 115572,1450535,662,1266.8,0.0,33.599999999999994
+A0A318ZDC1,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus saccharolyticus JOP 1030-1,1450539,665,1267.7,0.0,33.9
+A0A319CFQ0,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus uvarum CBS 121591,1448315,665,1270.0,0.0,33.9
+A0A319DNN5,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus ellipticus CBS 707.79,1448320,661,1276.1,0.0,33.599999999999994
+A0A319EEE1,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus sclerotiicarbonarius CBS 121057,1448318,665,1268.8,0.0,33.8
+A0A364M4W2,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus flavus,5059,665,1291.6,0.0,33.9
+A0A364MXF6,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Stemphylium lycopersici,183478,665,1278.4,0.0,34.0
+A0A369JI11,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Hypsizygus marmoreus,39966,644,1088.0,0.0,33.599999999999994
+A0A370TVS3,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Venustampulla echinocandica,2656787,658,1259.0,0.0,33.599999999999994
+A0A371CLQ4,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Polyporus brumalis,139420,642,1122.2,0.0,33.599999999999994
+A0A395GID0,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus ibericus CBS 121593,1448316,665,1272.2,0.0,33.8
+A0A395HPP0,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus homomorphus CBS 101889,1450537,665,1270.3,0.0,33.9
+A0A395IKF8,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Monilinia fructigena,38457,656,1226.9,0.0,33.599999999999994
+A0A395N0T1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium flagelliforme,2675880,657,1240.5,0.0,33.599999999999994
+A0A395N9G7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma arundinaceum,490622,654,1230.5,0.0,33.599999999999994
+A0A395SP46,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium sporotrichioides,5514,659,1242.5,0.0,33.599999999999994
+A0A395TAD6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium longipes,694270,657,1221.9,0.0,33.599999999999994
+A0A3A2ZSQ4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus sclerotialis,2070753,665,1284.7,0.0,33.9
+A0A3D8R9B7,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus mulundensis,1810919,665,1274.2,0.0,33.9
+A0A3D8SR04,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Coleophoma cylindrospora,1849047,665,1271.0,0.0,33.9
+A0A3E2GT83,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Scytalidium lignicola,5539,655,1268.5,0.0,33.599999999999994
+A0A3F3PYJ0,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus welwitschiae,1341132,662,1277.4,0.0,33.599999999999994
+A0A3M2SL30,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium kuroshium,2010991,655,1246.6,0.0,33.599999999999994
+A0A3M6WYP1,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Hortaea werneckii,91943,665,1275.3,0.0,34.0
+A0A3M7BEA0,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Hortaea werneckii,91943,665,1273.8,0.0,34.0
+A0A3M9Y5X2,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Verticillium nonalfalfae,1051616,651,1209.4,0.0,33.599999999999994
+A0A3N4KBK2,author_graph,1,0,Fungi,Ascomycota,Pezizomycetes,,,,Morchella conica CCBAS932,1392247,663,1284.6,0.0,34.0
+A0A401GA83,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Sparassis crispa,139825,644,1122.3,0.0,33.599999999999994
+A0A401KSG4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus awamori,105351,662,1281.2,0.0,33.599999999999994
+A0A409VUL1,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Panaeolus cyanescens,181874,643,1100.0,0.0,33.599999999999994
+A0A420Y6G0,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Coniochaeta pulveracea,177199,656,1249.1,0.0,33.599999999999994
+A0A423W9P7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Valsa sordida,252740,666,1175.9,0.0,33.599999999999994
+A0A423WGA7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Valsa malicola,356882,653,1227.9,0.0,33.599999999999994
+A0A423XHQ7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Cytospora leucostoma,1230097,654,1229.3,0.0,33.599999999999994
+A0A428NE95,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium sp. AF-6,1325737,655,1246.4,0.0,33.599999999999994
+A0A428PAC1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium duplospermum,1325734,655,1249.3,0.0,33.599999999999994
+A0A439D947,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Xylaria grammica,363999,652,1216.6,0.0,33.599999999999994
+A0A443I0D2,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Paecilomyces variotii,264951,664,1283.4,0.0,33.9
+A0A4Q4TAX8,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Monosporascus ibericus,155417,648,1205.8,0.0,33.599999999999994
+A0A4Q4UNX4,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Monosporascus sp. GIB2,2211647,656,1234.3,0.0,33.599999999999994
+A0A4Q4VBJ1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Monosporascus sp. MC13-8B,2211646,656,1237.5,0.0,33.599999999999994
+A0A4Q4VQ69,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Monosporascus sp. MG133,2211645,656,1230.9,0.0,33.599999999999994
+A0A4Q4YSZ1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Monosporascus sp. 5C6A,2211642,648,1202.1,0.0,33.599999999999994
+A0A4Q4YUR7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Monosporascus sp. CRB-8-3,2211644,648,1212.0,0.0,33.599999999999994
+A0A4Q9PTL3,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Dichomitus squalens,114155,643,1131.9,0.0,33.599999999999994
+A0A4R0RDJ8,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Steccherinum ochraceum,92696,644,1134.8,0.0,33.599999999999994
+A0A4R8R015,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum trifolii,5466,656,1250.6,0.0,33.599999999999994
+A0A4S4MTI8,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Antrodiella citrinella,2447956,650,1122.1,0.0,33.8
+A0A4S8M4X0,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Dendrothele bispora CBS 962.96,1314807,639,1121.2,0.0,33.599999999999994
+A0A4T0WKD8,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum higginsianum,80884,656,1244.3,0.0,33.599999999999994
+A0A4U0TJT0,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Salinomyces thailandica,706561,665,1264.0,0.0,34.0
+A0A4U6X6L6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum tanaceti,1306861,656,1239.9,0.0,33.599999999999994
+A0A4V1XNJ5,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Monosporascus sp. mg162,1081914,648,1206.7,0.0,33.599999999999994
+A0A4Y8D203,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Botryotinia calthae,38488,657,1247.1,0.0,33.599999999999994
+A0A4Y9YTF6,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Rhodofomes roseus,34475,644,1035.7,2.9e-308,33.599999999999994
+A0A4Y9YV70,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Dentipellis fragilis,205917,641,1103.7,0.0,33.599999999999994
+A0A4Z0A149,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Hericium alpestre,135208,639,1105.5,0.0,33.599999999999994
+A0A4Z0YFK3,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Xylaria hypoxylon,37992,654,1239.9,0.0,33.599999999999994
+A0A4Z1KC62,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Botrytis elliptica,278938,657,1262.3,0.0,33.599999999999994
+A0A4Z1L148,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Botrytis porri,87229,655,1262.5,0.0,33.599999999999994
+A0A507B7L9,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Thyridium curvatum,1093900,656,1238.5,0.0,33.599999999999994
+A0A517L855,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Venturia effusa,50376,665,1262.7,0.0,34.0
+A0A550CU55,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Auriculariopsis ampla,97359,639,1128.0,0.0,33.599999999999994
+A0A553HPK9,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Xylaria flabelliformis,2512241,625,1147.0,0.0,33.599999999999994
+A0A559MAH0,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Lachnellula willkommii,215461,649,1232.7,0.0,33.599999999999994
+A0A5B1QN96,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Dentipellis sp. KUC8613,1883078,639,1108.7,0.0,33.599999999999994
+A0A5C3KN19,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Coprinopsis marcescibilis,230819,642,1135.6,0.0,33.599999999999994
+A0A5C3LYG0,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Crucibulum laeve,68775,638,1121.2,0.0,33.599999999999994
+A0A5C3N508,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Heliocybe sulcata,5364,650,1133.2,0.0,33.9
+A0A5C3NW19,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Polyporus arcularius HHB13444,1314778,641,1121.5,0.0,33.599999999999994
+A0A5C3Q819,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Pterula gracilis,1884261,641,1109.4,0.0,33.599999999999994
+A0A5E3X2T7,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Peniophora sp. CBMAI 1063,718367,641,1084.2,0.0,33.599999999999994
+A0A5M3MJ52,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Coniophora puteana RWD-64-598 SS2,741705,639,1115.2,0.0,33.599999999999994
+A0A5M9JVZ9,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Monilinia fructicola,38448,659,1265.2,0.0,33.599999999999994
+A0A5N5D932,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Lasiodiplodia theobromae,45133,666,1250.3,0.0,34.0
+A0A5N5JXS7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Coniochaeta sp. 2T2.1,1571157,656,1254.1,0.0,33.599999999999994
+A0A5N5KQM7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Coniochaeta sp. 2T2.1,1571157,656,1257.6,0.0,33.599999999999994
+A0A5N5QNB3,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Ceratobasidium theobromae,1582974,622,953.1,2.8e-283,33.599999999999994
+A0A5N5WS51,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus leporis,41062,664,1283.8,0.0,33.8
+A0A5N6DYK3,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus parasiticus,5067,665,1290.7,0.0,33.9
+A0A5N6EB52,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus novoparasiticus,986946,665,1289.2,0.0,33.9
+A0A5N6FLB4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus alliaceus,209559,665,1281.0,0.0,33.9
+A0A5N6KBE6,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Monilinia laxa,61186,643,1175.2,0.0,33.599999999999994
+A0A5N6T6J1,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus pseudotamarii,132259,665,1286.5,0.0,33.9
+A0A5N6TJD5,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus avenaceus,36643,664,1269.7,0.0,33.9
+A0A5N6UU48,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus tamarii,41984,665,1285.0,0.0,33.9
+A0A5N7A3P5,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus caelatus,61420,665,1285.9,0.0,33.9
+A0A5N7AS31,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus bertholletiae,1226010,665,1274.4,0.0,33.9
+A0A5N7D6G6,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus pseudonomiae,1506151,665,1286.5,0.0,33.9
+A0A5Q4BJR1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum shisoi,2078593,620,1175.5,0.0,33.599999999999994
+A0A6A6Y0P5,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Mytilinidion resinicola,574789,666,1263.7,0.0,34.0
+A0A6P8BIP6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Pyricularia grisea,148305,659,1227.0,0.0,33.599999999999994
+A0A7C8IM37,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Xylaria multiplex,323545,654,1246.3,0.0,33.599999999999994
+A0A7C8MEZ2,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Massariosphaeria phaeospora,100035,665,1273.9,0.0,34.0
+A0A7D8UU31,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Lachnellula cervina,1316786,656,1267.3,0.0,33.599999999999994
+A0A7H8QPQ1,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Talaromyces rugulosus,121627,664,1258.9,0.0,33.9
+A2RB46,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus niger CBS 513.88,425011,662,1274.8,0.0,33.599999999999994
+A7E6B5,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Sclerotinia sclerotiorum 1980 UF-70,665079,657,1265.5,0.0,33.599999999999994
+A8P219,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Coprinopsis cinerea okayama7#130,240176,639,1125.2,0.0,33.599999999999994
+AAB57849.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Komagataella pastoris,4922,663,,,34.0
+AAB57850.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Komagataella pastoris,4922,663,,,34.0
+AAF02494.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Ogataea methanolica,1156966,664,,,34.0
+AAF02495.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Ogataea methanolica,1156966,663,,,34.0
+AAF82788.1,author_graph,1,1,Fungi,Ascomycota,Dothideomycetes,,,,Fulvia fulva,5499,665,,,34.0
+AAL56054.1,author_graph,1,1,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium chrysogenum,5076,665,,,33.9
+AAQ99151.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Ogataea pini,4923,663,,,34.0
+AAR89538.1,author_graph,1,1,Fungi,Ascomycota,Dothideomycetes,,,,Bipolaris victoriae,40125,665,,,34.0
+AAV66465.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Pichia sp. BZ159,300826,664,,,34.0
+AAV66466.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Pichia sp. BZ159,300826,664,,,34.0
+AAV66467.2,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,[Candida] boidinii,5477,663,,,34.0
+AAV66468.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,[Candida] boidinii,5477,652,,,33.599999999999994
+AHC95541.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Ogataea thermomethanolica (nom. inval.),310468,663,,,34.0
+B6H004,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium rubens Wisconsin 54-1255,500485,665,1282.2,0.0,33.9
+B8LTH7,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Talaromyces stipitatus ATCC 10500,441959,664,1273.7,0.0,33.9
+B8NNE1,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus flavus NRRL3357,332952,665,1291.6,0.0,33.9
+C4R702,author_graph,1,0,Fungi,Ascomycota,Saccharomycetes,,,,Komagataella phaffii GS115,644223,663,1295.4,0.0,34.0
+P04842,author_graph,1,0,Fungi,Ascomycota,Saccharomycetes,,,,Komagataella phaffii GS115,644223,663,1305.4,0.0,34.0
+C7ZD82,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium vanettenii 77-13-4,660122,655,1247.3,0.0,33.599999999999994
+C9SS38,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Verticillium alfalfae VaMs.102,526221,635,1147.7,0.0,33.599999999999994
+CAM84030.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Ogataea angusta,870730,664,,,34.0
+CAM84032.1,author_graph,1,1,Fungi,Ascomycota,Saccharomycetes,,,,Ogataea angusta,870730,664,,,34.0
+CDG66232.1,author_graph,1,1,Fungi,Basidiomycota,Agaricomycetes,,,,Phanerodontia chrysosporium,2822231,643,,,33.599999999999994
+D8PVH1,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Schizophyllum commune H4-8,578458,639,1130.4,0.0,33.599999999999994
+E3QV85,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum graminicola M1.001,645133,656,1240.7,0.0,33.599999999999994
+E3RDM4,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Pyrenophora teres f. teres 0-1,861557,665,1268.9,0.0,34.0
+E4ZS94,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Plenodomus lingam JN3,985895,665,1272.3,0.0,34.0
+EAA66666.1,author_graph,1,1,,Platyhelminthes,Cestoda,,,,Lyruterina,227341,686,,,33.9
+F0X7T2,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Grosmannia clavigera kw1407,655863,656,1234.3,0.0,33.599999999999994
+F8Q303,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Serpula lacrymans var. lacrymans S7.3,936435,639,1115.2,0.0,33.599999999999994
+F9F678,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium oxysporum f. sp. conglutinans Fo5176,660025,656,1235.5,0.0,33.599999999999994
+F9XCV2,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Zymoseptoria tritici IPO323,336722,664,1271.7,0.0,33.9
+G0RRS1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma reesei QM6a,431241,654,1240.2,0.0,33.599999999999994
+G2QME6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Thermothelomyces thermophilus ATCC 42464,573729,648,1161.9,0.0,33.599999999999994
+G2R1V2,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Thermothielavioides terrestris NRRL 8126,578455,656,1227.3,0.0,33.599999999999994
+G2XHT3,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Verticillium dahliae VdLs.17,498257,637,1163.8,0.0,33.599999999999994
+G2XS59,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Botrytis cinerea T4,999810,657,1253.9,0.0,33.599999999999994
+G4N5G7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Pyricularia oryzae 70-15,242507,666,1222.3,0.0,33.8
+G4U5F6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Neurospora tetrasperma FGSC 2509,510952,654,1220.0,0.0,33.599999999999994
+G9N8S0,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma virens Gv29-8,413071,654,1235.3,0.0,33.599999999999994
+G9NP24,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Trichoderma atroviride IMI 206040,452589,653,1231.8,0.0,33.599999999999994
+H0ELG6,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Glarea lozoyensis 74030,1104152,632,1224.9,0.0,33.599999999999994
+H6BU34,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Exophiala dermatitidis NIH/UT8656,858893,665,1244.3,0.0,33.9
+J3PH24,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Gaeumannomyces tritici R3-111a-1,644352,656,1225.6,0.0,33.599999999999994
+J4IBN1,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Fibroporia radiculosa,599839,646,1126.8,0.0,33.599999999999994
+K1Y422,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Drepanopeziza brunnea f. sp. 'multigermtubi' MB_m1,1072389,656,1269.9,0.0,33.599999999999994
+K5WGG5,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Phanerochaete carnosa HHB-10118-sp,650164,651,1137.6,0.0,33.9
+K5XK42,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Agaricus bisporus var. burnettii JB137-S8,597362,639,1120.0,0.0,33.599999999999994
+L2FC28,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum fructicola Nara gc5,1213859,659,1257.0,0.0,33.599999999999994
+M2PWC9,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Gelatoporia subvermispora B,914234,642,1129.6,0.0,33.599999999999994
+M2RHN8,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Bipolaris sorokiniana ND90Pr,665912,665,1290.6,0.0,34.0
+M2V4S3,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Bipolaris maydis C5,701091,665,1291.0,0.0,34.0
+M2YUV9,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Pseudocercospora fijiensis CIRAD86,383855,663,1262.7,0.0,33.8
+M3CF66,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Sphaerulina musiva SO2202,692275,666,1237.5,0.0,33.9
+M5GCQ7,author_graph,1,0,Fungi,Basidiomycota,Dacrymycetes,,,,Dacryopinax primogenitus,1858805,648,1110.4,0.0,33.699999999999996
+M7UID6,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Botrytis cinerea BcDW1,1290391,655,1264.8,0.0,33.599999999999994
+N1PK14,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Dothistroma septosporum NZE10,675120,665,1275.9,0.0,34.0
+N1S467,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium odoratissimum,2502994,656,1237.9,0.0,33.599999999999994
+N4TXI0,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium oxysporum f. sp. cubense race 1,1229664,656,1237.9,0.0,33.599999999999994
+N4VAA4,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum orbiculare MAFF 240422,1213857,656,1249.0,0.0,33.599999999999994
+Q0CAU6,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus terreus NIH2624,341663,668,1277.8,0.0,34.0
+Q0UYY5,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Parastagonospora nodorum SN15,321614,665,1268.7,0.0,34.0
+Q2H3S5,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Chaetomium globosum CBS 148.51,306901,655,1221.9,0.0,33.599999999999994
+Q2UNA0,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus oryzae RIB40,510516,700,1216.6,0.0,33.9
+Q5BFW3,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Aspergillus nidulans FGSC A4,227321,686,1278.2,0.0,33.9
+R0JW60,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Exserohilum turcica Et28A,671987,665,1288.6,0.0,34.0
+R1EEN8,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Neofusicoccum parvum UCRNP2,1287680,666,1250.1,0.0,34.0
+R7SWA7,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Dichomitus squalens LYAD-421 SS1,732165,643,1131.9,0.0,33.599999999999994
+R7YPA1,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Coniosporium apollinis CBS 100218,1168221,665,1271.7,0.0,34.0
+R8BGK6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Phaeoacremonium minimum UCRPA7,1286976,655,1244.5,0.0,33.599999999999994
+S0DVK4,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium fujikuroi IMI 58289,1279085,656,1238.0,0.0,33.599999999999994
+S3CPI0,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Glarea lozoyensis ATCC 20868,1116229,656,1269.1,0.0,33.599999999999994
+S3D7K6,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Ophiostoma piceae UAMH 11346,1262450,656,1214.1,0.0,33.599999999999994
+S7RFS3,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Gloeophyllum trabeum ATCC 11539,670483,641,1135.9,0.0,33.599999999999994
+XP_007868339.1,author_graph,1,1,Fungi,Basidiomycota,Agaricomycetes,,,,Gloeophyllum trabeum ATCC 11539,670483,641,,,33.599999999999994
+T0KZZ1,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Colletotrichum gloeosporioides Cg-14,1237896,659,1256.4,0.0,33.599999999999994
+V2WB91,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Moniliophthora roreri MCA 2997,1381753,642,1141.9,0.0,33.599999999999994
+V5FXD6,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Paecilomyces variotii No. 5,1356009,664,1279.4,0.0,33.9
+W1QCJ3,author_graph,1,0,Fungi,Ascomycota,Saccharomycetes,,,,Ogataea parapolymorpha DL-1,871575,664,1312.2,0.0,34.0
+W2S189,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Cyphellophora europaea CBS 101466,1220924,673,1215.7,0.0,33.9
+W3XJD9,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Pestalotiopsis fici W106-1,1229662,654,1239.7,0.0,33.599999999999994
+W4JTB1,author_graph,1,0,Fungi,Basidiomycota,Agaricomycetes,,,,Heterobasidion irregulare TC 32-1,747525,644,1111.9,0.0,33.599999999999994
+W6MF75,author_graph,1,0,Fungi,Ascomycota,Saccharomycetes,,,,Kuraishia capsulata CBS 1993,1382522,663,1290.7,0.0,34.0
+W6Q7N2,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium roqueforti FM164,1365484,655,1164.9,0.0,33.599999999999994
+W6QZY1,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Penicillium roqueforti FM164,1365484,665,1278.8,0.0,33.9
+W6YIK7,author_graph,1,0,Fungi,Ascomycota,Dothideomycetes,,,,Bipolaris zeicola 26-R-13,930089,665,1293.9,0.0,34.0
+W7N4L9,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium verticillioides 7600,334819,654,1239.8,0.0,33.599999999999994
+W9CNQ9,author_graph,1,0,Fungi,Ascomycota,Leotiomycetes,,,,Sclerotinia borealis F-4128,1432307,657,1249.3,0.0,33.599999999999994
+W9J4H7,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium oxysporum NRRL 32931,660029,656,1237.9,0.0,33.599999999999994
+W9W4X4,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Cladophialophora yegresii CBS 114405,1182544,666,1232.5,0.0,33.9
+W9X977,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Cladophialophora psammophila CBS 110553,1182543,666,1243.2,0.0,33.9
+W9Y7V1,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Capronia coronata CBS 617.96,1182541,665,1226.5,0.0,33.9
+W9YRP8,author_graph,1,0,Fungi,Ascomycota,Eurotiomycetes,,,,Capronia epimyces CBS 606.96,1182542,665,1243.2,0.0,33.9
+X0CZJ3,author_graph,1,0,Fungi,Ascomycota,Sordariomycetes,,,,Fusarium oxysporum f. sp. raphani 54005,1089458,656,1237.9,0.0,33.599999999999994
+XP_001838223.2,author_graph,1,1,,Streptophyta,Magnoliopsida,,,,Euphrasia nankotaizanensis,240179,639,,,33.599999999999994

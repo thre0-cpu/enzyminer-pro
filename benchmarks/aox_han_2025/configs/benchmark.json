@@ -1,0 +1,24 @@
+{
+  "benchmark_id": "aox_han_2025",
+  "paper": "Sequence and taxonomic feature evaluation facilitated the discovery of alcohol oxidases",
+  "doi": "10.1016/j.synbio.2025.04.014",
+  "primary_labels": "data/labels/primary_novel_tested_23.tsv",
+  "high_activity_targets": "data/labels/high_activity_targets_6.tsv",
+  "high_activity_threshold_mU_mg": 1000.0,
+  "top_k": [3, 5, 10, 20],
+  "random_iterations": 10000,
+  "random_seed": 20250414,
+  "substrate_smiles": "CO",
+  "predicted_sub_weights": {
+    "kcat": 0.3333333333,
+    "solubility": 0.3333333333,
+    "tm": 0.3333333333
+  },
+  "predicted_tm_target": 60.0,
+  "network_connectivity_threshold": 80.0,
+  "scientific_policy": {
+    "allow_mock_predictions": false,
+    "unlabelled_candidates_are_negative": false,
+    "primary_test_cohort_is_used_for_final_evaluation_not_undisclosed_tuning": true
+  }
+}
